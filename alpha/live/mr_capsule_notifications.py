@@ -15,15 +15,15 @@ from typing import Any, Callable
 from uuid import uuid4
 
 
-ALERT_KIND_SET = frozenset({"accepted_residual", "unresolved_execution", "late_execution", "dispatch_failed"})
+ALERT_KIND_SET = frozenset({"accepted_residual", "unresolved_execution", "late_execution", "dispatch_failed", "daily_exception"})
 DELIVERY_LEASE_SECONDS_INT = 300
 
 
 def ensure_execution_alert_schema(connection_obj: sqlite3.Connection) -> None:
-    # executescript would commit the caller's completion transaction.
-    connection_obj.execute("""
+    # A DAILY exception belongs to its decision, even when no VPlan was built.
+    schema_str = """
         CREATE TABLE IF NOT EXISTS mr_capsule_execution_alert (
-            vplan_id_int INTEGER NOT NULL,
+            vplan_id_int INTEGER,
             alert_kind_str TEXT NOT NULL,
             pod_id_str TEXT NOT NULL,
             account_route_str TEXT NOT NULL,
@@ -34,9 +34,30 @@ def ensure_execution_alert_schema(connection_obj: sqlite3.Connection) -> None:
             delivery_claimed_timestamp_str TEXT,
             delivered_timestamp_str TEXT,
             attempt_count_int INTEGER NOT NULL DEFAULT 0,
+            decision_plan_id_int INTEGER,
             PRIMARY KEY (vplan_id_int, alert_kind_str)
         )
-    """)
+    """
+    column_list = list(connection_obj.execute("PRAGMA table_info(mr_capsule_execution_alert)"))
+    if column_list and any(row_obj[1] == "vplan_id_int" and row_obj[3] for row_obj in column_list):
+        if not connection_obj.in_transaction:
+            connection_obj.execute("BEGIN IMMEDIATE")
+        index_sql_list = [row_obj[0] for row_obj in connection_obj.execute(
+            "SELECT sql FROM sqlite_master WHERE tbl_name='mr_capsule_execution_alert' "
+            "AND type IN ('index','trigger') AND sql IS NOT NULL")]
+        connection_obj.execute(schema_str.replace("mr_capsule_execution_alert", "daily_alert_migration"))
+        column_str = ",".join(row_obj[1] for row_obj in column_list)
+        connection_obj.execute(f"INSERT INTO daily_alert_migration ({column_str}) SELECT {column_str} FROM mr_capsule_execution_alert")
+        connection_obj.execute("DROP TABLE mr_capsule_execution_alert")
+        connection_obj.execute("ALTER TABLE daily_alert_migration RENAME TO mr_capsule_execution_alert")
+        for index_sql_str in index_sql_list:
+            connection_obj.execute(index_sql_str)
+    else:
+        connection_obj.execute(schema_str)
+        if column_list and "decision_plan_id_int" not in {row_obj[1] for row_obj in column_list}:
+            connection_obj.execute("ALTER TABLE mr_capsule_execution_alert ADD COLUMN decision_plan_id_int INTEGER")
+    connection_obj.execute("CREATE UNIQUE INDEX IF NOT EXISTS daily_exception_decision_idx "
+        "ON mr_capsule_execution_alert(decision_plan_id_int) WHERE alert_kind_str='daily_exception'")
 
 
 def _utc_timestamp_str(timestamp_ts: datetime) -> str:
@@ -48,7 +69,7 @@ def _utc_timestamp_str(timestamp_ts: datetime) -> str:
 def enqueue_execution_alert(connection_obj: sqlite3.Connection, *, vplan_id_int: int,
         alert_kind_str: str, pod_id_str: str, account_route_str: str, mode_str: str,
         payload_dict: dict[str, Any], created_timestamp_ts: datetime) -> None:
-    if alert_kind_str not in ALERT_KIND_SET or vplan_id_int <= 0:
+    if alert_kind_str not in ALERT_KIND_SET or alert_kind_str == "daily_exception" or vplan_id_int <= 0:
         raise ValueError("Invalid capsule execution alert identity.")
     if not pod_id_str or not account_route_str or mode_str not in {"live", "paper", "incubation"}:
         raise ValueError("Invalid capsule execution alert route.")
@@ -62,13 +83,40 @@ def enqueue_execution_alert(connection_obj: sqlite3.Connection, *, vplan_id_int:
           _utc_timestamp_str(created_timestamp_ts)))
 
 
+def enqueue_daily_exception_alert(connection_obj: sqlite3.Connection, *, decision_plan_id_int: int,
+        vplan_id_int: int | None = None, pod_id_str: str, account_route_str: str, mode_str: str,
+        exception_list: list[dict[str, Any]], created_timestamp_ts: datetime) -> None:
+    """Join finalization's transaction; keep one immutable exception alert per decision."""
+    if decision_plan_id_int <= 0 or (vplan_id_int is not None and vplan_id_int <= 0):
+        raise ValueError("Invalid DAILY alert cycle identity.")
+    if not pod_id_str or not account_route_str or mode_str not in {"live", "paper", "incubation"}:
+        raise ValueError("Invalid DAILY alert route.")
+    if not exception_list:
+        return
+    for row_dict in exception_list:
+        if (not row_dict.get("asset_str") or row_dict.get("side_str") not in {"BUY", "SELL"}
+                or not row_dict.get("reason_str") or "quantity_float" not in row_dict
+                or (row_dict["quantity_float"] is not None and float(row_dict["quantity_float"]) < 0)):
+            raise ValueError("DAILY exceptions require asset, absolute quantity (or unknown), side and reason.")
+    payload_dict = {"decision_plan_id_int": decision_plan_id_int, "exception_list": exception_list}
+    connection_obj.execute("""
+        INSERT INTO mr_capsule_execution_alert
+        (vplan_id_int, decision_plan_id_int, alert_kind_str, pod_id_str, account_route_str,
+         mode_str, payload_json_str, created_timestamp_str)
+        VALUES (?, ?, 'daily_exception', ?, ?, ?, ?, ?)
+        ON CONFLICT(decision_plan_id_int) WHERE alert_kind_str='daily_exception' DO NOTHING
+    """, (vplan_id_int, decision_plan_id_int, pod_id_str, account_route_str, mode_str,
+        json.dumps(payload_dict, sort_keys=True, allow_nan=False), _utc_timestamp_str(created_timestamp_ts)))
+
+
 @dataclass(frozen=True)
 class ExecutionAlertDelivery:
     pod_id_str: str
     mode_str: str
-    vplan_id_int: int
+    vplan_id_int: int | None
     alert_kind_str: str
     delivered_bool: bool
+    decision_plan_id_int: int | None = None
 
 
 def _configured_scope_list(summary_dict: dict[str, Any], mode_str: str | None) -> list[tuple]:
@@ -138,6 +186,18 @@ def _current_cycle_context_dict(connection_obj: sqlite3.Connection, alert_dict: 
     table_set = {row_obj[0] for row_obj in connection_obj.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if not required_table_set.issubset(table_set):
         return None
+    if alert_dict["alert_kind_str"] == "daily_exception":
+        row_obj = connection_obj.execute("""
+            SELECT d.status_str, d.snapshot_metadata_json_str FROM decision_plan d
+            JOIN live_release r ON r.release_id_str=d.release_id_str
+            WHERE d.decision_plan_id_int=? AND d.pod_id_str=? AND d.account_route_str=?
+              AND r.pod_id_str=d.pod_id_str AND r.account_route_str=d.account_route_str AND r.mode_str=?
+        """, (alert_dict["decision_plan_id_int"], alert_dict["pod_id_str"],
+            alert_dict["account_route_str"], alert_dict["mode_str"])).fetchone()
+        return None if row_obj is None else {"completed_bool": row_obj[0] == "completed",
+            "terminal_bool": row_obj[0] in {"completed", "completed_with_exceptions"},
+            "vplan_status_str": None, "decision_status_str": row_obj[0], "result_dict": None,
+            "checked_timestamp_str": datetime.now(timezone.utc).isoformat()}
     row_obj = connection_obj.execute("""
         SELECT v.status_str, d.status_str, d.snapshot_metadata_json_str, r.strategy_import_str
         FROM vplan v JOIN decision_plan d ON d.decision_plan_id_int = v.decision_plan_id_int
@@ -155,6 +215,7 @@ def _current_cycle_context_dict(connection_obj: sqlite3.Connection, alert_dict: 
         return None
     result_dict = json.loads(row_obj[2]).get("mr_capsule_execution_result_dict")
     return {"completed_bool": row_obj[0] == row_obj[1] == "completed",
+        "terminal_bool": all(status_str in {"completed", "completed_with_exceptions"} for status_str in row_obj[:2]),
         "vplan_status_str": row_obj[0], "decision_status_str": row_obj[1],
         "result_dict": result_dict if isinstance(result_dict, dict) else None,
         "checked_timestamp_str": datetime.now(timezone.utc).isoformat()}
@@ -167,13 +228,16 @@ def _build_payload_dict(alert_dict: dict[str, Any]) -> dict[str, Any]:
         "unresolved_execution": "Execution unresolved; verify broker orders and fills before any manual action.",
         "late_execution": "Late execution recorded separately from the opening auction.",
         "dispatch_failed": "CRITICAL: opening dispatch failed or missed its deadline. Pod parked; review broker orders/fills before resuming.",
+        "daily_exception": "DAILY cycle exceptions recorded from current broker holdings. Verify current state before any manual action.",
     }[alert_dict["alert_kind_str"]]
     current_context_dict = alert_dict.get("current_cycle_context_dict")
+    historical_exception_bool = bool(current_context_dict and current_context_dict.get("terminal_bool")
+        and not current_context_dict["completed_bool"])
     context_line_list = []
     if alert_dict["alert_kind_str"] == "dispatch_failed":
-        if current_context_dict and (current_context_dict["completed_bool"]
+        if current_context_dict and (current_context_dict.get("terminal_bool", current_context_dict["completed_bool"])
                 or current_context_dict["decision_status_str"] == "superseded"):
-            description_str = "HISTORICAL dispatch failure: this cycle is now completed or superseded by reviewed recovery. Verify current state before acting."
+            description_str = "HISTORICAL dispatch failure: this cycle is now closed or superseded. Verify current state before acting."
         for field_str in ("reason_code_str", "error_type_str", "dispatch_deadline_timestamp_str"):
             if field_str in payload_dict:
                 context_line_list.append(f"{field_str}={payload_dict[field_str]}")
@@ -183,6 +247,8 @@ def _build_payload_dict(alert_dict: dict[str, Any]) -> dict[str, Any]:
             original_asset_list = [row_dict["asset_str"] for row_dict in payload_dict.get("residual_row_dict_list") or []]
             context_line_list.append("Earlier affected symbols: " + ", ".join(original_asset_list))
             payload_dict = {}
+        elif historical_exception_bool:
+            description_str = "HISTORICAL execution observation: this cycle closed with exceptions. The details below describe that earlier observation. Verify current broker state before any manual action."
         elif current_context_dict and current_context_dict["result_dict"]:
             description_str = "Cycle remains unresolved. Latest recorded details below; verify current broker state before acting."
             payload_dict = current_context_dict["result_dict"]
@@ -197,6 +263,16 @@ def _build_payload_dict(alert_dict: dict[str, Any]) -> dict[str, Any]:
     line_list = [f"{str(alert_dict['mode_str']).upper()} / {alert_dict['pod_id_str']}: {description_str}",
         f"Account {alert_dict['account_route_str']} | VPlan {alert_dict['vplan_id_int']} | Original observation {alert_dict['created_timestamp_str']}",
         *context_line_list]
+    if alert_dict["alert_kind_str"] == "daily_exception":
+        line_list[1] = (f"Account {alert_dict['account_route_str']} | Decision {alert_dict['decision_plan_id_int']} | "
+            f"VPlan {alert_dict['vplan_id_int'] if alert_dict['vplan_id_int'] is not None else 'not built'} | "
+            f"Original observation {alert_dict['created_timestamp_str']}")
+        for row_dict in payload_dict["exception_list"]:
+            quantity_str = "unknown" if row_dict["quantity_float"] is None else f"{float(row_dict['quantity_float']):g}"
+            line_list.append(f"{row_dict['asset_str']}: side={row_dict['side_str']}; quantity={quantity_str} shares; "
+                f"reason={row_dict['reason_str']}; expected={row_dict.get('expected_share_float')}; "
+                f"actual={row_dict.get('actual_share_float')}; target_weight={row_dict.get('target_weight_float')}; "
+                f"intent={row_dict.get('intent_str', '')}")
     broker_snapshot_dict = payload_dict.get("broker_snapshot_dict") or {}
     for field_str in ("cash_float", "broker_cash_float", "net_liq_float", "available_funds_float",
                       "buying_power_float", "excess_liquidity_float", "cushion_float"):
@@ -206,8 +282,9 @@ def _build_payload_dict(alert_dict: dict[str, Any]) -> dict[str, Any]:
     for residual_dict in payload_dict.get("residual_row_dict_list") or []:
         residual_float = residual_dict["residual_amount_float"]
         quantity_str = "unknown" if residual_float is None else f"{abs(float(residual_float)):g}"
-        action_label_str = "action at observation" if alert_dict["alert_kind_str"] == "accepted_residual" else "action"
-        quantity_label_str = "recorded remaining" if alert_dict["alert_kind_str"] == "accepted_residual" else "remaining"
+        historical_detail_bool = alert_dict["alert_kind_str"] == "accepted_residual" or historical_exception_bool
+        action_label_str = "action at observation" if historical_detail_bool else "action"
+        quantity_label_str = "recorded remaining" if historical_detail_bool else "remaining"
         line_list.append(f"{residual_dict['asset_str']}: {action_label_str}={residual_dict.get('required_action_str', 'VERIFY')}; "
             f"{quantity_label_str}={quantity_str} shares; "
             f"requested={residual_dict['requested_amount_float']}, filled={residual_dict['filled_amount_float']}; "
@@ -225,6 +302,8 @@ def _build_payload_list(alert_dict: dict[str, Any]) -> list[dict[str, Any]]:
         return [payload_dict]
     identity_str = (f"{str(alert_dict['mode_str']).upper()} / {alert_dict['pod_id_str']} | "
         f"Account {alert_dict['account_route_str']} | VPlan {alert_dict['vplan_id_int']} | {alert_dict['alert_kind_str']}")
+    if alert_dict["alert_kind_str"] == "daily_exception":
+        identity_str += f" | Decision {alert_dict['decision_plan_id_int']}"
     body_limit_int = 1900 - len(identity_str) - 40
     if body_limit_int < 100:
         raise ValueError("Capsule alert identity exceeds the message size limit.")
@@ -271,15 +350,18 @@ def deliver_execution_alerts(summary_dict: dict[str, Any], *, webhook_url_str: s
             claim_str = uuid4().hex
             identity_tuple = (alert_dict["vplan_id_int"], alert_dict["alert_kind_str"],
                               pod_id_str, account_route_str, configured_mode_str)
+            identity_sql_str = "vplan_id_int IS ? AND alert_kind_str = ? AND pod_id_str = ? AND account_route_str = ? AND mode_str = ?"
+            if alert_dict["alert_kind_str"] == "daily_exception":
+                identity_sql_str += " AND decision_plan_id_int = ?"
+                identity_tuple += (alert_dict["decision_plan_id_int"],)
             db_uri_str = Path(db_path_str).as_uri() + "?mode=rw"
             with closing(sqlite3.connect(db_uri_str, uri=True, timeout=5.0)) as connection_obj, connection_obj:
                 connection_obj.execute("BEGIN IMMEDIATE")
-                claim_cursor_obj = connection_obj.execute("""
+                claim_cursor_obj = connection_obj.execute(f"""
                     UPDATE mr_capsule_execution_alert
                     SET delivery_claim_str = ?, delivery_claimed_timestamp_str = ?,
                         attempt_count_int = attempt_count_int + 1
-                    WHERE vplan_id_int = ? AND alert_kind_str = ? AND pod_id_str = ?
-                      AND account_route_str = ? AND mode_str = ? AND delivered_timestamp_str IS NULL
+                    WHERE {identity_sql_str} AND delivered_timestamp_str IS NULL
                       AND (delivery_claim_str IS NULL OR delivery_claimed_timestamp_str <= ?)
                 """, (claim_str, claim_timestamp_str, *identity_tuple, expired_timestamp_str))
                 claimed_bool = claim_cursor_obj.rowcount == 1
@@ -296,13 +378,13 @@ def deliver_execution_alerts(summary_dict: dict[str, Any], *, webhook_url_str: s
             finally:
                 completed_timestamp_str = _utc_timestamp_str(now_ts or datetime.now(timezone.utc))
                 with closing(sqlite3.connect(db_uri_str, uri=True, timeout=5.0)) as connection_obj, connection_obj:
-                    connection_obj.execute("""
+                    connection_obj.execute(f"""
                         UPDATE mr_capsule_execution_alert
                         SET delivered_timestamp_str = ?, delivery_claim_str = NULL,
                             delivery_claimed_timestamp_str = NULL
-                        WHERE vplan_id_int = ? AND alert_kind_str = ? AND pod_id_str = ?
-                          AND account_route_str = ? AND mode_str = ? AND delivery_claim_str = ?
+                        WHERE {identity_sql_str} AND delivery_claim_str = ?
                     """, (completed_timestamp_str if delivered_bool else None, *identity_tuple, claim_str))
             delivery_list.append(ExecutionAlertDelivery(pod_id_str, configured_mode_str,
-                int(alert_dict["vplan_id_int"]), str(alert_dict["alert_kind_str"]), delivered_bool))
+                int(alert_dict["vplan_id_int"]) if alert_dict["vplan_id_int"] is not None else None,
+                str(alert_dict["alert_kind_str"]), delivered_bool, alert_dict.get("decision_plan_id_int")))
     return delivery_list

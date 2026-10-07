@@ -15,6 +15,7 @@ import pytest
 from alpha.live.models import DecisionPlan, VPlan, VPlanRow
 from alpha.live.mr_capsule_adapter import MR_CAPSULE_CONTRACT_STR
 from alpha.live.state_store_v2 import LiveStateStore
+from test_live_mr_capsule_abandonment_race import _complete_daily_cycle, _register_capsule_release
 
 IDENTITY_DICT = dict(release_id_str="capsule.v1", user_id_str="owner", pod_id_str="capsule", account_route_str="DU123")
 SIGNAL_TS = datetime(2024, 1, 12, 21, tzinfo=timezone.utc)
@@ -50,6 +51,7 @@ def _vplan_for(decision_obj: DecisionPlan) -> VPlan:
 def ready_cycle(tmp_path):
     db_path_str = str(tmp_path / "capsule_pod.sqlite3")
     store_obj = LiveStateStore(db_path_str)
+    _register_capsule_release(store_obj)
     decision_obj = store_obj.insert_decision_plan(_capsule_decision())
     vplan_obj = store_obj.insert_vplan(_vplan_for(decision_obj))
     assert store_obj.get_decision_plan_by_id(decision_obj.decision_plan_id_int).status_str == "vplan_ready"
@@ -89,10 +91,10 @@ def test_upgraded_database_gains_the_target_share_column_before_any_write(tmp_pa
     assert restored_dv2_obj.target_share_map_dict == {} and restored_dv2_obj.entry_target_weight_map_dict == {"AAPL": 0.1}
 
 
-def test_abandonment_waits_for_an_in_flight_claim_and_never_overwrites_it(ready_cycle):
+def test_daily_close_waits_for_an_in_flight_claim_then_closes_actual_holdings(ready_cycle):
     db_path_str, decision_obj, vplan_obj = ready_cycle
     # Open worker B's store first: the constructor's schema statements also take the write lock.
-    abandon_store_obj = LiveStateStore(db_path_str)
+    close_store_obj = LiveStateStore(db_path_str)
     # Worker A is inside its submission claim: it holds the write lock and has moved the VPlan to 'submitting'.
     claim_connection_obj = sqlite3.connect(db_path_str, isolation_level=None)
     claim_connection_obj.execute("BEGIN IMMEDIATE")
@@ -100,32 +102,33 @@ def test_abandonment_waits_for_an_in_flight_claim_and_never_overwrites_it(ready_
         "UPDATE vplan SET status_str = 'submitting' WHERE vplan_id_int = ? AND status_str = 'ready'", (vplan_obj.vplan_id_int,),
     )
     result_dict = {}
-    abandon_thread_obj = threading.Thread(target=lambda: result_dict.update(
-        abandoned_bool=abandon_store_obj.abandon_unsubmitted_mr_capsule_cycle(decision_obj.decision_plan_id_int, "blocked")
+    close_thread_obj = threading.Thread(target=lambda: result_dict.update(
+        completed_bool=_complete_daily_cycle(close_store_obj, decision_obj, vplan_obj)
     ))
-    abandon_thread_obj.start()
+    close_thread_obj.start()
     time.sleep(0.4)
-    assert abandon_thread_obj.is_alive(), "worker B must wait for worker A's lock, not read the uncommitted 'ready'"
+    assert close_thread_obj.is_alive(), "worker B must wait for worker A's claim lock"
     claim_connection_obj.execute("COMMIT")
     claim_connection_obj.close()
-    abandon_thread_obj.join(timeout=10)
-    assert result_dict == {"abandoned_bool": False}
+    close_thread_obj.join(timeout=10)
+    assert result_dict == {"completed_bool": True}
     decision_status_str, vplan_status_str, metadata_dict = _status_pair(db_path_str, decision_obj, vplan_obj)
-    assert (decision_status_str, vplan_status_str) == ("vplan_ready", "submitting")
+    assert (decision_status_str, vplan_status_str) == ("completed", "completed")
+    assert metadata_dict["daily_execution_result_dict"]["status_str"] == "completed"
     assert "mr_capsule_unsubmitted_cycle_abandoned_bool" not in metadata_dict
 
 
-def test_claim_waits_for_an_in_flight_abandonment_and_then_fails_closed(ready_cycle):
+def test_claim_waits_for_an_in_flight_daily_close_and_then_fails_closed(ready_cycle):
     db_path_str, decision_obj, vplan_obj = ready_cycle
     # Open worker A's store first: the constructor's schema statements also take the write lock.
     claim_store_obj = LiveStateStore(db_path_str)
-    # Worker B is inside an abandonment: it holds the write lock and has marked both plans terminal.
+    # Worker B is inside daily finalization and has marked both plans terminal.
     abandon_connection_obj = sqlite3.connect(db_path_str, isolation_level=None)
     abandon_connection_obj.execute("BEGIN IMMEDIATE")
-    abandon_connection_obj.execute("UPDATE vplan SET status_str = 'blocked' WHERE vplan_id_int = ?", (vplan_obj.vplan_id_int,))
+    abandon_connection_obj.execute("UPDATE vplan SET status_str = 'completed' WHERE vplan_id_int = ?", (vplan_obj.vplan_id_int,))
     abandon_connection_obj.execute(
-        "UPDATE decision_plan SET status_str = 'blocked', snapshot_metadata_json_str = ? WHERE decision_plan_id_int = ?",
-        (json.dumps({"sizing_contract_str": MR_CAPSULE_CONTRACT_STR, "mr_capsule_unsubmitted_cycle_abandoned_bool": True}),
+        "UPDATE decision_plan SET status_str = 'completed', snapshot_metadata_json_str = ? WHERE decision_plan_id_int = ?",
+        (json.dumps({"sizing_contract_str": MR_CAPSULE_CONTRACT_STR, "daily_execution_result_dict": {"status_str": "completed"}}),
          decision_obj.decision_plan_id_int),
     )
     result_dict = {}
@@ -134,45 +137,27 @@ def test_claim_waits_for_an_in_flight_abandonment_and_then_fails_closed(ready_cy
     ))
     claim_thread_obj.start()
     time.sleep(0.4)
-    assert claim_thread_obj.is_alive(), "the claim must wait for the abandonment lock"
+    assert claim_thread_obj.is_alive(), "the claim must wait for the finalization lock"
     abandon_connection_obj.execute("COMMIT")
     abandon_connection_obj.close()
     claim_thread_obj.join(timeout=10)
     assert result_dict == {"claimed_bool": False}
-    assert _status_pair(db_path_str, decision_obj, vplan_obj)[:2] == ("blocked", "blocked")
+    assert _status_pair(db_path_str, decision_obj, vplan_obj)[:2] == ("completed", "completed")
 
 
-def test_abandonment_undoes_itself_if_the_vplan_left_ready_inside_its_transaction(ready_cycle, monkeypatch):
-    """Defence in depth: the guarded UPDATEs never overwrite a VPlan that is no longer 'ready'."""
+def test_daily_close_undoes_holdings_and_vplan_if_decision_write_fails(ready_cycle):
+    """The replacement finalizer must roll back all of its writes together."""
     db_path_str, decision_obj, vplan_obj = ready_cycle
     store_obj = LiveStateStore(db_path_str)
-    original_connect_fn = store_obj._connect
-
-    class _ClaimDuringAbandonConnection:
-        """Moves the VPlan to 'submitting' right after the abandonment's checks, as an unlocked writer would."""
-
-        def __init__(self):
-            self._connection_obj = original_connect_fn()
-
-        def __enter__(self):
-            self._connection_obj.__enter__()
-            return self
-
-        def __exit__(self, *exc_info):
-            return self._connection_obj.__exit__(*exc_info)
-
-        def rollback(self):
-            self._connection_obj.rollback()
-
-        def execute(self, sql_str, parameter_tuple=()):
-            if sql_str.startswith("UPDATE vplan SET status_str = ?"):
-                self._connection_obj.execute("UPDATE vplan SET status_str = 'submitting' WHERE vplan_id_int = ?", (vplan_obj.vplan_id_int,))
-            return self._connection_obj.execute(sql_str, parameter_tuple)
-
-    monkeypatch.setattr(store_obj, "_connect", _ClaimDuringAbandonConnection)
-    assert store_obj.abandon_unsubmitted_mr_capsule_cycle(decision_obj.decision_plan_id_int, "expired") is False
-    decision_status_str, _, metadata_dict = _status_pair(db_path_str, decision_obj, vplan_obj)
-    assert decision_status_str == "vplan_ready" and "mr_capsule_unsubmitted_cycle_abandoned_bool" not in metadata_dict
+    with sqlite3.connect(db_path_str) as connection_obj:
+        connection_obj.execute("""CREATE TRIGGER fail_daily_completion BEFORE UPDATE OF status_str ON decision_plan
+            WHEN NEW.status_str = 'completed' BEGIN SELECT RAISE(ABORT, 'simulated finalization crash'); END""")
+    with pytest.raises(sqlite3.IntegrityError, match="simulated finalization crash"):
+        _complete_daily_cycle(store_obj, decision_obj, vplan_obj)
+    decision_status_str, vplan_status_str, metadata_dict = _status_pair(db_path_str, decision_obj, vplan_obj)
+    assert (decision_status_str, vplan_status_str) == ("vplan_ready", "ready")
+    assert "daily_execution_result_dict" not in metadata_dict
+    assert store_obj.get_pod_state(decision_obj.pod_id_str) is None
 
 
 

@@ -2,7 +2,7 @@
 from alpha.live.execution_engine import build_broker_order_request_list_from_vplan
 from alpha.live.models import BrokerOrderFill, BrokerOrderRecord
 from alpha.live.runner import post_execution_reconcile
-from test_live_mr_capsule_recovery import capsule_case, RECONCILE_TIMESTAMP_TS
+from test_live_mr_capsule_recovery import capsule_case, CLOSE_TIMESTAMP_TS
 
 
 def test_identical_partial_executions_complete_capsule_cycle(capsule_case):
@@ -31,9 +31,9 @@ def test_identical_partial_executions_complete_capsule_cycle(capsule_case):
     broker_obj.seed_account_snapshot(
         account_route_str=release_obj.account_route_str, cash_float=1000.0, total_value_float=100000.0,
         position_amount_map={"AAPL": 80.0, "BIL": 880.0, "MSFT": 5.0},
-        snapshot_timestamp_ts=RECONCILE_TIMESTAMP_TS, session_mode_str="paper",
+        snapshot_timestamp_ts=CLOSE_TIMESTAMP_TS, session_mode_str="paper",
     )
-    result_dict = post_execution_reconcile(store_obj, broker_obj, RECONCILE_TIMESTAMP_TS, **runner_kwarg_dict)
+    result_dict = post_execution_reconcile(store_obj, broker_obj, CLOSE_TIMESTAMP_TS, **runner_kwarg_dict)
     assert result_dict["completed_vplan_count_int"] == 1
     assert len(store_obj.get_fill_row_dict_list_for_vplan(vplan_obj.vplan_id_int)) == 4
     assert store_obj.get_vplan_by_id(vplan_obj.vplan_id_int).status_str == "completed"

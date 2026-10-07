@@ -36,7 +36,13 @@ def compare_adapter_to_engine(pricing_data_df: pd.DataFrame, start_date_str: str
         risk_profile_str="local_qualification", enabled_bool=False, source_path_str="in_memory_only",
         pod_budget_fraction_float=1.0, auto_submit_enabled_bool=False,
     )
-    calendar_idx = core5_module.build_execution_calendar_idx(pricing_data_df, backtest_start_date_str=start_date_str)
+    # *** CRITICAL *** A reporting window must not reset strategy memory or
+    # account holdings. Warm both paths from the canonical first execution;
+    # compare_start only filters evidence after those causal transitions.
+    calendar_idx = core5_module.build_execution_calendar_idx(pricing_data_df)
+    comparison_start_ts = pd.Timestamp(start_date_str)
+    if not (calendar_idx >= comparison_start_ts).any():
+        raise ValueError("CORE5 parity reporting interval has no execution sessions.")
     oracle_obj = core5_module.AdaptiveMacroCore5Strategy()
     original_iterate_fn = oracle_obj.iterate
     original_process_fn = oracle_obj.process_orders
@@ -91,7 +97,7 @@ def compare_adapter_to_engine(pricing_data_df: pd.DataFrame, start_date_str: str
                 assert request_obj.target_bool is False and request_obj.order_class_str == "MarketOrder"
                 actual_leg_dict[request_obj.asset_str].append(request_obj.amount_float)
             assert actual_leg_dict == expected_leg_dict
-        evidence_row_list.append({
+        evidence_row_dict = {
             "decision_date_str": str(decision_date_ts.date()), "execution_date_str": str(oracle_obj.current_bar.date()),
             "signal_timestamp_str": decision_obj.signal_timestamp_ts.isoformat(),
             "submission_timestamp_str": decision_obj.submission_timestamp_ts.isoformat(),
@@ -100,7 +106,9 @@ def compare_adapter_to_engine(pricing_data_df: pd.DataFrame, start_date_str: str
             "month_end_bool": decision_obj.snapshot_metadata_dict["month_end_bool"],
             "no_order_bool": not bool(expected_leg_dict), "dbc_two_legs_bool": len(expected_leg_dict.get("DBC", [])) == 2,
             "target_share_map_dict": expected_target_dict, "order_leg_map_dict": dict(expected_leg_dict),
-        })
+        }
+        if oracle_obj.current_bar >= comparison_start_ts:
+            evidence_row_list.append(evidence_row_dict)
         pending_decision_obj = decision_obj
 
     def compare_process(prices_df):
@@ -110,11 +118,17 @@ def compare_adapter_to_engine(pricing_data_df: pd.DataFrame, start_date_str: str
         actual_position_dict = oracle_obj.get_positions().to_dict()
         assert {asset_str: float(actual_position_dict.get(asset_str, 0.0)) for asset_str in CORE5_ASSET_TUPLE} == expected_target_dict
         committed_state_dict = dict(pending_decision_obj.strategy_state_dict)
+        # Simulate the live daily finalizer only after actual simulated holdings
+        # matched every frozen target above. Pending intent is not a receipt.
+        committed_state_dict["core5_execution_receipt_dict"] = dict(
+            pending_decision_obj.snapshot_metadata_dict["core5_candidate_execution_receipt_dict"])
 
     oracle_obj.iterate = compare_iterate
     oracle_obj.process_orders = compare_process
     run_daily(oracle_obj, pricing_data_df, calendar=calendar_idx, show_progress=False, show_signal_progress_bool=False, audit_override_bool=False)
     return {
+        "oracle_start_date_str": str(calendar_idx[0].date()),
+        "warmup_decision_count_int": int((calendar_idx < comparison_start_ts).sum()),
         "decision_count_int": len(evidence_row_list),
         "rebalance_count_int": sum(row_dict["rebalance_bool"] for row_dict in evidence_row_list),
         "no_order_count_int": sum(row_dict["no_order_bool"] for row_dict in evidence_row_list),
@@ -128,7 +142,8 @@ def compare_adapter_to_engine(pricing_data_df: pd.DataFrame, start_date_str: str
 def main() -> int:
     parser_obj = argparse.ArgumentParser(description=__doc__)
     parser_obj.add_argument("--prices", type=Path, required=True)
-    parser_obj.add_argument("--start-date", required=True)
+    parser_obj.add_argument("--start-date", required=True,
+        help="First reported execution date; the oracle always warms from canonical inception.")
     parser_obj.add_argument("--output-dir", type=Path, required=True)
     args_obj = parser_obj.parse_args()
     args_obj.output_dir.mkdir(parents=True, exist_ok=False)
@@ -138,6 +153,7 @@ def main() -> int:
         "start_date_str": args_obj.start_date,
         "prices_sha256_str": hashlib.sha256(args_obj.prices.read_bytes()).hexdigest(),
         "limitations_list": ["Account cash seeded from the historical engine, including its research borrow/dividend/fee model.",
+            "The oracle and its borrow-fee total include canonical warmup before the requested reporting interval.",
             "Proves decisions, shares and ordered legs per asset; does not qualify real account cash, fills, borrow or margin."]}
     source_path_list = ["alpha/live/core5_adapter.py", "alpha/live/execution_engine.py", "alpha/live/scheduler_utils.py", "alpha/live/models.py",
         "alpha/engine/strategy.py", "alpha/engine/order.py",

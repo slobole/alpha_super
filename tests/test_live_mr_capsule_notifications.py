@@ -474,6 +474,24 @@ def test_old_unresolved_alert_is_historical_after_cycle_completion(tmp_path):
     assert _read_alert_dict(db_path_obj)["payload_json_str"] == original_payload_str
 
 
+@pytest.mark.parametrize("alert_kind_str", ["unresolved_execution", "dispatch_failed"])
+def test_legacy_alert_after_daily_exception_completion_preserves_only_historical_detail(tmp_path, alert_kind_str):
+    db_path_obj = _create_alert_db(tmp_path, alert_kind_str=alert_kind_str)
+    original_payload_str = _read_alert_dict(db_path_obj)["payload_json_str"]
+    _seed_cycle_context(db_path_obj)
+    with closing(sqlite3.connect(db_path_obj)) as connection_obj, connection_obj:
+        connection_obj.execute("UPDATE decision_plan SET status_str='completed_with_exceptions'")
+        connection_obj.execute("UPDATE vplan SET status_str='completed_with_exceptions'")
+    content_str = _capture_delivery(db_path_obj)[0]["content"]
+    assert "HISTORICAL" in content_str and "closed" in content_str
+    assert "Cycle remains unresolved" not in content_str and "Pod parked" not in content_str
+    assert "resuming" not in content_str and "resume" not in content_str
+    assert "MSFT: action at observation=SELL" in content_str
+    assert "recorded remaining=40 shares" in content_str and "Exit remains" in content_str
+    assert "action=SELL" not in content_str
+    assert _read_alert_dict(db_path_obj)["payload_json_str"] == original_payload_str
+
+
 def test_unresolved_alert_uses_latest_recorded_remainder_without_rewriting_audit(tmp_path):
     db_path_obj = _create_alert_db(tmp_path, alert_kind_str="unresolved_execution")
     original_payload_str = _read_alert_dict(db_path_obj)["payload_json_str"]

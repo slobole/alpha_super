@@ -12,7 +12,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from alpha.live import runner
+from alpha.live import runner, scheduler_utils
+from alpha.live.dispatch_state import record_dispatch_failure
+from alpha.live.execution_engine import build_broker_order_request_list_from_vplan
 from alpha.live.ibkr_socket_client import IBKRSocketClient
 from alpha.live.incubation import IncubationBrokerAdapter
 from alpha.live.models import LivePriceSnapshot, SessionOpenPrice
@@ -33,7 +35,7 @@ def no_real_broker(monkeypatch):
 
 @pytest.fixture
 def incubation_case_factory(release_obj, price_df, monkeypatch, tmp_path):
-    def create_case(direction_str="initialization"):
+    def create_case(direction_str="initialization", *, dispatch_case_str="accepted"):
         sim_release_obj = replace(
             release_obj, mode_str="incubation", account_route_str="SIM_CORE5",
             params_dict={"capital_base_float": 100_000.0},
@@ -93,11 +95,26 @@ def incubation_case_factory(release_obj, price_df, monkeypatch, tmp_path):
                     "incubation", log_path_str=str(tmp_path / "ops.log"), trace_enabled_bool=False)
         assert build_dict["created_vplan_count_int"] == 1
         vplan_obj = store_obj.get_latest_vplan_for_pod(sim_release_obj.pod_id_str)
-        submit_dict = runner.submit_ready_vplans(
-            store_obj, preopen_broker_obj, decision_obj.submission_timestamp_ts, "incubation", False,
-            vplan_id_int=vplan_obj.vplan_id_int, log_path_str=str(tmp_path / "ops.log"), trace_enabled_bool=False,
-        )
-        assert submit_dict["submitted_vplan_count_int"] == 1
+        if dispatch_case_str in {"permanent", "cutoff"}:
+            failure_ts = (decision_obj.submission_timestamp_ts if dispatch_case_str == "permanent"
+                else decision_obj.target_execution_timestamp_ts - timedelta(minutes=2))
+            record_dispatch_failure(store_obj, sim_release_obj, vplan_obj,
+                build_broker_order_request_list_from_vplan(vplan_obj),
+                ValueError("synthetic " + dispatch_case_str), failure_ts, before_send_bool=True)
+        else:
+            if dispatch_case_str == "partial":
+                original_submit_fn = preopen_broker_obj.submit_order_request_list
+                def partial_submit_fn(*, account_route_str, broker_order_request_list, submitted_timestamp_ts):
+                    # Keep a later original ordinal, including only the DBC
+                    # closing leg of a sign flip; never reindex the accepted leg.
+                    accepted_request_obj = next(request_obj for request_obj in broker_order_request_list if request_obj.asset_str == "DBC")
+                    return original_submit_fn(account_route_str, [accepted_request_obj], submitted_timestamp_ts)
+                monkeypatch.setattr(preopen_broker_obj, "submit_order_request_list", partial_submit_fn)
+            submit_dict = runner.submit_ready_vplans(
+                store_obj, preopen_broker_obj, decision_obj.submission_timestamp_ts, "incubation", False,
+                vplan_id_int=vplan_obj.vplan_id_int, log_path_str=str(tmp_path / "ops.log"), trace_enabled_bool=False,
+            )
+            assert submit_dict["submitted_vplan_count_int"] == 1
         assert not any(call_tuple[0] == "open" for call_tuple in price_call_list)
         assert not store_obj.get_fill_row_dict_list_for_vplan(vplan_obj.vplan_id_int)
         return SimpleNamespace(
@@ -117,9 +134,12 @@ def _table_snapshot_dict(store_obj):
                 for table_str in table_list}
 
 
-def _reconcile(case_obj, store_obj, broker_obj):
+def _reconcile(case_obj, store_obj, broker_obj, *, after_close_bool=True):
+    if after_close_bool:
+        broker_obj.as_of_ts = scheduler_utils.get_session_close_timestamp_ts(
+            scheduler_utils.session_label_from_timestamp_ts(case_obj.decision_obj.target_execution_timestamp_ts, "XNYS"), "XNYS")
     return runner.post_execution_reconcile(
-        store_obj, broker_obj, case_obj.after_open_ts, "incubation",
+        store_obj, broker_obj, broker_obj.as_of_ts, "incubation",
         log_path_str=case_obj.log_path_str, trace_enabled_bool=False,
     )
 
@@ -149,13 +169,72 @@ def test_actual_incubation_core5_lifecycle_and_restart(incubation_case_factory, 
     # Restart after settlement, before reconciliation: persisted evidence must suffice.
     again_obj = LiveStateStore(store_obj.db_path_str)
     again_broker_obj = case_obj.make_broker(again_obj, case_obj.after_open_ts)
+    assert _reconcile(case_obj, again_obj, again_broker_obj, after_close_bool=False)["completed_vplan_count_int"] == 0
+    assert again_obj.get_decision_plan_by_id(case_obj.decision_obj.decision_plan_id_int).status_str == "submitted"
     assert _reconcile(case_obj, again_obj, again_broker_obj)["completed_vplan_count_int"] == 1
-    assert again_obj.get_pod_state(case_obj.release_obj.pod_id_str).strategy_state_dict == case_obj.decision_obj.strategy_state_dict
+    assert again_obj.get_pod_state(case_obj.release_obj.pod_id_str).strategy_state_dict == {
+        **case_obj.decision_obj.strategy_state_dict,
+        "core5_execution_receipt_dict": case_obj.decision_obj.snapshot_metadata_dict["core5_candidate_execution_receipt_dict"],
+    }
     assert again_obj.has_committed_incubation_settlement(case_obj.vplan_obj.vplan_id_int)
     before_dict = _table_snapshot_dict(again_obj)
     assert _reconcile(case_obj, again_obj, again_broker_obj)["completed_vplan_count_int"] == 0
     again_broker_obj.get_account_snapshot(case_obj.release_obj.account_route_str)
     assert _table_snapshot_dict(again_obj) == before_dict
+
+
+@pytest.mark.parametrize("dispatch_case_str", ["permanent", "cutoff"])
+def test_unaccepted_daily_batch_never_creates_virtual_fills(incubation_case_factory, dispatch_case_str):
+    case_obj = incubation_case_factory(dispatch_case_str=dispatch_case_str)
+    store_obj = case_obj.store_obj
+    assert store_obj.get_vplan_by_id(case_obj.vplan_obj.vplan_id_int).status_str == "submitted"
+    broker_obj = case_obj.make_broker(store_obj, case_obj.after_open_ts)
+    snapshot_obj = broker_obj.get_daily_execution_snapshot(case_obj.release_obj.account_route_str)
+    assert snapshot_obj.broker_snapshot_obj.position_amount_map == case_obj.initial_state_obj.position_amount_map
+    assert snapshot_obj.broker_snapshot_obj.cash_float == case_obj.initial_state_obj.cash_float
+    assert not store_obj.get_fill_row_dict_list_for_vplan(case_obj.vplan_obj.vplan_id_int)
+    assert not store_obj.get_cash_ledger_row_dict_list_for_vplan(case_obj.vplan_obj.vplan_id_int)
+    assert not store_obj.has_committed_incubation_settlement(case_obj.vplan_obj.vplan_id_int)
+    assert _reconcile(case_obj, store_obj, broker_obj)["completed_vplan_count_int"] == 1
+    assert store_obj.get_decision_plan_by_id(case_obj.decision_obj.decision_plan_id_int).status_str == "completed_with_exceptions"
+    assert store_obj.get_pod_state(case_obj.release_obj.pod_id_str).strategy_state_dict["core5_execution_receipt_dict"] == {}
+    assert not store_obj.get_fill_row_dict_list_for_vplan(case_obj.vplan_obj.vplan_id_int)
+
+
+@pytest.mark.parametrize("direction_str", ["long_to_short", "short_to_long"])
+def test_partial_virtual_acceptance_settles_only_original_leg_and_keeps_ordinal(incubation_case_factory, direction_str):
+    case_obj = incubation_case_factory(direction_str, dispatch_case_str="partial")
+    store_obj = case_obj.store_obj
+    accepted_dict, = store_obj.get_broker_order_row_dict_list_for_vplan(case_obj.vplan_obj.vplan_id_int)
+    assert not accepted_dict["order_request_key_str"].endswith(":1")
+    broker_obj = case_obj.make_broker(store_obj, case_obj.after_open_ts)
+    snapshot_obj = broker_obj.get_daily_execution_snapshot(case_obj.release_obj.account_route_str).broker_snapshot_obj
+    expected_position_dict = dict(case_obj.initial_state_obj.position_amount_map)
+    expected_position_dict.pop("DBC", None)
+    expected_position_dict = {asset_str: quantity_float for asset_str, quantity_float in expected_position_dict.items() if quantity_float}
+    assert snapshot_obj.position_amount_map == expected_position_dict
+    fill_dict, = store_obj.get_fill_row_dict_list_for_vplan(case_obj.vplan_obj.vplan_id_int, include_order_identity_bool=True)
+    assert fill_dict["asset_str"] == "DBC"
+    assert fill_dict["fill_amount_float"] == accepted_dict["amount_float"]
+    assert fill_dict["broker_order_id_str"] == accepted_dict["broker_order_id_str"]
+    assert len(store_obj.get_cash_ledger_row_dict_list_for_vplan(case_obj.vplan_obj.vplan_id_int)) == 2
+    restarted_obj = LiveStateStore(store_obj.db_path_str)
+    restarted_broker_obj = case_obj.make_broker(restarted_obj, case_obj.after_open_ts)
+    assert restarted_broker_obj.get_daily_execution_snapshot(case_obj.release_obj.account_route_str).broker_snapshot_obj.position_amount_map == expected_position_dict
+    assert _reconcile(case_obj, restarted_obj, restarted_broker_obj)["completed_vplan_count_int"] == 1
+    assert restarted_obj.get_decision_plan_by_id(case_obj.decision_obj.decision_plan_id_int).status_str == "completed_with_exceptions"
+    assert len(restarted_obj.get_fill_row_dict_list_for_vplan(case_obj.vplan_obj.vplan_id_int)) == 1
+
+
+def test_daily_market_completion_cannot_fabricate_an_open_price_fill(incubation_case_factory):
+    case_obj = incubation_case_factory()
+    request_obj = replace(build_broker_order_request_list_from_vplan(case_obj.vplan_obj)[0],
+        broker_order_type_str="MKT", order_request_key_str="daily:1:daily-completion:SPY")
+    before_dict = _table_snapshot_dict(case_obj.store_obj)
+    with pytest.raises(NotImplementedError, match="intraday fill-price model"):
+        case_obj.make_broker(case_obj.store_obj, case_obj.after_open_ts).submit_order_request_list(
+            case_obj.release_obj.account_route_str, [request_obj], case_obj.after_open_ts)
+    assert _table_snapshot_dict(case_obj.store_obj) == before_dict
 
 
 @pytest.mark.parametrize("method_str", [

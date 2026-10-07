@@ -5,8 +5,8 @@ import pytest
 
 from alpha.live import runner as runner_module
 from alpha.live.execution_engine import build_broker_order_request_list_from_vplan
+from alpha.live.daily_reconcile import DailyReconcileResult
 from alpha.live.order_clerk import BrokerAdapter, IBKRGatewayBrokerAdapter
-from alpha.live.reconcile import reconcile_account_state
 from test_live_mr_capsule_recovery import capsule_case, SUBMIT_TIMESTAMP_TS, RECONCILE_TIMESTAMP_TS
 
 
@@ -67,8 +67,6 @@ def test_other_sales_dispatch_between_bil_and_buys_without_reassigning_ids(capsu
 
 @pytest.mark.parametrize("error_obj", [ValueError("Insufficient broker buying power"), TimeoutError("Account preview timeout"), NotImplementedError("Unsupported adapter")])
 def test_capsule_funding_failure_retries_transient_or_preserves_sales(capsule_case, monkeypatch, error_obj):
-    from alpha.live.execution_resolution import load_request_resolution_dict
-
     state_store_obj, broker_adapter_obj, release_obj, vplan_obj, runner_kwarg_dict, _ = capsule_case
     def fail_funding(*_):
         raise error_obj
@@ -80,22 +78,19 @@ def test_capsule_funding_failure_retries_transient_or_preserves_sales(capsule_ca
         SUBMIT_TIMESTAMP_TS, "paper", False, **runner_kwarg_dict)
     assert result_dict["submitted_vplan_count_int"] == int(not transient_bool)
     assert result_dict["reason_count_map_dict"]["mr_capsule_funding_not_verified"] == 1
-    resolution_dict = load_request_resolution_dict(state_store_obj, vplan_obj)
+    metadata_dict = state_store_obj.get_decision_plan_by_id(vplan_obj.decision_plan_id_int).snapshot_metadata_dict
     if transient_bool:
         assert result_dict["reason_count_map_dict"]["dispatch_retry_pending"] == 1
         assert not broker_adapter_obj.submitted_order_request_list
         assert state_store_obj.get_vplan_by_id(vplan_obj.vplan_id_int).status_str == "ready"
         assert state_store_obj.get_decision_plan_by_id(vplan_obj.decision_plan_id_int).status_str == "vplan_ready"
-        assert resolution_dict == {}
+        assert not metadata_dict.get("funding_buys_dropped_bool")
     else:
         sale_request_obj, = broker_adapter_obj.submitted_order_request_list
         assert (sale_request_obj.asset_str, sale_request_obj.amount_float) == ("BIL", -100.0)
         assert state_store_obj.get_vplan_by_id(vplan_obj.vplan_id_int).status_str == "submitted"
         assert state_store_obj.get_decision_plan_by_id(vplan_obj.decision_plan_id_int).status_str == "submitted"
-        resolution_obj, = resolution_dict.values()
-        assert resolution_obj["asset_str"] == "AAPL"
-        assert resolution_obj["resolution_str"] == "never_dispatched"
-        assert resolution_obj["reason_str"] == "funding_check_suppressed_buy"
+        assert metadata_dict["funding_buys_dropped_bool"] is True
 
 
 def test_capsule_checks_all_client_open_orders_before_funding(capsule_case, monkeypatch):
@@ -123,24 +118,25 @@ def test_persisted_capsule_live_refused_before_any_broker_resolution(capsule_cas
             runner_module.build_vplans(state_store_obj, broker_adapter_obj, SUBMIT_TIMESTAMP_TS, "live", **runner_kwarg_dict)
 
 
-def test_capsule_reconcile_delegates_before_legacy_observation_and_keeps_automatic_refresh(capsule_case, monkeypatch):
+def test_capsule_daily_reconcile_runs_even_when_fill_reporting_is_unavailable(capsule_case, monkeypatch):
     state_store_obj, broker_adapter_obj, release_obj, vplan_obj, runner_kwarg_dict, _ = capsule_case
     state_store_obj.mark_vplan_status(vplan_obj.vplan_id_int, "submitted")
     state_store_obj.mark_decision_plan_status(vplan_obj.decision_plan_id_int, "submitted")
     snapshot_obj = replace(broker_adapter_obj.get_account_snapshot(release_obj.account_route_str), snapshot_timestamp_ts=RECONCILE_TIMESTAMP_TS)
-    reconciliation_obj = reconcile_account_state(snapshot_obj.position_amount_map, snapshot_obj.cash_float, snapshot_obj)
     called_vplan_list = []
-    def recovery_fn(store_obj, adapter_obj, passed_release_obj, passed_vplan_obj, decision_obj, as_of_ts):
+    def recovery_fn(store_obj, adapter_obj, passed_release_obj, decision_obj, as_of_ts, *, vplan_obj, **_kwarg_dict):
         assert store_obj is state_store_obj and adapter_obj is broker_adapter_obj
         assert passed_release_obj == release_obj and as_of_ts == RECONCILE_TIMESTAMP_TS
-        called_vplan_list.append(passed_vplan_obj.vplan_id_int)
-        return reconciliation_obj, "accepted_residual", [], snapshot_obj
-    monkeypatch.setattr(runner_module, "reconcile_capsule_cycle", recovery_fn)
+        called_vplan_list.append(vplan_obj.vplan_id_int)
+        return DailyReconcileResult("pending", snapshot_obj)
+    def unavailable_reporting_fn(**_kwarg_dict):
+        raise TimeoutError("Synthetic fill history outage")
+    monkeypatch.setattr(runner_module, "reconcile_daily_cycle", recovery_fn)
     monkeypatch.setattr(broker_adapter_obj, "get_account_snapshot", lambda *_: pytest.fail("Legacy observation ran"))
-    monkeypatch.setattr(broker_adapter_obj, "get_recent_order_state_snapshot", lambda **_: pytest.fail("Legacy order normalization ran"))
+    monkeypatch.setattr(broker_adapter_obj, "get_recent_order_state_snapshot", unavailable_reporting_fn)
     result_dict = runner_module.post_execution_reconcile(state_store_obj, broker_adapter_obj,
         RECONCILE_TIMESTAMP_TS, "paper", **runner_kwarg_dict)
-    assert result_dict["completed_vplan_count_int"] == 1
+    assert result_dict["completed_vplan_count_int"] == 0
     assert called_vplan_list == [vplan_obj.vplan_id_int]
     assert not runner_module.is_vplan_execution_exception_parked(state_store_obj, vplan_obj)
 
@@ -165,3 +161,53 @@ def test_base_adapter_refuses_unimplemented_funding_and_gateway_uses_opt_in_meth
     assert adapter_obj.get_capsule_order_state_snapshot("DU_TEST", SUBMIT_TIMESTAMP_TS, submission_key_str="plan", allowed_broker_order_id_set={"one"}) == ([], [], [])
     assert adapter_obj.get_capsule_funding_evidence("DU_TEST", []) == {"required_bool": False}
     assert [entry_tuple[0] for entry_tuple in called_method_list] == ["snapshot", "orders", "funding"]
+
+
+def test_funded_retry_clears_buy_drop_before_daily_bil_completion(capsule_case, monkeypatch):
+    store_obj, broker_obj, release_obj, plan_obj, option_dict, _ = capsule_case
+    original_funding_fn = broker_obj.get_capsule_funding_evidence
+    original_trace_fn = runner_module._emit_live_trace_event
+    funding_count_int = 0
+    trace_count_int = 0
+
+    def funding_fn(*arg_tuple, **kwarg_dict):
+        nonlocal funding_count_int
+        funding_count_int += 1
+        if funding_count_int == 1:
+            raise ValueError("Insufficient broker buying power")
+        return original_funding_fn(*arg_tuple, **kwarg_dict)
+
+    def trace_fn(*arg_tuple, **kwarg_dict):
+        nonlocal trace_count_int
+        if arg_tuple[0] == "vplan.submit_request":
+            trace_count_int += 1
+            if trace_count_int == 1:
+                raise TimeoutError("Trace failed before any send")
+        return original_trace_fn(*arg_tuple, **kwarg_dict)
+
+    monkeypatch.setattr(broker_obj, "get_capsule_funding_evidence", funding_fn)
+    monkeypatch.setattr(runner_module, "_emit_live_trace_event", trace_fn)
+    first_dict = runner_module.submit_ready_vplans(store_obj, broker_obj,
+        SUBMIT_TIMESTAMP_TS, "paper", False, **option_dict)
+    assert first_dict["reason_count_map_dict"]["dispatch_retry_pending"] == 1
+    assert store_obj.get_vplan_by_id(plan_obj.vplan_id_int).status_str == "ready"
+    assert broker_obj.submitted_order_request_list == []
+    assert store_obj.get_decision_plan_by_id(plan_obj.decision_plan_id_int).snapshot_metadata_dict["funding_buys_dropped_bool"] is True
+
+    assert runner_module.submit_ready_vplans(store_obj, broker_obj,
+        SUBMIT_TIMESTAMP_TS, "paper", False, **option_dict)["submitted_vplan_count_int"] == 1
+    assert [request_obj.asset_str for request_obj in broker_obj.submitted_order_request_list] == ["BIL", "AAPL"]
+    assert store_obj.get_decision_plan_by_id(plan_obj.decision_plan_id_int).snapshot_metadata_dict["funding_buys_dropped_bool"] is False
+
+    # Fresh broker truth, not fill totals, determines the still-required BIL sale.
+    snapshot_obj = broker_obj.get_account_snapshot(release_obj.account_route_str)
+    broker_obj.seed_account_snapshot(release_obj.account_route_str, snapshot_obj.cash_float,
+        snapshot_obj.net_liq_float, {**snapshot_obj.position_amount_map, "BIL": plan_obj.target_share_map["BIL"] + 60},
+        RECONCILE_TIMESTAMP_TS, session_mode_str="paper")
+    runner_module.post_execution_reconcile(store_obj, broker_obj, RECONCILE_TIMESTAMP_TS, "paper", **option_dict)
+    completion_obj = broker_obj.submitted_order_request_list[-1]
+    assert (completion_obj.asset_str, completion_obj.amount_float, completion_obj.broker_order_type_str) == ("BIL", -60.0, "MKT")
+    assert len(broker_obj.submitted_order_request_list) == 3
+    assert runner_module.submit_ready_vplans(store_obj, broker_obj,
+        SUBMIT_TIMESTAMP_TS, "paper", False, **option_dict)["submitted_vplan_count_int"] == 0
+    assert len(broker_obj.submitted_order_request_list) == 3

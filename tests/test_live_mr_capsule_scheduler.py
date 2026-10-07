@@ -167,7 +167,7 @@ def test_capture_preserves_broker_response_time(capsule_case):
 @pytest.mark.parametrize("phase_str,expected_str", [
     ("planned", "build_vplan"), ("ready", "submit_vplan"),
     ("submitting", "post_execution_reconcile"), ("submitted", "post_execution_reconcile"),
-    ("expired_ready", "expire_stale"),
+    ("expired_ready", "post_execution_reconcile"),
 ])
 def test_saved_cycles_continue_without_new_eod(capsule_case, phase_str, expected_str):
     store_obj, _, _, readiness_dict = capsule_case
@@ -187,8 +187,10 @@ def test_saved_cycles_continue_without_new_eod(capsule_case, phase_str, expected
 @pytest.mark.parametrize("status_str,abandoned_bool,prior_date_str,expected_build_bool", [
     ("completed", False, "2024-01-31", False), ("blocked", True, "2024-01-31", False),
     ("expired", True, "2024-01-31", False), ("completed", False, "2024-01-30", True),
-    ("blocked", True, "2024-01-30", True), ("expired", True, "2024-01-30", True),
+    ("blocked", True, "2024-01-30", False), ("expired", True, "2024-01-30", False),
     ("blocked", False, "2024-01-30", False), ("expired", False, "2024-01-30", False),
+    ("completed_with_exceptions", False, "2024-01-30", True),
+    ("completed_with_exceptions", False, "2024-01-31", False),
 ])
 def test_new_cycle_requires_strictly_older_resolved_plan(capsule_case, status_str, abandoned_bool, prior_date_str, expected_build_bool):
     store_obj, release_obj, _, _ = capsule_case
@@ -203,9 +205,10 @@ def test_new_cycle_requires_strictly_older_resolved_plan(capsule_case, status_st
     ))
     decision_obj = _decision(capsule_case)
     assert (decision_obj.next_phase_str == "build_decision_plan") is expected_build_bool
-    if status_str in {"blocked", "expired"} and not abandoned_bool:
-        assert decision_obj.next_phase_str == "manual_review_pending"
-        assert decision_obj.reason_code_str == "execution_exception_parked"
+    if status_str in {"blocked", "expired"}:
+        # Old abandonment flags cannot bypass fresh post-close settlement.
+        assert decision_obj.next_phase_str == "post_execution_reconcile"
+        assert decision_obj.reason_code_str == "waiting_for_post_execution_reconcile"
 
 
 @pytest.mark.parametrize("legacy_profile_str", ["norgate_eod_ndx_pit_plus_vxn_helper", "norgate_eod_etf_plus_vix_helper"])

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 from contextlib import closing, nullcontext
 from typing import Iterable
@@ -565,12 +566,10 @@ class LiveStateStore(CoreLiveStateStore):
                     """
                 )
 
-            from alpha.live.mr_capsule_recovery import ensure_capsule_recovery_schema
+            from alpha.live.daily_reconcile import ensure_daily_reconcile_schema
             from alpha.live.mr_capsule_notifications import ensure_execution_alert_schema
-            ensure_capsule_recovery_schema(connection_obj)
+            ensure_daily_reconcile_schema(connection_obj)
             ensure_execution_alert_schema(connection_obj)
-            from alpha.live.execution_resolution import ensure_execution_resolution_schema
-            ensure_execution_resolution_schema(connection_obj)
             from alpha.live.decision_revision import migrate_decision_revisions
             migrate_decision_revisions(connection_obj)
 
@@ -718,221 +717,127 @@ class LiveStateStore(CoreLiveStateStore):
             ).fetchone()
         return int(row_obj["active_count_int"]) > 0
 
-    def block_unsubmitted_core5_vplan(self, vplan_id_int: int, status_str: str = "blocked") -> bool:
-        """Do not let a late failing preflight overwrite another submitter's claim."""
-        from alpha.live.core5_adapter import CORE5_CONTRACT_STR
+    def block_unsubmitted_daily_cycle(self, decision_plan_id_int: int, status_str: str) -> bool:
+        """Stop an unclaimed batch; post-execution reconcile will finish its session."""
+        from alpha.live.daily_reconcile import is_daily_reconcile_release_bool
 
-        if status_str not in {"blocked", "expired"}:
-            raise ValueError("CORE5 pre-submit status must be blocked or expired.")
+        decision_obj = self.get_decision_plan_by_id(decision_plan_id_int)
+        if status_str not in {"blocked", "expired"} or not is_daily_reconcile_release_bool(self.get_release_by_id(decision_obj.release_id_str)):
+            raise ValueError("Daily submission block requires a daily pod and blocked/expired status.")
         with self._connect() as connection_obj:
             connection_obj.execute("BEGIN IMMEDIATE")
-            plan_row_obj = connection_obj.execute(
-                "SELECT v.status_str AS vplan_status_str, v.decision_plan_id_int, "
-                "d.status_str AS decision_status_str, d.snapshot_metadata_json_str "
-                "FROM vplan v JOIN decision_plan d ON d.decision_plan_id_int = v.decision_plan_id_int "
-                "WHERE v.vplan_id_int = ?", (int(vplan_id_int),),
-            ).fetchone()
-            if plan_row_obj is None or json.loads(plan_row_obj["snapshot_metadata_json_str"]).get("sizing_contract_str") != CORE5_CONTRACT_STR:
-                raise ValueError("CORE5 pre-submit block requires its persisted decision and VPlan.")
-            if plan_row_obj["vplan_status_str"] != "ready" or plan_row_obj["decision_status_str"] not in {"planned", "vplan_ready"}:
+            decision_row_obj = connection_obj.execute("SELECT status_str FROM decision_plan WHERE decision_plan_id_int=?",
+                (decision_plan_id_int,)).fetchone()
+            vplan_row_list = connection_obj.execute("SELECT status_str FROM vplan WHERE decision_plan_id_int=?",
+                (decision_plan_id_int,)).fetchall()
+            if decision_row_obj["status_str"] not in {"planned", "vplan_ready"} or any(row_obj["status_str"] != "ready" for row_obj in vplan_row_list):
                 return False
-            for table_str in ("vplan_broker_order", "vplan_broker_order_event", "vplan_broker_ack", "vplan_fill"):
-                if connection_obj.execute(
-                    f"SELECT 1 FROM {table_str} WHERE vplan_id_int = ? LIMIT 1", (int(vplan_id_int),),
-                ).fetchone() is not None:
-                    return False
-            updated_timestamp_str = _serialize_timestamp_str(_utc_now_ts())
-            metadata_dict = json.loads(plan_row_obj["snapshot_metadata_json_str"])
-            metadata_dict["core5_unclaimed_terminal_bool"] = True
-            connection_obj.execute(
-                "UPDATE vplan SET status_str = ?, updated_timestamp_str = ? WHERE vplan_id_int = ? AND status_str = 'ready'",
-                (status_str, updated_timestamp_str, int(vplan_id_int)),
-            )
-            connection_obj.execute(
-                "UPDATE decision_plan SET status_str = ?, updated_timestamp_str = ?, snapshot_metadata_json_str = ? WHERE decision_plan_id_int = ?",
-                (status_str, updated_timestamp_str, json.dumps(metadata_dict, sort_keys=True), plan_row_obj["decision_plan_id_int"]),
-            )
+            timestamp_str = _serialize_timestamp_str(_utc_now_ts())
+            connection_obj.execute("UPDATE vplan SET status_str=?, updated_timestamp_str=? WHERE decision_plan_id_int=?",
+                (status_str, timestamp_str, decision_plan_id_int))
+            connection_obj.execute("UPDATE decision_plan SET status_str=?, updated_timestamp_str=? WHERE decision_plan_id_int=?",
+                (status_str, timestamp_str, decision_plan_id_int))
             return True
 
-    def complete_core5_cycle(self, decision_plan_id_int: int, vplan_id_int: int | None = None) -> None:
-        """Atomically commit CORE5 strategy memory with the completed cycle.
-
-        Account cash/positions retain their independently observed timestamps.
-        A no-order cycle needs no broker operation. An executed cycle requires
-        persisted successful reconciliation and already refreshed account state.
-        """
-        from alpha.live.core5_adapter import CORE5_CONTRACT_STR, require_core5_position_match
+    def get_pending_daily_decision_plan_list(self) -> list[DecisionPlan]:
+        from alpha.live.daily_reconcile import is_daily_reconcile_release_bool
 
         with self._connect() as connection_obj:
+            decision_id_list = [int(row_obj[0]) for row_obj in connection_obj.execute(
+                "SELECT decision_plan_id_int FROM decision_plan WHERE status_str NOT IN "
+                "('completed','completed_with_exceptions','superseded') ORDER BY target_execution_timestamp_str, decision_plan_id_int").fetchall()]
+        decision_list = [self.get_decision_plan_by_id(decision_id_int) for decision_id_int in decision_id_list]
+        return [decision_obj for decision_obj in decision_list
+            if is_daily_reconcile_release_bool(self.get_release_by_id(decision_obj.release_id_str))]
+
+    def complete_daily_cycle(self, decision_plan_id_int: int, vplan_id_int: int | None,
+            broker_snapshot_obj: BrokerSnapshot, status_str: str, exception_list: list[dict], as_of_ts) -> bool:
+        """Atomically close a daily session from observed holdings, never fill totals."""
+        from alpha.live.daily_reconcile import DAILY_TERMINAL_STATUS_SET, is_daily_reconcile_release_bool
+        from alpha.live import scheduler_utils
+        from alpha.live.mr_capsule_notifications import enqueue_daily_exception_alert
+        from alpha.live.reconcile import reconcile_account_state
+
+        decision_obj = self.get_decision_plan_by_id(decision_plan_id_int)
+        release_obj = self.get_release_by_id(decision_obj.release_id_str)
+        if not is_daily_reconcile_release_bool(release_obj) or status_str not in DAILY_TERMINAL_STATUS_SET:
+            raise ValueError("Daily cycle completion requires a supported pod and final status.")
+        close_timestamp_ts = scheduler_utils.get_session_close_timestamp_ts(
+            scheduler_utils.session_label_from_timestamp_ts(decision_obj.target_execution_timestamp_ts, release_obj.session_calendar_id_str),
+            release_obj.session_calendar_id_str)
+        if (as_of_ts < close_timestamp_ts or broker_snapshot_obj.snapshot_timestamp_ts < as_of_ts
+                or broker_snapshot_obj.account_route_str != release_obj.account_route_str
+                or not all(math.isfinite(float(value_float)) for value_float in
+                    (broker_snapshot_obj.cash_float, broker_snapshot_obj.net_liq_float, *broker_snapshot_obj.position_amount_map.values()))
+                or broker_snapshot_obj.net_liq_float <= 0):
+            raise ValueError("Daily cycle completion requires refreshed account holdings after target close.")
+        if bool(exception_list) != (status_str == "completed_with_exceptions"):
+            raise ValueError("Daily final status must agree with the exceptions.")
+        with self._connect() as connection_obj:
             connection_obj.execute("BEGIN IMMEDIATE")
-            decision_row_obj = connection_obj.execute(
-                "SELECT * FROM decision_plan WHERE decision_plan_id_int = ?", (int(decision_plan_id_int),),
-            ).fetchone()
-            if decision_row_obj is None:
-                raise ValueError("CORE5 completion requires a persisted decision.")
+            release_row_obj = connection_obj.execute("SELECT * FROM live_release WHERE release_id_str=?",
+                (decision_obj.release_id_str,)).fetchone()
+            current_release_obj = self._row_to_release(release_row_obj)
+            if (current_release_obj != release_obj or
+                    (decision_obj.pod_id_str, decision_obj.user_id_str, decision_obj.account_route_str) !=
+                    (current_release_obj.pod_id_str, current_release_obj.user_id_str, current_release_obj.account_route_str)):
+                raise ValueError("Daily cycle release identity changed while reconciliation was in progress.")
+            decision_row_obj = connection_obj.execute("SELECT status_str,snapshot_metadata_json_str FROM decision_plan WHERE decision_plan_id_int=?",
+                (decision_plan_id_int,)).fetchone()
+            if decision_row_obj["status_str"] in {*DAILY_TERMINAL_STATUS_SET, "superseded"}:
+                return False
+            latest_vplan_row_obj = connection_obj.execute("SELECT vplan_id_int FROM vplan WHERE decision_plan_id_int=? ORDER BY vplan_id_int DESC LIMIT 1",
+                (decision_plan_id_int,)).fetchone()
+            latest_vplan_id_int = None if latest_vplan_row_obj is None else int(latest_vplan_row_obj[0])
+            if latest_vplan_id_int != vplan_id_int:
+                raise ValueError("Daily cycle VPlan changed while reconciliation was in progress.")
             metadata_dict = json.loads(decision_row_obj["snapshot_metadata_json_str"])
-            if metadata_dict.get("sizing_contract_str") != CORE5_CONTRACT_STR:
-                raise ValueError("CORE5 completion cannot update another strategy.")
-            if decision_row_obj["status_str"] == "completed":
-                return
-            state_row_obj = connection_obj.execute(
-                "SELECT * FROM pod_state WHERE pod_id_str = ?", (decision_row_obj["pod_id_str"],),
-            ).fetchone()
-            if state_row_obj is None or state_row_obj["account_route_str"] != decision_row_obj["account_route_str"]:
-                raise ValueError("CORE5 completion requires the matching saved account state.")
-            if json.loads(state_row_obj["strategy_state_json_str"]) != metadata_dict["base_strategy_state_dict"]:
-                raise ValueError("CORE5 committed strategy state changed while this cycle was pending.")
-            if vplan_id_int is None:
-                if not metadata_dict.get("no_order_bool") or decision_row_obj["status_str"] != "planned":
-                    raise ValueError("Only a planned no-order CORE5 cycle can complete without a VPlan.")
-                expected_position_dict = json.loads(decision_row_obj["decision_base_position_json_str"])
+            strategy_state_dict = dict(decision_obj.strategy_state_dict)
+            # A partial/missed rebalance is closed operationally but is not an
+            # execution receipt. Replay can catch it up at the following open.
+            target_dict = metadata_dict.get("fixed_target_share_map_dict")
+            candidate_receipt_dict = metadata_dict.get("core5_candidate_execution_receipt_dict")
+            if candidate_receipt_dict is not None and target_dict is not None:
+                actual_dict = broker_snapshot_obj.position_amount_map
+                achieved_bool = all(abs(float(target_dict.get(asset_str, 0)) - float(actual_dict.get(asset_str, 0))) <= 1e-9
+                    for asset_str in set(target_dict) | set(actual_dict))
+                strategy_state_dict["core5_execution_receipt_dict"] = dict(candidate_receipt_dict if achieved_bool else
+                    metadata_dict.get("base_strategy_state_dict", {}).get("core5_execution_receipt_dict", {}))
+            result_dict = {"status_str": status_str, "exception_list": exception_list,
+                "broker_snapshot_timestamp_str": broker_snapshot_obj.snapshot_timestamp_ts.isoformat(),
+                "completed_timestamp_str": as_of_ts.isoformat()}
+            newer_decision_row_obj = connection_obj.execute(
+                "SELECT decision_plan_id_int FROM decision_plan WHERE pod_id_str=? AND "
+                "(julianday(target_execution_timestamp_str),julianday(signal_timestamp_str),decision_plan_id_int) > (julianday(?),julianday(?),?) "
+                "ORDER BY julianday(target_execution_timestamp_str) DESC,julianday(signal_timestamp_str) DESC,decision_plan_id_int DESC LIMIT 1",
+                (decision_obj.pod_id_str, _serialize_timestamp_str(decision_obj.target_execution_timestamp_ts),
+                    _serialize_timestamp_str(decision_obj.signal_timestamp_ts), decision_plan_id_int)).fetchone()
+            # Upgrade-era abandoned cycles and concurrent workers may close out of
+            # order. Their audit/status may finish, but may not rewind current memory.
+            if newer_decision_row_obj is not None:
+                result_dict["pod_state_preserved_for_newer_decision_id_int"] = int(newer_decision_row_obj[0])
             else:
-                vplan_row_obj = connection_obj.execute(
-                    "SELECT * FROM vplan WHERE vplan_id_int = ? AND decision_plan_id_int = ?",
-                    (int(vplan_id_int), int(decision_plan_id_int)),
-                ).fetchone()
-                reconciliation_row_obj = connection_obj.execute(
-                    "SELECT status_str FROM vplan_reconciliation_snapshot WHERE vplan_id_int = ? AND stage_str = 'post_execution' ORDER BY vplan_reconciliation_snapshot_id_int DESC LIMIT 1",
-                    (int(vplan_id_int),),
-                ).fetchone()
-                if (
-                    vplan_row_obj is None or vplan_row_obj["status_str"] not in {"submitted", "submitting"}
-                    or reconciliation_row_obj is None or reconciliation_row_obj["status_str"] != "passed"
-                ):
-                    raise ValueError("CORE5 cannot commit an unexecuted or unreconciled VPlan.")
-                expected_position_dict = metadata_dict["fixed_target_share_map_dict"]
-            require_core5_position_match(expected_position_dict, json.loads(state_row_obj["position_json_str"]))
-            completed_timestamp_str = _serialize_timestamp_str(_utc_now_ts())
-            connection_obj.execute(
-                "UPDATE pod_state SET strategy_state_json_str = ? WHERE pod_id_str = ?",
-                (decision_row_obj["strategy_state_json_str"], decision_row_obj["pod_id_str"]),
-            )
-            connection_obj.execute(
-                """INSERT INTO pod_state_history (
-                    pod_id_str, user_id_str, account_route_str, position_json_str,
-                    cash_float, total_value_float, strategy_state_json_str,
-                    snapshot_stage_str, snapshot_source_str, updated_timestamp_str, recorded_timestamp_str
-                ) SELECT pod_id_str, user_id_str, account_route_str, position_json_str,
-                    cash_float, total_value_float, strategy_state_json_str,
-                    'strategy_commit', 'decision_plan', updated_timestamp_str, ?
-                  FROM pod_state WHERE pod_id_str = ?""",
-                (completed_timestamp_str, decision_row_obj["pod_id_str"]),
-            )
-            connection_obj.execute(
-                "UPDATE decision_plan SET status_str = 'completed', updated_timestamp_str = ? WHERE decision_plan_id_int = ?",
-                (completed_timestamp_str, int(decision_plan_id_int)),
-            )
+                self.upsert_pod_state(PodState(pod_id_str=release_obj.pod_id_str, user_id_str=release_obj.user_id_str,
+                    account_route_str=release_obj.account_route_str, position_amount_map=dict(broker_snapshot_obj.position_amount_map),
+                    cash_float=broker_snapshot_obj.cash_float, total_value_float=broker_snapshot_obj.net_liq_float,
+                    strategy_state_dict=strategy_state_dict, updated_timestamp_ts=broker_snapshot_obj.snapshot_timestamp_ts),
+                    snapshot_stage_str="post_execution", snapshot_source_str="virtual_broker" if release_obj.mode_str == "incubation" else "broker",
+                    connection_obj=connection_obj)
+            metadata_dict["daily_execution_result_dict"] = result_dict
             if vplan_id_int is not None:
-                connection_obj.execute(
-                    "UPDATE vplan SET status_str = 'completed', updated_timestamp_str = ? WHERE vplan_id_int = ?",
-                    (completed_timestamp_str, int(vplan_id_int)),
-                )
-
-    def abandon_unsubmitted_mr_capsule_cycle(self, decision_plan_id_int: int, status_str: str) -> bool:
-        """Mark a capsule cycle safe to skip only while its submission claim is provably untouched."""
-        from alpha.live.mr_capsule_adapter import MR_CAPSULE_CONTRACT_STR
-
-        if status_str not in {"expired", "blocked"}:
-            raise ValueError("Unsubmitted capsule abandonment requires expired or blocked status.")
-        with self._connect() as connection_obj:
-            # The submission claim also updates this database. This lock makes ready->terminal
-            # exclusive with ready->submitting, including a process that has not received any ACK yet.
-            connection_obj.execute("BEGIN IMMEDIATE")
-            decision_row_obj = connection_obj.execute(
-                "SELECT * FROM decision_plan WHERE decision_plan_id_int = ?", (int(decision_plan_id_int),),
-            ).fetchone()
-            if decision_row_obj is None:
-                raise ValueError("Capsule abandonment requires a persisted decision.")
-            metadata_dict = json.loads(decision_row_obj["snapshot_metadata_json_str"])
-            if metadata_dict.get("sizing_contract_str") != MR_CAPSULE_CONTRACT_STR:
-                raise ValueError("Capsule abandonment cannot update another strategy.")
-            if metadata_dict.get("mr_capsule_unsubmitted_cycle_abandoned_bool") is True:
-                return decision_row_obj["status_str"] in {"expired", "blocked"}
-            if decision_row_obj["status_str"] not in {"planned", "vplan_ready"}:
-                return False
-            vplan_row_list = connection_obj.execute(
-                "SELECT * FROM vplan WHERE decision_plan_id_int = ?", (int(decision_plan_id_int),),
-            ).fetchall()
-            if any(
-                row_obj["status_str"] != "ready" or row_obj["submit_ack_status_str"] != "not_checked"
-                or row_obj["submit_ack_checked_timestamp_str"] is not None
-                or row_obj["ack_coverage_ratio_float"] is not None or row_obj["missing_ack_count_int"] != 0
-                for row_obj in vplan_row_list
-            ):
-                return False
-            for table_str in ("vplan_broker_order", "vplan_broker_order_event", "vplan_broker_ack", "vplan_fill"):
-                evidence_row_obj = connection_obj.execute(
-                    f"SELECT 1 FROM {table_str} WHERE decision_plan_id_int = ? OR vplan_id_int IN "
-                    "(SELECT vplan_id_int FROM vplan WHERE decision_plan_id_int = ?) LIMIT 1",
-                    (int(decision_plan_id_int), int(decision_plan_id_int)),
-                ).fetchone()
-                if evidence_row_obj is not None:
-                    return False
-            if connection_obj.execute(
-                "SELECT 1 FROM cash_ledger_entry WHERE vplan_id_int IN "
-                "(SELECT vplan_id_int FROM vplan WHERE decision_plan_id_int = ?) LIMIT 1", (int(decision_plan_id_int),),
-            ).fetchone() is not None:
-                return False
-            metadata_dict["mr_capsule_unsubmitted_cycle_abandoned_bool"] = True
-            terminal_timestamp_str = _serialize_timestamp_str(_utc_now_ts())
-            vplan_cursor_obj = connection_obj.execute(
-                "UPDATE vplan SET status_str = ?, updated_timestamp_str = ? "
-                "WHERE decision_plan_id_int = ? AND status_str = 'ready'",
-                (status_str, terminal_timestamp_str, int(decision_plan_id_int)),
-            )
-            decision_cursor_obj = connection_obj.execute(
-                "UPDATE decision_plan SET status_str = ?, snapshot_metadata_json_str = ?, updated_timestamp_str = ? "
-                "WHERE decision_plan_id_int = ? AND status_str IN ('planned', 'vplan_ready')",
-                (status_str, json.dumps(metadata_dict, sort_keys=True), terminal_timestamp_str, int(decision_plan_id_int)),
-            )
-            # *** CRITICAL *** Defence in depth behind BEGIN IMMEDIATE: never overwrite a VPlan that left 'ready'
-            # (claimed for submission) or a decision that left planned/vplan_ready; undo and report not abandoned.
-            if vplan_cursor_obj.rowcount != len(vplan_row_list) or decision_cursor_obj.rowcount != 1:
-                connection_obj.rollback()
-                return False
+                reconciliation_obj = reconcile_account_state(broker_snapshot_obj.position_amount_map,
+                    broker_snapshot_obj.cash_float, broker_snapshot_obj)
+                self.insert_vplan_reconciliation_snapshot(release_obj.pod_id_str, decision_plan_id_int, vplan_id_int,
+                    "post_execution", reconciliation_obj, connection_obj=connection_obj)
+                connection_obj.execute("UPDATE vplan SET status_str=?,updated_timestamp_str=? WHERE vplan_id_int=?",
+                    (status_str, as_of_ts.isoformat(), vplan_id_int))
+            connection_obj.execute("UPDATE decision_plan SET status_str=?,snapshot_metadata_json_str=?,updated_timestamp_str=? WHERE decision_plan_id_int=?",
+                (status_str, json.dumps(metadata_dict, sort_keys=True, allow_nan=False), as_of_ts.isoformat(), decision_plan_id_int))
+            if exception_list:
+                enqueue_daily_exception_alert(connection_obj, decision_plan_id_int=decision_plan_id_int, vplan_id_int=vplan_id_int,
+                    pod_id_str=release_obj.pod_id_str, account_route_str=release_obj.account_route_str, mode_str=release_obj.mode_str,
+                    exception_list=exception_list, created_timestamp_ts=as_of_ts)
             return True
-
-    def complete_mr_capsule_cycle(self, decision_plan_id_int: int, vplan_id_int: int, *, connection_obj=None) -> None:
-        """Complete both reconciled capsule plans atomically so restart cannot strand one status."""
-        from alpha.live.mr_capsule_adapter import MR_CAPSULE_CONTRACT_STR
-
-        with (self._connect() if connection_obj is None else nullcontext(connection_obj)) as connection_obj:
-            if not connection_obj.in_transaction:
-                connection_obj.execute("BEGIN IMMEDIATE")
-            decision_row_obj = connection_obj.execute(
-                "SELECT * FROM decision_plan WHERE decision_plan_id_int = ?", (int(decision_plan_id_int),),
-            ).fetchone()
-            vplan_row_obj = connection_obj.execute(
-                "SELECT * FROM vplan WHERE vplan_id_int = ? AND decision_plan_id_int = ?",
-                (int(vplan_id_int), int(decision_plan_id_int)),
-            ).fetchone()
-            if decision_row_obj is None or vplan_row_obj is None:
-                raise ValueError("Capsule completion requires a matching persisted decision and VPlan.")
-            metadata_dict = json.loads(decision_row_obj["snapshot_metadata_json_str"])
-            if metadata_dict.get("sizing_contract_str") != MR_CAPSULE_CONTRACT_STR:
-                raise ValueError("Capsule completion cannot update another strategy.")
-            if decision_row_obj["status_str"] == vplan_row_obj["status_str"] == "completed":
-                return
-            reconciliation_row_obj = connection_obj.execute(
-                "SELECT status_str FROM vplan_reconciliation_snapshot WHERE vplan_id_int = ? "
-                "AND decision_plan_id_int = ? AND stage_str = 'post_execution' "
-                "ORDER BY vplan_reconciliation_snapshot_id_int DESC LIMIT 1",
-                (int(vplan_id_int), int(decision_plan_id_int)),
-            ).fetchone()
-            if (
-                vplan_row_obj["status_str"] not in {"submitted", "submitting"}
-                or reconciliation_row_obj is None or reconciliation_row_obj["status_str"] != "passed"
-            ):
-                raise ValueError("Capsule cannot complete an unexecuted or unreconciled VPlan.")
-            completed_timestamp_str = _serialize_timestamp_str(_utc_now_ts())
-            connection_obj.execute(
-                "UPDATE vplan SET status_str = 'completed', updated_timestamp_str = ? WHERE vplan_id_int = ?",
-                (completed_timestamp_str, int(vplan_id_int)),
-            )
-            connection_obj.execute(
-                "UPDATE decision_plan SET status_str = 'completed', updated_timestamp_str = ? WHERE decision_plan_id_int = ?",
-                (completed_timestamp_str, int(decision_plan_id_int)),
-            )
 
     def insert_decision_plan(self, decision_plan_obj: DecisionPlan, *, connection_obj=None, intent_revision_int=0) -> DecisionPlan:
         created_timestamp_str = _serialize_timestamp_str(_utc_now_ts())

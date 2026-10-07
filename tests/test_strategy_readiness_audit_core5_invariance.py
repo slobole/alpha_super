@@ -2,7 +2,7 @@
 
 Real-data evidence lives in results/research/strategy_readiness_audit_20260928/core5/. These tests only lock the
 code properties the audit relied on: scale-free signals, causal prefixes, calendar month-end on partial data,
-the target-book contract, the unqualified LIVE block, fail-closed session gaps, and that the harness catches a leak.
+the target-book contract, the unqualified LIVE block, deterministic session-gap replay, and that the harness catches a leak.
 """
 from __future__ import annotations
 
@@ -111,7 +111,7 @@ def test_unqualified_live_is_blocked_incubation_allowed():
     adapter_module.validate_core5_release(_release("incubation"))
 
 
-def test_missed_session_fails_closed(price_df):
+def test_missed_session_replays_prices_and_warns_about_the_cache_gap(price_df):
     rel = _release("incubation")
     T = pd.Timestamp("2021-05-27")
     as_of = (T.tz_localize("America/New_York") + pd.Timedelta(hours=18)).to_pydatetime()
@@ -124,13 +124,18 @@ def test_missed_session_fails_closed(price_df):
     }
     pod = PodState(rel.pod_id_str, rel.user_id_str, rel.account_route_str, {"BIL": 100.0}, 1_000.0, 10_000.0, state, as_of,
                    snapshot_stage_str="eod", snapshot_source_str="virtual_broker")
-    with pytest.raises(ValueError, match="missed decision session"):
-        adapter_module.build_core5_decision_from_prices(rel, as_of, pod, price_df, {
-            "norgate_snapshot_date_str": T.date().isoformat(), "norgate_data_profile_str": "norgate_eod_core5",
-            "norgate_manifest_hash_str": "audit"})
+    metadata_dict = {"norgate_snapshot_date_str": T.date().isoformat(),
+        "norgate_data_profile_str": "norgate_eod_core5", "norgate_manifest_hash_str": "audit"}
+    decision_obj = adapter_module.build_core5_decision_from_prices(rel, as_of, pod, price_df, metadata_dict)
+    rebuilt_obj = adapter_module.build_core5_decision_from_prices(rel, as_of,
+        replace(pod, strategy_state_dict={}), price_df, metadata_dict)
+    assert "core5_strategy_state_cache_gap" in decision_obj.snapshot_metadata_dict["core5_warning_code_list"]
+    assert decision_obj.strategy_state_dict == rebuilt_obj.strategy_state_dict
+    assert decision_obj.snapshot_metadata_dict["fixed_target_share_map_dict"] == rebuilt_obj.snapshot_metadata_dict["fixed_target_share_map_dict"]
+    assert decision_obj.decision_base_position_map == {"BIL": 100.0}
 
 
-def test_intraday_rerun_of_committed_session_fails_closed(price_df):
+def test_intraday_rerun_replays_same_completed_close_with_a_cache_warning(price_df):
     # Invoked at 15:00 on 2021-05-28 the latest completed session is 2021-05-27; memory already committed it.
     rel = _release("incubation")
     T = pd.Timestamp("2021-05-27")
@@ -145,7 +150,11 @@ def test_intraday_rerun_of_committed_session_fails_closed(price_df):
     stamp = (T.tz_localize("America/New_York") + pd.Timedelta(hours=18)).to_pydatetime()
     pod = PodState(rel.pod_id_str, rel.user_id_str, rel.account_route_str, {"BIL": 100.0}, 1_000.0, 10_000.0, state, stamp,
                    snapshot_stage_str="eod", snapshot_source_str="virtual_broker")
-    with pytest.raises(ValueError, match="duplicate or missed"):
-        adapter_module.build_core5_decision_from_prices(rel, as_of, pod, price_df, {
-            "norgate_snapshot_date_str": T.date().isoformat(), "norgate_data_profile_str": "norgate_eod_core5",
-            "norgate_manifest_hash_str": "audit"})
+    metadata_dict = {"norgate_snapshot_date_str": T.date().isoformat(),
+        "norgate_data_profile_str": "norgate_eod_core5", "norgate_manifest_hash_str": "audit"}
+    decision_obj = adapter_module.build_core5_decision_from_prices(rel, as_of, pod, price_df, metadata_dict)
+    prior_close_obj = adapter_module.build_core5_decision_from_prices(rel, stamp, pod, price_df, metadata_dict)
+    assert decision_obj == prior_close_obj
+    assert "core5_strategy_state_cache_gap" in decision_obj.snapshot_metadata_dict["core5_warning_code_list"]
+    assert decision_obj.signal_timestamp_ts == scheduler_utils.get_session_close_timestamp_ts(T, "XNYS")
+    assert decision_obj.target_execution_timestamp_ts == scheduler_utils.get_session_open_timestamp_ts(pd.Timestamp("2021-05-28"), "XNYS")

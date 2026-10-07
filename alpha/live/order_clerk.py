@@ -124,8 +124,12 @@ def _compute_submit_ack_summary(
 
 
 class BrokerAdapter(ABC):
-    def get_refreshed_order_evidence(self, account_route_str: str, since_timestamp_ts: datetime) -> dict:
-        raise NotImplementedError("This adapter cannot prove broker order absence.")
+    def get_daily_execution_snapshot(self, account_route_str: str):
+        raise NotImplementedError("This adapter does not provide complete fresh DAILY account state.")
+
+    def cancel_daily_owned_orders(self, account_route_str: str, owned_order_ref_set: set[str],
+            *, session_close_timestamp_ts: datetime):
+        raise NotImplementedError("This adapter cannot selectively cancel DAILY owned orders.")
 
     @abstractmethod
     def get_visible_account_route_set(self) -> set[str] | None:
@@ -217,9 +221,15 @@ class BrokerAdapter(ABC):
 
 
 class IBKRGatewayBrokerAdapter(BrokerAdapter):
-    def get_refreshed_order_evidence(self, account_route_str: str, since_timestamp_ts: datetime) -> dict:
-        from alpha.live.order_evidence import refreshed_order_evidence_dict
-        return refreshed_order_evidence_dict(self.socket_client_obj, account_route_str, since_timestamp_ts)
+    def get_daily_execution_snapshot(self, account_route_str: str):
+        from alpha.live.daily_broker import get_daily_execution_snapshot
+        return get_daily_execution_snapshot(self.socket_client_obj, account_route_str)
+
+    def cancel_daily_owned_orders(self, account_route_str: str, owned_order_ref_set: set[str],
+            *, session_close_timestamp_ts: datetime):
+        from alpha.live.daily_broker import cancel_daily_owned_orders
+        return cancel_daily_owned_orders(self.socket_client_obj, account_route_str, owned_order_ref_set,
+            session_close_timestamp_ts=session_close_timestamp_ts)
 
     def __init__(
         self,

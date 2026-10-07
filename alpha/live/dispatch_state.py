@@ -1,4 +1,4 @@
-"""Durable retry/park transitions for CORE5 and capsule opening batches."""
+"""Opening-batch retries and failure reporting for the daily reconciliation path."""
 from datetime import UTC, datetime
 from dataclasses import replace
 import json
@@ -6,7 +6,6 @@ import json
 from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR
 from alpha.live.guarded_dispatch import DispatchFailure, is_transient_broker_error_bool, moo_dispatch_deadline_ts
 from alpha.live.mr_capsule_adapter import MR_CAPSULE_STRATEGY_IMPORT_TUPLE
-from alpha.live.mr_capsule_notifications import enqueue_execution_alert
 
 
 def is_guarded_release_bool(release_obj):
@@ -16,8 +15,7 @@ def is_guarded_release_bool(release_obj):
 
 def record_dispatch_failure(state_store_obj, release_obj, vplan_obj, request_list,
         exception_obj, as_of_ts, *, before_send_bool=False, claim_owned_bool=False):
-    """Retry only a proved pre-dispatch transient failure; park every uncertain send."""
-    from alpha.live.execution_resolution import record_never_dispatched_requests
+    """Retry a pre-send transient error; otherwise leave the cycle for reconciliation."""
 
     if not is_guarded_release_bool(release_obj):
         raise ValueError("Dispatch recovery is limited to CORE5 and capsules.")
@@ -38,7 +36,7 @@ def record_dispatch_failure(state_store_obj, release_obj, vplan_obj, request_lis
     retry_bool = (not attempted_key_list and transient_bool
         and max(as_of_ts, datetime.now(UTC)) < moo_dispatch_deadline_ts(vplan_obj))
     payload_dict = {"severity_str": "warning" if retry_bool else "critical",
-        "reason_code_str": "dispatch_retry_pending" if retry_bool else "opening_dispatch_parked",
+        "reason_code_str": "dispatch_retry_pending" if retry_bool else "opening_dispatch_incomplete",
         "error_type_str": getattr(exception_obj, "error_type_str", type(exception_obj).__name__),
         "attempted_request_key_list": attempted_key_list,
         "never_dispatched_request_key_list": [request_obj.order_request_key_str for request_obj in never_list],
@@ -61,24 +59,11 @@ def record_dispatch_failure(state_store_obj, release_obj, vplan_obj, request_lis
             raise ValueError("Cannot release a dispatch claim with recorded orders.")
         metadata_dict = json.loads(row_obj["snapshot_metadata_json_str"])
         metadata_dict["opening_dispatch_result_dict"] = payload_dict
-        if not retry_bool:
-            metadata_dict["opening_dispatch_parked_bool"] = True
-            if never_list:
-                record_never_dispatched_requests(state_store_obj, release_obj, vplan_obj, never_list,
-                    as_of_ts, "dispatch_failed_before_place_order", connection_obj=connection_obj)
-        # Submitted means reconciliation must inspect this batch, not that the
-        # broker acknowledged it. The critical result makes uncertainty explicit.
-        preflight_park_bool = not retry_bool and not claim_owned_bool and release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR
-        if preflight_park_bool:
-            metadata_dict["core5_unclaimed_terminal_bool"] = True
+        # No proof ledger or separate recovery phase: both failed claims and
+        # unsent batches remain observable until this session's reconciliation.
         connection_obj.execute("UPDATE vplan SET status_str=?, updated_timestamp_str=? WHERE vplan_id_int=?",
-            ("ready" if retry_bool else "blocked" if preflight_park_bool else "submitted", as_of_ts.isoformat(), vplan_obj.vplan_id_int))
+            ("ready" if retry_bool else "submitted", as_of_ts.isoformat(), vplan_obj.vplan_id_int))
         connection_obj.execute("UPDATE decision_plan SET status_str=?, snapshot_metadata_json_str=?, updated_timestamp_str=? WHERE decision_plan_id_int=?",
-            ("vplan_ready" if retry_bool else "blocked" if preflight_park_bool else "submitted", json.dumps(metadata_dict, sort_keys=True),
+            ("vplan_ready" if retry_bool else "submitted", json.dumps(metadata_dict, sort_keys=True),
              as_of_ts.isoformat(), vplan_obj.decision_plan_id_int))
-        if not retry_bool:
-            enqueue_execution_alert(connection_obj, vplan_id_int=vplan_obj.vplan_id_int,
-                alert_kind_str="dispatch_failed", pod_id_str=vplan_obj.pod_id_str,
-                account_route_str=vplan_obj.account_route_str, mode_str=release_obj.mode_str,
-                payload_dict=payload_dict, created_timestamp_ts=as_of_ts)
     return payload_dict["reason_code_str"]

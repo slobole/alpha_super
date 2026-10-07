@@ -1,13 +1,33 @@
-"""Deterministic SQLite interleavings for capsule build/abandon/claim races."""
+"""Deterministic SQLite interleavings for capsule build/close/claim races."""
 import json
 import sqlite3
 from datetime import datetime, timezone
 
 import pytest
 
-from alpha.live.models import DecisionPlan, VPlan, VPlanRow
+from alpha.live.models import BrokerSnapshot, DecisionPlan, LiveRelease, VPlan, VPlanRow
 from alpha.live.mr_capsule_adapter import MR_CAPSULE_CONTRACT_STR
 from alpha.live.state_store_v2 import LiveStateStore
+
+
+def _register_capsule_release(store_obj):
+    store_obj.upsert_release(LiveRelease(
+        release_id_str="capsule.v1", user_id_str="owner", pod_id_str="capsule", account_route_str="DU123",
+        strategy_import_str="strategies.mr_capsule.strategy_mr_dv2_vix_gated_bil", mode_str="paper",
+        session_calendar_id_str="XNYS", signal_clock_str="eod_snapshot_ready", execution_policy_str="next_open_moo",
+        data_profile_str="norgate_eod_sp500_mr_capsule_pit", params_dict={}, risk_profile_str="standard",
+        enabled_bool=True, source_path_str="in_memory_test.yaml", pod_budget_fraction_float=1.0,
+    ))
+
+
+def _complete_daily_cycle(store_obj, decision_obj, vplan_obj=None, status_str="completed", as_of_ts=None):
+    as_of_ts = as_of_ts or datetime(2024, 1, 16, 21, tzinfo=timezone.utc)
+    exception_list = [] if status_str == "completed" else [
+        {"asset_str": "BIL", "quantity_float": 10.0, "side_str": "BUY", "reason_str": "target_not_reached"}]
+    snapshot_obj = BrokerSnapshot("DU123", as_of_ts, cash_float=9_000, total_value_float=10_000, net_liq_float=10_000,
+        position_amount_map={"BIL": 10.0} if not exception_list else {})
+    return store_obj.complete_daily_cycle(decision_obj.decision_plan_id_int,
+        None if vplan_obj is None else vplan_obj.vplan_id_int, snapshot_obj, status_str, exception_list, as_of_ts)
 
 
 @pytest.fixture
@@ -18,6 +38,7 @@ def capsule_cycle(monkeypatch):
     monkeypatch.setattr(store_obj, "_connect", lambda: connection_obj)
     store_obj._initialize_schema()
     store_obj._initialize_v2_schema()
+    _register_capsule_release(store_obj)
     signal_ts = datetime(2024, 1, 12, 21, tzinfo=timezone.utc)
     execution_ts = datetime(2024, 1, 16, 14, 30, tzinfo=timezone.utc)
     identity_dict = dict(release_id_str="capsule.v1", user_id_str="owner", pod_id_str="capsule", account_route_str="DU123")
@@ -43,17 +64,17 @@ def capsule_cycle(monkeypatch):
     connection_obj.close()
 
 
-@pytest.mark.parametrize("status_str", ["blocked", "expired"])
-def test_candidate_built_before_abandonment_cannot_resurrect_cycle(capsule_cycle, status_str):
+@pytest.mark.parametrize("status_str", ["completed", "completed_with_exceptions"])
+def test_candidate_built_before_daily_close_cannot_resurrect_cycle(capsule_cycle, status_str):
     store_obj, decision_obj, candidate_obj = capsule_cycle
-    # Worker A has built candidate_obj; worker B abandons before A persists it.
-    assert store_obj.abandon_unsubmitted_mr_capsule_cycle(decision_obj.decision_plan_id_int, status_str)
+    # Worker A has built candidate_obj; worker B closes before A persists it.
+    assert _complete_daily_cycle(store_obj, decision_obj, status_str=status_str)
     with pytest.raises(ValueError, match="active planned decision"):
         store_obj.insert_vplan(candidate_obj)
     assert store_obj.get_latest_vplan_for_decision(decision_obj.decision_plan_id_int) is None
     persisted_obj = store_obj.get_decision_plan_by_id(decision_obj.decision_plan_id_int)
     assert persisted_obj.status_str == status_str
-    assert persisted_obj.snapshot_metadata_dict["mr_capsule_unsubmitted_cycle_abandoned_bool"] is True
+    assert persisted_obj.snapshot_metadata_dict["daily_execution_result_dict"]["status_str"] == status_str
 
 
 def test_insert_and_decision_ready_transition_roll_back_together(capsule_cycle):
@@ -69,7 +90,7 @@ def test_insert_and_decision_ready_transition_roll_back_together(capsule_cycle):
         assert connection_obj.execute("SELECT COUNT(*) FROM vplan_row").fetchone()[0] == 0
 
 
-def test_first_builder_wins_and_claimed_no_ack_cycle_cannot_be_abandoned(capsule_cycle):
+def test_first_builder_wins_and_claimed_no_ack_cycle_can_close_only_after_session(capsule_cycle):
     store_obj, decision_obj, candidate_obj = capsule_cycle
     inserted_obj = store_obj.insert_vplan(candidate_obj)
     assert store_obj.get_decision_plan_by_id(decision_obj.decision_plan_id_int).status_str == "vplan_ready"
@@ -77,21 +98,25 @@ def test_first_builder_wins_and_claimed_no_ack_cycle_cannot_be_abandoned(capsule
     with pytest.raises(ValueError, match="active planned decision"):
         store_obj.insert_vplan(candidate_obj)
     assert store_obj.claim_vplan_for_submission(inserted_obj.vplan_id_int)
-    assert not store_obj.abandon_unsubmitted_mr_capsule_cycle(decision_obj.decision_plan_id_int, "expired")
+    with pytest.raises(ValueError, match="after target close"):
+        _complete_daily_cycle(store_obj, decision_obj, inserted_obj, as_of_ts=decision_obj.target_execution_timestamp_ts)
     assert store_obj.get_latest_vplan_for_decision(decision_obj.decision_plan_id_int).status_str == "submitting"
     assert not store_obj.claim_vplan_for_submission(inserted_obj.vplan_id_int)
+    assert _complete_daily_cycle(store_obj, decision_obj, inserted_obj)
+    assert store_obj.get_latest_vplan_for_decision(decision_obj.decision_plan_id_int).status_str == "completed"
 
 
-def test_abandonment_after_insert_wins_over_later_claim(capsule_cycle):
+def test_daily_close_after_insert_wins_over_later_claim(capsule_cycle):
     store_obj, decision_obj, candidate_obj = capsule_cycle
     inserted_obj = store_obj.insert_vplan(candidate_obj)
-    assert store_obj.abandon_unsubmitted_mr_capsule_cycle(decision_obj.decision_plan_id_int, "blocked")
+    assert _complete_daily_cycle(store_obj, decision_obj, inserted_obj)
     assert not store_obj.claim_vplan_for_submission(inserted_obj.vplan_id_int)
-    assert store_obj.get_latest_vplan_for_decision(decision_obj.decision_plan_id_int).status_str == "blocked"
+    assert store_obj.get_latest_vplan_for_decision(decision_obj.decision_plan_id_int).status_str == "completed"
 
 
 @pytest.mark.parametrize("status_str,abandoned_bool", [
-    ("planned", False), ("blocked", False), ("expired", False), ("completed", False), ("vplan_ready", True),
+    ("planned", False), ("blocked", False), ("expired", False), ("completed", False),
+    ("completed_with_exceptions", False), ("vplan_ready", True),
 ])
 def test_claim_refuses_ready_vplan_with_inactive_or_abandoned_parent(capsule_cycle, status_str, abandoned_bool):
     store_obj, decision_obj, candidate_obj = capsule_cycle

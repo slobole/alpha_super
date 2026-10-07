@@ -112,6 +112,36 @@ class IBKRSocketClient:
             raise last_exception_obj
         raise RuntimeError("IBKRSocketClient.connect() exhausted all hosts without an exception.")
 
+    @contextmanager
+    def daily_connection(self, client_id_int: int | None = None):
+        """Fresh DAILY queries without execution history or client-zero binding."""
+        from ib_async import StartupFetchNONE
+
+        client_id_int = self.client_id_int if client_id_int is None else client_id_int
+        if isinstance(client_id_int, bool) or not isinstance(client_id_int, int) or client_id_int <= 0:
+            raise ValueError("DAILY account operations require a positive API client ID; client zero auto-binds manual orders.")
+        for host_str in self._build_connect_host_str_list():
+            ib_obj = IB()
+            try:
+                ib_obj.connect(host_str, self.port_int, clientId=client_id_int,
+                    timeout=self.timeout_seconds_float, readonly=True,
+                    raiseSyncErrors=True, fetchFields=StartupFetchNONE)
+            except Exception as exception_obj:
+                if ib_obj.isConnected():
+                    ib_obj.disconnect()
+                if self._can_retry_connect_with_alternate_loopback_host(
+                        attempted_host_str=host_str, exception_obj=exception_obj):
+                    continue
+                raise
+            # Body failures cannot trigger the host fallback or repeat cancellation.
+            try:
+                yield ib_obj
+            finally:
+                if ib_obj.isConnected():
+                    ib_obj.disconnect()
+            return
+        raise RuntimeError("DAILY broker connection exhausted configured hosts.")
+
     def _build_connect_host_str_list(self) -> list[str]:
         normalized_host_str = str(self.host_str).strip()
         if normalized_host_str not in LOOPBACK_HOST_ALIAS_TUPLE:

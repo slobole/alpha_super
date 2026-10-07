@@ -29,6 +29,7 @@ This file is the short operator path. Everything else lives here:
 
 - [LIVE_RUNBOOK.md](docs/live/LIVE_RUNBOOK.md) — the full operator guide: Norgate setup, command semantics, manual vs automatic flow, recovery.
 - [LIVE_TECHNICAL_REFERENCE.md](docs/live/LIVE_TECHNICAL_REFERENCE.md) — implementation truth.
+- [CORE5/capsule daily execution rules](docs/live/DAILY_EXECUTION_RULES_20261007.md) — replay, opening deadlines, per-asset completion and after-close settlement; supersedes the former recovery/resume workflow.
 - [COMMANDS.md](COMMANDS.md) — one-line cheat sheet for every live command.
 
 If this deployment uses the private Norgate artifact server: start it on the Norgate node (`.\scripts\start_norgate_server.cmd`), then on each client VPS run `uv run python scripts\doctor_norgate_client.py` before starting `serve`. Full walkthrough: [LIVE_RUNBOOK.md](docs/live/LIVE_RUNBOOK.md#client-norgate-snapshot-check).

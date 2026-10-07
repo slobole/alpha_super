@@ -2,7 +2,6 @@
 from dataclasses import replace
 from datetime import datetime, timedelta
 import json
-import sqlite3
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -13,11 +12,13 @@ from alpha.live.order_clerk import StubBrokerAdapter
 from alpha.live.runner import build_decision_plans, build_vplans, expire_stale_decision_plans, post_execution_reconcile, submit_ready_vplans
 from alpha.live.state_store_v2 import LiveStateStore
 from test_live_runner import _install_partial_submit_ack_stub, _install_pending_submit_truth_stub
+from daily_broker_fakes import install_daily_broker_stub
 
 
 MARKET_TIMEZONE_OBJ = ZoneInfo("America/New_York")
 SUBMIT_TIMESTAMP_TS = datetime(2024, 2, 1, 9, 22, tzinfo=MARKET_TIMEZONE_OBJ)
 RECONCILE_TIMESTAMP_TS = datetime(2024, 2, 1, 9, 35, tzinfo=MARKET_TIMEZONE_OBJ)
+CLOSE_TIMESTAMP_TS = datetime(2024, 2, 1, 16, 0, tzinfo=MARKET_TIMEZONE_OBJ)
 
 
 @pytest.fixture(params=["dv2_vix_gated", "hpi_vote_vix_gated"])
@@ -58,6 +59,7 @@ def capsule_case(request, tmp_path, monkeypatch):
         entry_priority_list=["AAPL"], target_share_map_dict={"BIL": 880.0},
     ))
     broker_adapter_obj = StubBrokerAdapter()
+    install_daily_broker_stub(broker_adapter_obj)
     broker_adapter_obj.seed_account_snapshot(
         account_route_str="DU_TEST", cash_float=1000.0, total_value_float=100500.0,
         position_amount_map=base_position_dict, snapshot_timestamp_ts=SUBMIT_TIMESTAMP_TS, session_mode_str="paper",
@@ -118,28 +120,28 @@ def test_capsule_cycle_preserves_stocks_and_never_replays_submitted_batch(
     broker_adapter_obj.seed_account_snapshot(
         account_route_str="DU_TEST", cash_float=1000.0 + bil_filled_float * 100.0 - 10000.0,
         total_value_float=100500.0, position_amount_map=actual_position_dict,
-        snapshot_timestamp_ts=RECONCILE_TIMESTAMP_TS, session_mode_str="paper",
+        snapshot_timestamp_ts=CLOSE_TIMESTAMP_TS, session_mode_str="paper",
     )
     reconcile_result_dict = post_execution_reconcile(
-        restarted_store_obj, broker_adapter_obj, RECONCILE_TIMESTAMP_TS, **runner_kwarg_dict,
+        restarted_store_obj, broker_adapter_obj, CLOSE_TIMESTAMP_TS, **runner_kwarg_dict,
     )
     latest_vplan_obj = restarted_store_obj.get_latest_vplan_for_pod(release_obj.pod_id_str)
     latest_decision_obj = restarted_store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str)
     successful_bool = outcome_str == "filled"
-    assert reconcile_result_dict["completed_vplan_count_int"] == int(successful_bool)
-    assert latest_vplan_obj.status_str == ("completed" if successful_bool else "submitted")
-    assert latest_decision_obj.status_str == ("completed" if successful_bool else "submitted")
+    assert reconcile_result_dict["completed_vplan_count_int"] == 1
+    assert latest_vplan_obj.status_str == ("completed" if successful_bool else "completed_with_exceptions")
+    assert latest_decision_obj.status_str == latest_vplan_obj.status_str
     state_obj = restarted_store_obj.get_pod_state(release_obj.pod_id_str)
     if successful_bool:
         assert state_obj.position_amount_map == actual_position_dict
         assert state_obj.snapshot_stage_str == "post_execution"
     else:
-        assert state_obj.position_amount_map == actual_position_dict  # broker truth is saved even when the cycle stays unresolved
+        assert state_obj.position_amount_map == actual_position_dict
         assert latest_vplan_obj.target_share_map["BIL"] - actual_position_dict["BIL"] == -(100.0 - bil_filled_float)
     assert len(submitted_batch_list) == 1
 
 
-def test_missing_bil_ack_stays_unresolved_after_restart(capsule_case):
+def test_missing_bil_ack_stays_pending_intraday_then_closes_after_restart(capsule_case):
     state_store_obj, broker_adapter_obj, release_obj, vplan_obj, runner_kwarg_dict, tmp_path = capsule_case
     _install_partial_submit_ack_stub(broker_adapter_obj, {"AAPL"})
     submit_result_dict = submit_ready_vplans(
@@ -164,9 +166,13 @@ def test_missing_bil_ack_stays_unresolved_after_restart(capsule_case):
     assert reconcile_result_dict["completed_vplan_count_int"] == 0
     assert restarted_store_obj.get_latest_vplan_for_pod(release_obj.pod_id_str).status_str == "submitted"
     assert restarted_store_obj.get_pod_state(release_obj.pod_id_str).position_amount_map == {"BIL": 980.0, "MSFT": 5.0}
+    snapshot_obj = broker_adapter_obj.get_account_snapshot(release_obj.account_route_str)
+    broker_adapter_obj._snapshot_map[release_obj.account_route_str] = replace(snapshot_obj, snapshot_timestamp_ts=CLOSE_TIMESTAMP_TS)
+    assert post_execution_reconcile(restarted_store_obj, broker_adapter_obj, CLOSE_TIMESTAMP_TS, **runner_kwarg_dict)["completed_vplan_count_int"] == 1
+    assert restarted_store_obj.get_latest_vplan_for_pod(release_obj.pod_id_str).status_str == "completed_with_exceptions"
 
 
-def test_matching_positions_do_not_replace_missing_order_and_fill_evidence(capsule_case):
+def test_matching_positions_close_after_session_without_order_and_fill_evidence(capsule_case):
     state_store_obj, broker_adapter_obj, release_obj, vplan_obj, runner_kwarg_dict, tmp_path = capsule_case
     _install_partial_submit_ack_stub(broker_adapter_obj, {"AAPL"})
     submit_ready_vplans(
@@ -185,6 +191,10 @@ def test_matching_positions_do_not_replace_missing_order_and_fill_evidence(capsu
     )
     assert reconcile_result_dict["completed_vplan_count_int"] == 0
     assert restarted_store_obj.get_latest_vplan_for_pod(release_obj.pod_id_str).status_str == "submitted"
+    snapshot_obj = broker_adapter_obj.get_account_snapshot(release_obj.account_route_str)
+    broker_adapter_obj._snapshot_map[release_obj.account_route_str] = replace(snapshot_obj, snapshot_timestamp_ts=CLOSE_TIMESTAMP_TS)
+    assert post_execution_reconcile(restarted_store_obj, broker_adapter_obj, CLOSE_TIMESTAMP_TS, **runner_kwarg_dict)["completed_vplan_count_int"] == 1
+    assert restarted_store_obj.get_latest_vplan_for_pod(release_obj.pod_id_str).status_str == "completed"
 
 
 def test_missing_ack_recovers_from_matching_broker_order_and_fill_evidence(capsule_case):
@@ -213,11 +223,11 @@ def test_missing_ack_recovers_from_matching_broker_order_and_fill_evidence(capsu
     actual_position_dict = {"AAPL": 80.0, "BIL": 880.0, "MSFT": 5.0}
     broker_adapter_obj.seed_account_snapshot(
         account_route_str="DU_TEST", cash_float=1000.0, total_value_float=100500.0,
-        position_amount_map=actual_position_dict, snapshot_timestamp_ts=RECONCILE_TIMESTAMP_TS, session_mode_str="paper",
+        position_amount_map=actual_position_dict, snapshot_timestamp_ts=CLOSE_TIMESTAMP_TS, session_mode_str="paper",
     )
     restarted_store_obj = LiveStateStore(str(tmp_path / "recovery.sqlite3"))
     reconcile_result_dict = post_execution_reconcile(
-        restarted_store_obj, broker_adapter_obj, RECONCILE_TIMESTAMP_TS, **runner_kwarg_dict,
+        restarted_store_obj, broker_adapter_obj, CLOSE_TIMESTAMP_TS, **runner_kwarg_dict,
     )
     assert reconcile_result_dict["completed_vplan_count_int"] == 1
     assert restarted_store_obj.get_latest_vplan_for_pod(release_obj.pod_id_str).status_str == "completed"
@@ -373,20 +383,19 @@ def test_capsule_completion_rolls_back_both_statuses_and_recovers_after_restart(
     broker_adapter_obj.seed_account_snapshot(
         account_route_str="DU_TEST", cash_float=1000.0, total_value_float=100500.0,
         position_amount_map={"AAPL": 80.0, "BIL": 880.0, "MSFT": 5.0},
-        snapshot_timestamp_ts=RECONCILE_TIMESTAMP_TS, session_mode_str="paper",
+        snapshot_timestamp_ts=CLOSE_TIMESTAMP_TS, session_mode_str="paper",
     )
     with state_store_obj._connect() as connection_obj:
         connection_obj.execute("""CREATE TRIGGER fail_second_completion_write
             BEFORE UPDATE OF status_str ON decision_plan WHEN NEW.status_str = 'completed'
             BEGIN SELECT RAISE(ABORT, 'simulated completion crash'); END""")
-    with pytest.raises(sqlite3.IntegrityError, match="simulated completion crash"):
-        post_execution_reconcile(state_store_obj, broker_adapter_obj, RECONCILE_TIMESTAMP_TS, **runner_kwarg_dict)
+    assert post_execution_reconcile(state_store_obj, broker_adapter_obj, CLOSE_TIMESTAMP_TS, **runner_kwarg_dict)["completed_vplan_count_int"] == 0
     restarted_store_obj = LiveStateStore(str(tmp_path / "recovery.sqlite3"))
     assert restarted_store_obj.get_latest_vplan_for_pod(release_obj.pod_id_str).status_str == "submitted"
     assert restarted_store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str).status_str == "submitted"
     with restarted_store_obj._connect() as connection_obj:
         connection_obj.execute("DROP TRIGGER fail_second_completion_write")
-    result_dict = post_execution_reconcile(restarted_store_obj, broker_adapter_obj, RECONCILE_TIMESTAMP_TS, **runner_kwarg_dict)
+    result_dict = post_execution_reconcile(restarted_store_obj, broker_adapter_obj, CLOSE_TIMESTAMP_TS, **runner_kwarg_dict)
     assert result_dict["completed_vplan_count_int"] == 1
     assert restarted_store_obj.get_latest_vplan_for_pod(release_obj.pod_id_str).status_str == "completed"
     assert restarted_store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str).status_str == "completed"
@@ -394,7 +403,7 @@ def test_capsule_completion_rolls_back_both_statuses_and_recovers_after_restart(
 
 
 @pytest.mark.parametrize("terminal_path_str", ["expiry", "pre_submit_block"])
-def test_provably_unsubmitted_cycle_can_advance_next_day_without_committing_proposed_state(
+def test_unsubmitted_cycle_closes_from_actual_holdings_before_next_day(
     capsule_case, terminal_path_str, monkeypatch,
 ):
     state_store_obj, broker_adapter_obj, release_obj, vplan_obj, runner_kwarg_dict, tmp_path = capsule_case
@@ -415,10 +424,16 @@ def test_provably_unsubmitted_cycle_can_advance_next_day_without_committing_prop
                                          vplan_id_int=vplan_obj.vplan_id_int, **runner_kwarg_dict)
         assert result_dict["submitted_vplan_count_int"] == 0
     abandoned_plan_obj = state_store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str)
-    assert abandoned_plan_obj.snapshot_metadata_dict["mr_capsule_unsubmitted_cycle_abandoned_bool"] is True
+    assert abandoned_plan_obj.status_str in {"blocked", "expired"}
     assert state_store_obj.get_pod_state(release_obj.pod_id_str).strategy_state_dict == original_state_obj.strategy_state_dict
     assert not state_store_obj.claim_vplan_for_submission(vplan_obj.vplan_id_int)
-    state_store_obj.upsert_pod_state(replace(original_state_obj, updated_timestamp_ts=next_close_ts, snapshot_stage_str="eod"))
+    snapshot_obj = broker_adapter_obj.get_account_snapshot(release_obj.account_route_str)
+    broker_adapter_obj._snapshot_map[release_obj.account_route_str] = replace(snapshot_obj,
+        snapshot_timestamp_ts=next_close_ts, open_order_id_list=[])
+    assert post_execution_reconcile(state_store_obj, broker_adapter_obj, next_close_ts, **runner_kwarg_dict)["completed_vplan_count_int"] == 1
+    finished_state_obj = state_store_obj.get_pod_state(release_obj.pod_id_str)
+    assert finished_state_obj.position_amount_map == original_state_obj.position_amount_map
+    state_store_obj.upsert_pod_state(replace(finished_state_obj, updated_timestamp_ts=next_close_ts, snapshot_stage_str="eod"))
     builder_state_list = []
 
     def next_decision(pod_state_obj, **_kwarg_dict):
@@ -438,13 +453,13 @@ def test_provably_unsubmitted_cycle_can_advance_next_day_without_committing_prop
     result_dict = build_decision_plans(state_store_obj, next_decision_ts, str(tmp_path),
                                      auto_sync_norgate_snapshots_bool=False, **runner_kwarg_dict)
     assert result_dict["created_decision_plan_count_int"] == 1
-    assert builder_state_list == [original_state_obj.strategy_state_dict]
+    assert builder_state_list == [finished_state_obj.strategy_state_dict]
 
 
 def test_claimed_without_ack_cannot_be_abandoned_or_expired_by_manual_submit(capsule_case):
     state_store_obj, broker_adapter_obj, release_obj, vplan_obj, runner_kwarg_dict, tmp_path = capsule_case
     assert state_store_obj.claim_vplan_for_submission(vplan_obj.vplan_id_int)
-    assert not state_store_obj.abandon_unsubmitted_mr_capsule_cycle(vplan_obj.decision_plan_id_int, "expired")
+    assert not state_store_obj.block_unsubmitted_daily_cycle(vplan_obj.decision_plan_id_int, "expired")
     after_window_ts = datetime(2024, 2, 1, 16, 10, tzinfo=MARKET_TIMEZONE_OBJ)
     expire_result_dict = expire_stale_decision_plans(state_store_obj, after_window_ts, str(tmp_path), **runner_kwarg_dict)
     assert expire_result_dict["expired_decision_plan_count_int"] == 0
@@ -491,7 +506,7 @@ def test_capsule_vplan_validation_error_does_not_starve_another_due_plan(capsule
     assert result_dict["blocked_action_count_int"] == 1
     bad_plan_obj = state_store_obj.get_latest_decision_plan_for_pod("bad_capsule")
     assert bad_plan_obj.status_str == "blocked"
-    assert bad_plan_obj.snapshot_metadata_dict["mr_capsule_unsubmitted_cycle_abandoned_bool"] is True
+    assert "daily_execution_result_dict" not in bad_plan_obj.snapshot_metadata_dict
     assert state_store_obj.get_latest_vplan_for_pod("bad_capsule") is None
     assert state_store_obj.get_latest_vplan_for_pod("healthy_parent").status_str == "ready"
 
@@ -551,25 +566,20 @@ def test_capsule_no_order_cycle_completes_through_normal_reconciliation(capsule_
     # Reconcile needs a fresh broker observation even when the frozen plan has no orders.
     broker_adapter_obj.seed_account_snapshot(
         account_route_str="DU_NO_ORDER", cash_float=1000.0, total_value_float=100500.0,
-        position_amount_map=prior_state_obj.position_amount_map, snapshot_timestamp_ts=RECONCILE_TIMESTAMP_TS, session_mode_str="paper")
-    result_dict = post_execution_reconcile(state_store_obj, broker_adapter_obj, RECONCILE_TIMESTAMP_TS, **runner_kwarg_dict)
+        position_amount_map=prior_state_obj.position_amount_map, snapshot_timestamp_ts=CLOSE_TIMESTAMP_TS, session_mode_str="paper")
+    result_dict = post_execution_reconcile(state_store_obj, broker_adapter_obj, CLOSE_TIMESTAMP_TS, **runner_kwarg_dict)
     assert result_dict["completed_vplan_count_int"] == 1
     assert state_store_obj.get_latest_decision_plan_for_pod("no_order").status_str == "completed"
     assert state_store_obj.get_pod_state("no_order").position_amount_map == prior_state_obj.position_amount_map
 
 
-@pytest.mark.parametrize("terminal_str", ["abandoned", "completed"])
+@pytest.mark.parametrize("terminal_str", ["completed_with_exceptions", "completed"])
 def test_finished_capsule_cycle_is_never_rebuilt_for_the_same_signal_session(capsule_case, monkeypatch, terminal_str):
     """A rerun on the same evening must not decide on Close_T again: T's signal would be traded twice."""
     state_store_obj, _, release_obj, vplan_obj, runner_kwarg_dict, tmp_path = capsule_case
-    if terminal_str == "abandoned":
-        assert state_store_obj.abandon_unsubmitted_mr_capsule_cycle(vplan_obj.decision_plan_id_int, "blocked")
-    else:
-        with state_store_obj._connect() as connection_obj:
-            connection_obj.execute("UPDATE vplan SET status_str = 'completed' WHERE vplan_id_int = ?", (vplan_obj.vplan_id_int,))
-            connection_obj.execute(
-                "UPDATE decision_plan SET status_str = 'completed' WHERE decision_plan_id_int = ?", (vplan_obj.decision_plan_id_int,),
-            )
+    with state_store_obj._connect() as connection_obj:
+        connection_obj.execute("UPDATE vplan SET status_str = ? WHERE vplan_id_int = ?", (terminal_str, vplan_obj.vplan_id_int))
+        connection_obj.execute("UPDATE decision_plan SET status_str = ? WHERE decision_plan_id_int = ?", (terminal_str, vplan_obj.decision_plan_id_int))
     builder_call_list = []
     monkeypatch.setattr(runner_module, "_load_release_list_validate_and_sync", lambda *_args, **_kwargs: [release_obj])
     monkeypatch.setattr(runner_module.scheduler_utils, "select_due_release_list", lambda release_list, _as_of_ts: release_list)
@@ -582,4 +592,4 @@ def test_finished_capsule_cycle_is_never_rebuilt_for_the_same_signal_session(cap
     )
     assert builder_call_list == []
     assert result_dict["created_decision_plan_count_int"] == 0 and result_dict["skipped_decision_plan_count_int"] == 1
-    assert result_dict["reason_count_map_dict"].get("mr_capsule_signal_cycle_already_completed") == 1
+    assert result_dict["reason_count_map_dict"].get("daily_signal_cycle_already_completed") == 1

@@ -13,6 +13,7 @@ import pytest
 from alpha.live import core5_adapter as adapter_module, runner as runner_module, scheduler_utils
 from alpha.live import scheduler_service as scheduler_module, dashboard as dashboard_module
 from alpha.live.execution_engine import build_vplan, build_broker_order_request_list_from_vplan
+from alpha.live.daily_broker import DailyExecutionSnapshot
 from alpha.live.models import BrokerSnapshot, LivePriceSnapshot, LiveRelease, PodState
 from alpha.live.order_clerk import StubBrokerAdapter
 from alpha.live.release_manifest import validate_release_manifest
@@ -70,6 +71,11 @@ def _build(release_obj, price_df, date_str, state_obj):
     })
 
 
+def _committed_state_dict(decision_obj):
+    return {**decision_obj.strategy_state_dict,
+        "core5_execution_receipt_dict": decision_obj.snapshot_metadata_dict["core5_candidate_execution_receipt_dict"]}
+
+
 def _controlled_signals(monkeypatch, price_df, change_dict=None):
     # These fixtures isolate the state-machine branches. Full feature parity is
     # tested separately against the actual research engine below.
@@ -81,6 +87,12 @@ def _controlled_signals(monkeypatch, price_df, change_dict=None):
         signal_df[(namespace_str, "annualized_volatility_ser")] = .231
     for (date_str, asset_str, field_str), value_float in (change_dict or {}).items():
         signal_df.loc[pd.Timestamp(date_str), (f"ADAPTIVE_TR_{asset_str}", field_str)] = value_float
+    long_state_df = signal_df.loc[:, [(f"ADAPTIVE_TR_{asset_str}", "long_state_ser")
+        for asset_str in core5_module.RISK_ASSET_TUPLE]]
+    signal_df[(core5_module.PORTFOLIO_NAMESPACE_STR, core5_module.LONG_STATE_CHANGED_FIELD_STR)] = (
+        long_state_df.diff().abs().fillna(0.0).gt(0.0).any(axis=1))
+    signal_df[(core5_module.PORTFOLIO_NAMESPACE_STR, core5_module.MONTH_END_REBALANCE_FIELD_STR)] = (
+        core5_module._month_end_rebalance_ser(signal_df.index))
     monkeypatch.setattr(core5_module.AdaptiveMacroCore5Strategy, "compute_signals", lambda self, pricing_data_df: signal_df.loc[pricing_data_df.index].copy())
     return signal_df
 
@@ -127,7 +139,7 @@ def test_unchanged_day_holds_drifted_positions_and_volatility(release_obj, price
     changed_price_df.loc["2026-09-14", ("DBC", "Close")] *= 1.5
     signal_df.loc["2026-09-14", ("DBC", "Close")] = changed_price_df.loc["2026-09-14", ("DBC", "Close")]
     signal_df.loc["2026-09-14", ("ADAPTIVE_TR_DBC", "annualized_volatility_ser")] = 1.0
-    second_obj = _build(release_obj, changed_price_df, "2026-09-14", _state(release_obj, "2026-09-14", position_dict, first_obj.strategy_state_dict, 25_000))
+    second_obj = _build(release_obj, changed_price_df, "2026-09-14", _state(release_obj, "2026-09-14", position_dict, _committed_state_dict(first_obj), 25_000))
     assert not second_obj.snapshot_metadata_dict["rebalance_bool"]
     assert second_obj.snapshot_metadata_dict["no_order_bool"]
     assert second_obj.snapshot_metadata_dict["fixed_target_share_map_dict"] == position_dict
@@ -142,9 +154,9 @@ def test_dbc_equality_does_not_create_a_new_short_trigger(release_obj, price_df,
         ("2026-09-14", "DBC", "short_state_ser"): 1.0,
     })
     first_obj = _build(release_obj, price_df, "2026-09-10", _state(release_obj, "2026-09-10"))
-    second_obj = _build(release_obj, price_df, "2026-09-11", _state(release_obj, "2026-09-11", first_obj.snapshot_metadata_dict["fixed_target_share_map_dict"], first_obj.strategy_state_dict))
+    second_obj = _build(release_obj, price_df, "2026-09-11", _state(release_obj, "2026-09-11", first_obj.snapshot_metadata_dict["fixed_target_share_map_dict"], _committed_state_dict(first_obj)))
     assert second_obj.snapshot_metadata_dict["fixed_target_share_map_dict"]["DBC"] == 0
-    third_obj = _build(release_obj, price_df, "2026-09-14", _state(release_obj, "2026-09-14", second_obj.snapshot_metadata_dict["fixed_target_share_map_dict"], second_obj.strategy_state_dict))
+    third_obj = _build(release_obj, price_df, "2026-09-14", _state(release_obj, "2026-09-14", second_obj.snapshot_metadata_dict["fixed_target_share_map_dict"], _committed_state_dict(second_obj)))
     assert not third_obj.snapshot_metadata_dict["rebalance_bool"]
     assert third_obj.snapshot_metadata_dict["fixed_target_share_map_dict"]["DBC"] == 0
 
@@ -153,32 +165,32 @@ def test_dbc_equality_does_not_create_a_new_short_trigger(release_obj, price_df,
 def test_month_end_uses_exchange_calendar_not_terminal_price_row(release_obj, price_df, monkeypatch, signal_date_str, previous_date_str, month_end_bool):
     _controlled_signals(monkeypatch, price_df)
     first_obj = _build(release_obj, price_df, previous_date_str, _state(release_obj, previous_date_str))
-    second_obj = _build(release_obj, price_df.loc[:signal_date_str], signal_date_str, _state(release_obj, signal_date_str, first_obj.snapshot_metadata_dict["fixed_target_share_map_dict"], first_obj.strategy_state_dict))
+    second_obj = _build(release_obj, price_df.loc[:signal_date_str], signal_date_str, _state(release_obj, signal_date_str, first_obj.snapshot_metadata_dict["fixed_target_share_map_dict"], _committed_state_dict(first_obj)))
     assert second_obj.snapshot_metadata_dict["rebalance_bool"] == month_end_bool
     assert second_obj.snapshot_metadata_dict["month_end_bool"] == month_end_bool
 
 
-@pytest.mark.parametrize("mutation_str", ["stale", "bootstrap", "wrong_account", "future", "missing_state", "fractional", "unknown_asset"])
+@pytest.mark.parametrize("mutation_str", ["stale", "bootstrap", "wrong_account", "future", "fractional", "unknown_asset"])
 def test_invalid_account_state_blocks_decision(release_obj, price_df, mutation_str):
     state_obj = _state(release_obj, "2026-09-11")
     if mutation_str == "stale": state_obj = replace(state_obj, updated_timestamp_ts=_time("2026-09-10", 17))
     elif mutation_str == "bootstrap": state_obj = replace(state_obj, snapshot_stage_str="unknown")
     elif mutation_str == "wrong_account": state_obj = replace(state_obj, account_route_str="DU_OTHER")
     elif mutation_str == "future": state_obj = replace(state_obj, updated_timestamp_ts=_time("2026-09-14", 17))
-    elif mutation_str == "missing_state": state_obj = replace(state_obj, position_amount_map={"SPY": 2})
     elif mutation_str == "fractional": state_obj = replace(state_obj, position_amount_map={"DBC": -.5})
     else: state_obj = replace(state_obj, position_amount_map={"MSFT": 2})
     with pytest.raises(ValueError): _build(release_obj, price_df, "2026-09-11", state_obj)
 
 
-def test_skipped_session_and_revised_previous_state_block(release_obj, price_df, monkeypatch):
+def test_skipped_session_and_revised_previous_state_warn_without_blocking(release_obj, price_df, monkeypatch):
     _controlled_signals(monkeypatch, price_df)
     first_obj = _build(release_obj, price_df, "2026-09-10", _state(release_obj, "2026-09-10"))
-    with pytest.raises(ValueError, match="missed"):
-        _build(release_obj, price_df, "2026-09-14", _state(release_obj, "2026-09-14", strategy_state_dict=first_obj.strategy_state_dict))
+    skipped_obj = _build(release_obj, price_df, "2026-09-14", _state(release_obj, "2026-09-14", strategy_state_dict=first_obj.strategy_state_dict))
+    assert "core5_strategy_state_cache_gap" in skipped_obj.snapshot_metadata_dict["core5_warning_code_list"]
     first_obj.strategy_state_dict["last_long_state_map_dict"]["DBC"] = 0
-    with pytest.raises(ValueError, match="historical revision"):
-        _build(release_obj, price_df, "2026-09-11", _state(release_obj, "2026-09-11", strategy_state_dict=first_obj.strategy_state_dict))
+    revised_obj = _build(release_obj, price_df, "2026-09-11", _state(release_obj, "2026-09-11", strategy_state_dict=first_obj.strategy_state_dict))
+    assert revised_obj.snapshot_metadata_dict["core5_data_revision_warning_bool"]
+    assert revised_obj.strategy_state_dict["last_long_state_map_dict"]["DBC"] == 1
 
 
 @pytest.mark.parametrize("opening_short_bool", [True, False])
@@ -191,7 +203,7 @@ def test_sign_flip_preserves_two_legs_after_sql_restart(release_obj, price_df, m
     })
     first_obj = _build(release_obj, price_df, "2026-09-10", _state(release_obj, "2026-09-10"))
     prior_position_dict = first_obj.snapshot_metadata_dict["fixed_target_share_map_dict"]
-    state_obj = _state(release_obj, "2026-09-11", prior_position_dict, first_obj.strategy_state_dict)
+    state_obj = _state(release_obj, "2026-09-11", prior_position_dict, _committed_state_dict(first_obj))
     decision_obj = _build(release_obj, price_df, "2026-09-11", state_obj)
     store_obj = LiveStateStore(str(tmp_path / "core5.sqlite3"))
     store_obj.upsert_release(release_obj)
@@ -234,9 +246,13 @@ def _store_and_broker(tmp_path, release_obj, state_obj):
     return store_obj, broker_obj
 
 
-def test_runner_full_cycle_commits_state_once_after_reconcile(release_obj, price_df, tmp_path):
+def test_runner_full_cycle_commits_state_once_after_reconcile(release_obj, price_df, tmp_path, monkeypatch):
     state_obj = _state(release_obj, "2026-09-11")
     store_obj, broker_obj = _store_and_broker(tmp_path, release_obj, state_obj)
+    def fresh_daily_fn(account_route_str):
+        snapshot_obj = broker_obj.get_account_snapshot(account_route_str)
+        return DailyExecutionSnapshot(snapshot_obj, [], snapshot_obj.snapshot_timestamp_ts, snapshot_obj.snapshot_timestamp_ts)
+    monkeypatch.setattr(broker_obj, "get_daily_execution_snapshot", fresh_daily_fn)
     decision_obj = store_obj.insert_decision_plan(_build(release_obj, price_df, "2026-09-11", state_obj))
     detail_dict = runner_module.build_vplans(store_obj, broker_obj, decision_obj.submission_timestamp_ts, "paper", log_path_str=str(tmp_path / "ops.log"), trace_enabled_bool=False)
     assert detail_dict["created_vplan_count_int"] == 1
@@ -252,11 +268,19 @@ def test_runner_full_cycle_commits_state_once_after_reconcile(release_obj, price
         snapshot_timestamp_ts=decision_obj.target_execution_timestamp_ts + timedelta(minutes=10))
     detail_dict = runner_module.post_execution_reconcile(restarted_store_obj, broker_obj,
         decision_obj.target_execution_timestamp_ts + timedelta(minutes=10), "paper", log_path_str=str(tmp_path / "ops.log"), trace_enabled_bool=False)
+    assert detail_dict["completed_vplan_count_int"] == 0
+    assert restarted_store_obj.get_pod_state(release_obj.pod_id_str).strategy_state_dict == {}
+    close_ts = _time("2026-09-14", 16)
+    broker_obj._snapshot_map[release_obj.account_route_str] = replace(
+        broker_obj._snapshot_map[release_obj.account_route_str], snapshot_timestamp_ts=close_ts)
+    detail_dict = runner_module.post_execution_reconcile(restarted_store_obj, broker_obj, close_ts,
+        "paper", log_path_str=str(tmp_path / "ops.log"), trace_enabled_bool=False)
     assert detail_dict["completed_vplan_count_int"] == 1
-    assert restarted_store_obj.get_pod_state(release_obj.pod_id_str).strategy_state_dict == decision_obj.strategy_state_dict
+    assert restarted_store_obj.get_pod_state(release_obj.pod_id_str).strategy_state_dict == _committed_state_dict(decision_obj)
     assert restarted_store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str).status_str == "completed"
     before_history_int = len(restarted_store_obj.get_pod_state_history_row_dict_list(release_obj.pod_id_str))
-    restarted_store_obj.complete_core5_cycle(decision_obj.decision_plan_id_int, vplan_obj.vplan_id_int)
+    restarted_store_obj.complete_daily_cycle(decision_obj.decision_plan_id_int, vplan_obj.vplan_id_int,
+        broker_obj._snapshot_map[release_obj.account_route_str], "completed", [], close_ts)
     assert len(restarted_store_obj.get_pod_state_history_row_dict_list(release_obj.pod_id_str)) == before_history_int
 
 
@@ -276,60 +300,66 @@ def test_runner_blocks_account_change_before_sizing_or_submit(release_obj, price
             vplan_id_int=vplan_obj.vplan_id_int, log_path_str=str(tmp_path / "ops.log"), trace_enabled_bool=False)
         assert detail_dict["submitted_vplan_count_int"] == 0
     assert not broker_obj.submitted_order_request_list
-    assert store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str).status_str == "blocked"
+    assert store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str).status_str == ("blocked" if when_str == "vplan" else "submitted")
+    assert store_obj.get_pending_daily_decision_plan_list()
 
 
 def _no_order_cycle(release_obj, price_df, monkeypatch, tmp_path):
     _controlled_signals(monkeypatch, price_df)
     prior_obj = _build(release_obj, price_df, "2026-09-10", _state(release_obj, "2026-09-10"))
-    state_obj = _state(release_obj, "2026-09-11", prior_obj.snapshot_metadata_dict["fixed_target_share_map_dict"], prior_obj.strategy_state_dict)
+    state_obj = _state(release_obj, "2026-09-11", prior_obj.snapshot_metadata_dict["fixed_target_share_map_dict"], _committed_state_dict(prior_obj))
     store_obj, _ = _store_and_broker(tmp_path, release_obj, state_obj)
     decision_obj = store_obj.insert_decision_plan(_build(release_obj, price_df, "2026-09-11", state_obj))
     assert decision_obj.snapshot_metadata_dict["no_order_bool"]
     return store_obj, decision_obj, state_obj
 
 
-def test_no_order_commit_is_atomic_and_preserves_eod_timestamp(release_obj, price_df, monkeypatch, tmp_path):
+def test_no_order_commit_is_atomic_and_uses_refreshed_close_holdings(release_obj, price_df, monkeypatch, tmp_path):
     store_obj, decision_obj, state_obj = _no_order_cycle(release_obj, price_df, monkeypatch, tmp_path)
+    close_ts = _time("2026-09-14", 16)
+    snapshot_obj = BrokerSnapshot(release_obj.account_route_str, close_ts, state_obj.cash_float, 100_000.0,
+        position_amount_map=state_obj.position_amount_map, net_liq_float=100_000.0)
     with store_obj._connect() as connection_obj:
         connection_obj.execute("CREATE TRIGGER test_commit_failure BEFORE UPDATE OF status_str ON decision_plan BEGIN SELECT RAISE(ABORT, 'injected crash'); END")
     with pytest.raises(sqlite3.IntegrityError, match="injected crash"):
-        store_obj.complete_core5_cycle(decision_obj.decision_plan_id_int)
+        store_obj.complete_daily_cycle(decision_obj.decision_plan_id_int, None, snapshot_obj, "completed", [], close_ts)
     assert store_obj.get_pod_state(release_obj.pod_id_str).strategy_state_dict == state_obj.strategy_state_dict
     assert store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str).status_str == "planned"
     with store_obj._connect() as connection_obj:
         connection_obj.execute("DROP TRIGGER test_commit_failure")
-    store_obj.complete_core5_cycle(decision_obj.decision_plan_id_int)
+    store_obj.complete_daily_cycle(decision_obj.decision_plan_id_int, None, snapshot_obj, "completed", [], close_ts)
     saved_state_obj = store_obj.get_pod_state(release_obj.pod_id_str)
-    assert saved_state_obj.strategy_state_dict == decision_obj.strategy_state_dict
-    assert saved_state_obj.updated_timestamp_ts == state_obj.updated_timestamp_ts
-    assert saved_state_obj.snapshot_stage_str == "eod"
+    assert saved_state_obj.strategy_state_dict == _committed_state_dict(decision_obj)
+    assert saved_state_obj.updated_timestamp_ts == close_ts
+    assert saved_state_obj.snapshot_stage_str == "post_execution"
     assert store_obj.get_latest_vplan_for_pod(release_obj.pod_id_str) is None
 
 
-def test_scheduler_recovers_no_order_after_open_without_broker(release_obj, price_df, monkeypatch, tmp_path):
+def test_scheduler_keeps_no_order_cycle_open_for_daily_reconciliation(release_obj, price_df, monkeypatch, tmp_path):
     store_obj, decision_obj, _ = _no_order_cycle(release_obj, price_df, monkeypatch, tmp_path)
     monkeypatch.setattr(scheduler_module, "_load_release_list_and_sync", lambda *args, **kwargs: [release_obj])
     monkeypatch.setattr(scheduler_utils, "evaluate_build_gate_dict", lambda *args, **kwargs: {"due_bool": True})
     schedule_obj = scheduler_module.get_scheduler_decision(store_obj, _time("2026-09-14", 12), "unused", "paper")
-    assert schedule_obj.reason_code_str == "core5_complete_no_order_cycle"
+    assert schedule_obj.next_phase_str == "post_execution_reconcile"
     detail_dict = runner_module.expire_stale_decision_plans(store_obj, _time("2026-09-14", 12), "unused", "paper", log_path_str=str(tmp_path / "ops.log"), trace_enabled_bool=False)
-    assert detail_dict["expired_decision_plan_count_int"] == 0
-    assert store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str).status_str == "completed"
+    assert detail_dict["expired_decision_plan_count_int"] == 1
+    assert store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str).status_str == "expired"
+    assert store_obj.get_pending_daily_decision_plan_list()
     assert store_obj.get_latest_vplan_for_pod(release_obj.pod_id_str) is None
     schedule_obj = scheduler_module.get_scheduler_decision(store_obj, _time("2026-09-14", 12), "unused", "paper")
     assert schedule_obj.next_phase_str != "build_decision_plan"
 
 
-def test_manual_vplan_build_recovers_no_order_without_broker(release_obj, price_df, monkeypatch, tmp_path):
+def test_manual_vplan_build_cannot_complete_no_order_without_daily_broker_refresh(release_obj, price_df, monkeypatch, tmp_path):
     store_obj, decision_obj, _ = _no_order_cycle(release_obj, price_df, monkeypatch, tmp_path)
     broker_obj = StubBrokerAdapter()
     def fail_broker_call(*args, **kwargs):
-        pytest.fail("No-order completion must not request a broker snapshot")
+        pytest.fail("VPlan build must leave a HOLD cycle to daily reconciliation")
     monkeypatch.setattr(broker_obj, "get_account_snapshot", fail_broker_call)
     detail_dict = runner_module.build_vplans(store_obj, broker_obj, _time("2026-09-14", 12), "paper", log_path_str=str(tmp_path / "ops.log"), trace_enabled_bool=False)
     assert detail_dict["created_vplan_count_int"] == 0
-    assert store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str).status_str == "completed"
+    assert store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str).status_str == "blocked"
+    assert store_obj.get_pending_daily_decision_plan_list()
     assert store_obj.get_latest_vplan_for_pod(release_obj.pod_id_str) is None
 
 
@@ -339,7 +369,8 @@ def test_scheduler_captures_eod_before_core5_decision(release_obj, monkeypatch, 
     store_obj.upsert_release(release_obj)
     if has_prior_eod_bool: store_obj.upsert_pod_state(_state(release_obj, "2026-09-10"))
     monkeypatch.setattr(scheduler_module, "_load_release_list_and_sync", lambda *args, **kwargs: [release_obj])
-    monkeypatch.setattr(scheduler_utils, "evaluate_build_gate_dict", lambda *args, **kwargs: {"due_bool": True})
+    monkeypatch.setattr(scheduler_utils, "evaluate_build_gate_dict", lambda *args, **kwargs: {
+        "due_bool": True, "latest_heartbeat_session_date_str": "2026-09-11"})
     schedule_obj = scheduler_module.get_scheduler_decision(store_obj, _time("2026-09-11"), "unused", "paper")
     assert schedule_obj.next_phase_str == "eod_snapshot"
     store_obj.upsert_pod_state(_state(release_obj, "2026-09-11"))
@@ -361,15 +392,13 @@ def test_eod_rejects_stale_broker_source_and_open_orders(release_obj, monkeypatc
     assert store_obj.get_pod_state(release_obj.pod_id_str).updated_timestamp_ts == _time("2026-09-10", 17)
 
 
-def test_malformed_saved_targets_fail_cleanly_and_first_ready_day_can_initialize(release_obj, price_df, monkeypatch):
-    signal_df = _controlled_signals(monkeypatch, price_df)
+def test_malformed_saved_signal_cache_is_rebuilt_with_warning(release_obj, price_df, monkeypatch):
+    _controlled_signals(monkeypatch, price_df)
     first_obj = _build(release_obj, price_df, "2026-09-10", _state(release_obj, "2026-09-10"))
     first_obj.strategy_state_dict.pop("last_rebalance_date_str")
-    with pytest.raises(ValueError, match="rebalance date"):
-        _build(release_obj, price_df, "2026-09-11", _state(release_obj, "2026-09-11", strategy_state_dict=first_obj.strategy_state_dict))
-    signal_df.loc["2026-09-10", ("ADAPTIVE_TR_UUP", "long_state_ser")] = np.nan
-    first_ready_obj = _build(release_obj, price_df, "2026-09-11", _state(release_obj, "2026-09-11"))
-    assert first_ready_obj.snapshot_metadata_dict["initialization_bool"]
+    rebuilt_obj = _build(release_obj, price_df, "2026-09-11", _state(release_obj, "2026-09-11", strategy_state_dict=first_obj.strategy_state_dict))
+    assert rebuilt_obj.snapshot_metadata_dict["core5_data_revision_warning_bool"]
+    assert rebuilt_obj.strategy_state_dict["last_rebalance_date_str"]
 
 
 def test_multiday_engine_oracle_with_dividends_borrow_and_gapped_opens(price_df):
@@ -413,7 +442,7 @@ def _submitted_flip(release_obj, price_df, monkeypatch, tmp_path):
         ("2026-09-11", "DBC", "short_state_ser"): 1.0,
     })
     prior_obj = _build(release_obj, price_df, "2026-09-10", _state(release_obj, "2026-09-10"))
-    state_obj = _state(release_obj, "2026-09-11", prior_obj.snapshot_metadata_dict["fixed_target_share_map_dict"], prior_obj.strategy_state_dict)
+    state_obj = _state(release_obj, "2026-09-11", prior_obj.snapshot_metadata_dict["fixed_target_share_map_dict"], _committed_state_dict(prior_obj))
     store_obj, broker_obj = _store_and_broker(tmp_path, release_obj, state_obj)
     decision_obj = store_obj.insert_decision_plan(_build(release_obj, price_df, "2026-09-11", state_obj))
     vplan_obj = store_obj.insert_vplan(_vplan(release_obj, decision_obj))
@@ -428,7 +457,7 @@ def _submitted_flip(release_obj, price_df, monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize("mutation_str", ["missing_fill", "wrong_sign", "partial_fill", "open_orders", "rejected_first_leg"])
-def test_incomplete_flip_does_not_commit_even_if_positions_match(release_obj, price_df, monkeypatch, tmp_path, mutation_str):
+def test_intraday_flip_waits_for_close_independent_of_fill_reporting(release_obj, price_df, monkeypatch, tmp_path, mutation_str):
     store_obj, broker_obj, decision_obj, vplan_obj, state_obj, dbc_record_list = _submitted_flip(release_obj, price_df, monkeypatch, tmp_path)
     route_str = release_obj.account_route_str
     first_record_obj = dbc_record_list[0]
@@ -455,8 +484,6 @@ def test_incomplete_flip_does_not_commit_even_if_positions_match(release_obj, pr
     assert store_obj.get_pod_state(release_obj.pod_id_str).strategy_state_dict == state_obj.strategy_state_dict
     assert store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str).status_str != "completed"
     assert store_obj.get_vplan_by_id(vplan_obj.vplan_id_int).status_str != "completed"
-    if mutation_str == "rejected_first_leg":
-        assert runner_module.is_vplan_execution_exception_parked(store_obj, store_obj.get_vplan_by_id(vplan_obj.vplan_id_int))
 
 
 def test_sparse_flip_refresh_preserves_identity_and_rejects_ambiguity(release_obj, price_df, monkeypatch, tmp_path):

@@ -8,7 +8,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from alpha.live import runner, scheduler_utils
-from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR, is_core5_decision_bool
+from alpha.live.daily_reconcile import DAILY_TERMINAL_STATUS_SET, is_daily_reconcile_release_bool
+from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR
 from alpha.live.logging_utils import (
     DEFAULT_LOG_PATH_STR,
     DEFAULT_POD_TRACE_LOG_ROOT_PATH_STR,
@@ -174,88 +175,53 @@ def get_scheduler_decision(
     manual_review_pod_id_list: list[str] = []
     parked_manual_review_pod_id_list: list[str] = []
     idle_probe_pod_id_list: list[str] = []
-    capsule_eod_review_pod_id_list: list[str] = []
+    daily_eod_review_pod_id_list: list[str] = []
 
     for release_obj in enabled_release_list:
         latest_decision_plan_obj = state_store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str)
         current_vplan_obj = _get_current_cycle_vplan_obj(state_store_obj, latest_decision_plan_obj)
         build_gate_dict = scheduler_utils.evaluate_build_gate_dict(release_obj, as_of_ts)
-        if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
-            if is_core5_decision_bool(latest_decision_plan_obj) and latest_decision_plan_obj.status_str == "planned" and latest_decision_plan_obj.snapshot_metadata_dict.get("no_order_bool"):
-                immediate_candidate_list.append(_build_candidate_dict(
-                    priority_int=0, due_timestamp_ts=as_of_ts, next_phase_str="expire_stale",
-                    reason_code_str="core5_complete_no_order_cycle", pod_id_str=release_obj.pod_id_str, active_poll_bool=False,
-                ))
-                continue
-            if latest_decision_plan_obj is not None and latest_decision_plan_obj.status_str in {"expired", "blocked"}:
-                parked_manual_review_pod_id_list.append(release_obj.pod_id_str)
-                continue
-            required_signal_ts = scheduler_utils.get_latest_completed_session_label_ts(as_of_ts, "XNYS")
+        daily_bool = is_daily_reconcile_release_bool(release_obj)
+        daily_pending_bool = daily_bool and latest_decision_plan_obj is not None and latest_decision_plan_obj.status_str not in DAILY_TERMINAL_STATUS_SET
+        if daily_bool:
+            # Both daily pods use observed Close-T account state before forming
+            # the next open's intent. No strategy-memory/resume prerequisite.
+            signal_ts = scheduler_utils.get_latest_completed_session_label_ts(as_of_ts, release_obj.session_calendar_id_str)
             state_obj = state_store_obj.get_pod_state(release_obj.pod_id_str)
-            same_session_eod_bool = (
-                required_signal_ts is not None and state_obj is not None and state_obj.snapshot_stage_str == "eod"
-                and scheduler_utils.session_label_from_timestamp_ts(state_obj.updated_timestamp_ts, "XNYS") == required_signal_ts
-            )
-            already_completed_bool = (
-                latest_decision_plan_obj is not None and latest_decision_plan_obj.status_str == "completed"
-                and scheduler_utils.session_label_from_timestamp_ts(latest_decision_plan_obj.signal_timestamp_ts, "XNYS") == required_signal_ts
-            )
-            if not same_session_eod_bool or already_completed_bool:
-                # CORE5 freezes Close_T account equity. Its EOD prerequisite
-                # must run before a build, and a completed day must stay idle.
+            state_market_ts = None if state_obj is None else scheduler_utils.to_market_timestamp_ts(state_obj.updated_timestamp_ts, release_obj.session_calendar_id_str)
+            eod_ready_bool = (signal_ts is not None and state_obj is not None and state_obj.snapshot_stage_str == "eod"
+                and state_obj.snapshot_source_str == runner._snapshot_source_str_for_mode(release_obj.mode_str)
+                and state_obj.account_route_str == release_obj.account_route_str and state_obj.user_id_str == release_obj.user_id_str
+                and state_market_ts.date() == signal_ts.date()
+                and scheduler_utils.get_session_close_timestamp_ts(signal_ts, release_obj.session_calendar_id_str) <= state_market_ts <= as_of_ts)
+            already_decided_bool = (latest_decision_plan_obj is not None and signal_ts is not None
+                and scheduler_utils.session_label_from_timestamp_ts(latest_decision_plan_obj.signal_timestamp_ts, release_obj.session_calendar_id_str) >= signal_ts)
+            if (not eod_ready_bool or daily_pending_bool or already_decided_bool
+                    or build_gate_dict.get("latest_heartbeat_session_date_str") != signal_ts.date().isoformat()):
                 build_gate_dict = {**build_gate_dict, "due_bool": False}
-        if release_obj.strategy_import_str.startswith("strategies.mr_capsule."):
-            # *** CRITICAL *** New capsule intent needs pricing and broker EOD
-            # from the same completed T. Do not pair today's early data with
-            # yesterday's EOD, or rebuild a completed/abandoned signal day.
-            capsule_signal_ts = scheduler_utils.get_latest_completed_session_label_ts(as_of_ts, "XNYS")
-            capsule_state_obj = state_store_obj.get_pod_state(release_obj.pod_id_str)
-            capsule_market_ts = scheduler_utils.to_market_timestamp_ts(as_of_ts, "XNYS")
-            capsule_state_ts = (
-                scheduler_utils.to_market_timestamp_ts(capsule_state_obj.updated_timestamp_ts, "XNYS")
-                if capsule_state_obj is not None else None
-            )
-            capsule_eod_ready_bool = (
-                capsule_signal_ts is not None and capsule_state_obj is not None
-                and capsule_state_obj.snapshot_stage_str == "eod"
-                and capsule_state_obj.snapshot_source_str == runner._snapshot_source_str_for_mode(release_obj.mode_str)
-                and capsule_state_obj.account_route_str == release_obj.account_route_str
-                and capsule_state_obj.user_id_str == release_obj.user_id_str
-                and capsule_state_ts.date() == capsule_signal_ts.date()
-                and scheduler_utils.get_session_close_timestamp_ts(capsule_signal_ts, "XNYS") <= capsule_state_ts <= capsule_market_ts
-            )
-            capsule_prior_ready_bool = latest_decision_plan_obj is None or (
-                capsule_signal_ts is not None
-                and (
-                    latest_decision_plan_obj.status_str == "completed"
-                    or (latest_decision_plan_obj.status_str in {"expired", "blocked"}
-                        and latest_decision_plan_obj.snapshot_metadata_dict.get("mr_capsule_unsubmitted_cycle_abandoned_bool") is True)
-                )
-                and scheduler_utils.session_label_from_timestamp_ts(latest_decision_plan_obj.signal_timestamp_ts, "XNYS") < capsule_signal_ts
-            )
-            if (
-                latest_decision_plan_obj is not None
-                and latest_decision_plan_obj.status_str in {"expired", "blocked"}
-                and latest_decision_plan_obj.snapshot_metadata_dict.get("mr_capsule_unsubmitted_cycle_abandoned_bool") is not True
-            ):
-                parked_manual_review_pod_id_list.append(release_obj.pod_id_str)
-            if (
-                capsule_prior_ready_bool and not capsule_eod_ready_bool and capsule_signal_ts is not None
-                and runner._pod_has_stage_snapshot_for_market_date_bool(
-                    state_store_obj=state_store_obj, release_obj=release_obj,
-                    snapshot_stage_str="eod", market_date_str=capsule_signal_ts.date().isoformat(),
-                )
-            ):
-                # Date-only deduplication will not replace a saved EOD. Expose
-                # the invalid prerequisite instead of reporting ordinary idle.
-                capsule_eod_review_pod_id_list.append(release_obj.pod_id_str)
-            if (
-                not capsule_eod_ready_bool or not capsule_prior_ready_bool
-                or build_gate_dict.get("latest_heartbeat_session_date_str") != capsule_signal_ts.date().isoformat()
-            ):
-                # Suppress only NEW decisions. Existing VPlans keep their usual
-                # expiry/submit/reconcile route; all shared priorities stay put.
-                build_gate_dict = {**build_gate_dict, "due_bool": False}
+            if (not daily_pending_bool and not eod_ready_bool and signal_ts is not None
+                    and runner._pod_has_stage_snapshot_for_market_date_bool(state_store_obj=state_store_obj, release_obj=release_obj,
+                        snapshot_stage_str="eod", market_date_str=signal_ts.date().isoformat())):
+                daily_eod_review_pod_id_list.append(release_obj.pod_id_str)
+            if daily_pending_bool:
+                target_ts = latest_decision_plan_obj.target_execution_timestamp_ts
+                close_ts = scheduler_utils.get_session_close_timestamp_ts(
+                    scheduler_utils.session_label_from_timestamp_ts(target_ts, release_obj.session_calendar_id_str), release_obj.session_calendar_id_str)
+                dispatched_bool = current_vplan_obj is not None and current_vplan_obj.status_str in {"submitting", "submitted", "parked"}
+                if (as_of_ts >= target_ts - timedelta(minutes=2) or dispatched_bool
+                        or latest_decision_plan_obj.status_str in {"expired", "blocked"}):
+                    reconcile_due_ts = min(close_ts, target_ts + timedelta(seconds=reconcile_grace_seconds_int))
+                    due_bool = reconcile_due_ts <= as_of_ts
+                    # A daily broker outage must not starve another pod's due
+                    # decision or EOD snapshot. This pod's EOD remains blocked
+                    # until its own cycle closes; legacy priorities stay intact.
+                    candidate_obj = _build_candidate_dict(priority_int=6 if as_of_ts >= close_ts else 1,
+                        due_timestamp_ts=as_of_ts if due_bool else reconcile_due_ts,
+                        next_phase_str="post_execution_reconcile",
+                        reason_code_str="ready_to_reconcile" if due_bool else "waiting_for_post_execution_reconcile",
+                        pod_id_str=release_obj.pod_id_str, active_poll_bool=True)
+                    (immediate_candidate_list if due_bool else future_candidate_list).append(candidate_obj)
+                    continue
         eod_due_timestamp_ts = runner._eod_snapshot_due_timestamp_ts(
             release_obj=release_obj,
             as_of_ts=as_of_ts,
@@ -322,11 +288,6 @@ def get_scheduler_decision(
 
         if (
             latest_decision_plan_obj.status_str in ("planned", "vplan_ready")
-            and not (
-                release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR
-                and current_vplan_obj is not None
-                and current_vplan_obj.status_str in ("submitted", "submitting")
-            )
             and scheduler_utils.is_execution_window_expired_bool(
                 latest_decision_plan_obj.execution_policy_str,
                 latest_decision_plan_obj.target_execution_timestamp_ts,
@@ -417,7 +378,7 @@ def get_scheduler_decision(
                 )
             continue
 
-        if latest_decision_plan_obj.status_str in ("completed", "expired", "blocked"):
+        if latest_decision_plan_obj.status_str in ("completed", "completed_with_exceptions", "expired", "blocked"):
             if bool(build_gate_dict["due_bool"]):
                 immediate_candidate_list.append(
                     _build_candidate_dict(
@@ -508,7 +469,7 @@ def get_scheduler_decision(
             related_pod_id_list=sorted(set(manual_review_pod_id_list)),
         )
 
-    if capsule_eod_review_pod_id_list:
+    if daily_eod_review_pod_id_list:
         return SchedulerDecision(
             as_of_timestamp_ts=as_of_ts,
             env_mode_str=env_mode_str,
@@ -517,7 +478,7 @@ def get_scheduler_decision(
             next_phase_str="manual_review_pending",
             reason_code_str="mr_capsule_eod_snapshot_untrusted",
             next_due_timestamp_ts=as_of_ts + timedelta(seconds=idle_max_sleep_seconds_int),
-            related_pod_id_list=sorted(set(capsule_eod_review_pod_id_list)),
+            related_pod_id_list=sorted(set(daily_eod_review_pod_id_list)),
         )
 
     return SchedulerDecision(

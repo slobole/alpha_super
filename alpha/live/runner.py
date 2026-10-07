@@ -8,6 +8,7 @@ import argparse
 import contextlib
 import io
 import json
+import math
 from collections import Counter
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -18,7 +19,7 @@ import uuid
 from alpha.data import FredSeriesLoadError
 from alpha.live import reference_compare, scheduler_utils, strategy_host
 from alpha.live.core5_adapter import (
-    CORE5_STRATEGY_IMPORT_STR, is_core5_decision_bool, require_core5_position_match,
+    CORE5_STRATEGY_IMPORT_STR, require_core5_position_match,
     validate_core5_release,
 )
 from alpha.live.dispatch_state import is_guarded_release_bool, record_dispatch_failure
@@ -39,7 +40,9 @@ from alpha.live.logging_utils import (
 )
 from alpha.live.models import BrokerOrderEvent, DecisionPlan, LivePriceSnapshot, LiveRelease, PodState, SubmitBatchResult, VPlan
 from alpha.live.mr_capsule_adapter import MR_CAPSULE_STRATEGY_IMPORT_TUPLE, validate_mr_capsule_release
-from alpha.live.mr_capsule_recovery import reconcile_capsule_cycle
+from alpha.live.daily_reconcile import (
+    DAILY_TERMINAL_STATUS_SET, is_daily_reconcile_release_bool, reconcile_daily_cycle,
+)
 from alpha.live.norgate_snapshot_sync import ensure_norgate_snapshots_for_live_tick
 from alpha.live.order_clerk import BrokerAdapter, IBKRGatewayBrokerAdapter
 from alpha.live.reconcile import reconcile_account_state
@@ -1701,8 +1704,8 @@ def is_vplan_execution_exception_parked(
     if vplan_obj.vplan_id_int is None:
         return False
     release_obj = state_store_obj.get_release_by_id(vplan_obj.release_id_str)
-    if release_obj.strategy_import_str in MR_CAPSULE_STRATEGY_IMPORT_TUPLE:
-        # Keep observing pending orders and owner repairs; never resubmit here.
+    if is_daily_reconcile_release_bool(release_obj):
+        # Daily sessions keep polling and finish from actual holdings after close.
         return False
     if not state_store_obj.has_post_execution_reconciliation_snapshot(int(vplan_obj.vplan_id_int)):
         return False
@@ -2508,12 +2511,8 @@ def _render_ops_report_detail_str(detail_dict: dict[str, object]) -> str:
 def _mark_unsubmitted_decision_terminal(
     state_store_obj: LiveStateStore, release_obj: LiveRelease, decision_plan_id_int: int, status_str: str,
 ) -> bool:
-    if release_obj.strategy_import_str.startswith("strategies.mr_capsule."):
-        return state_store_obj.abandon_unsubmitted_mr_capsule_cycle(decision_plan_id_int, status_str)
-    if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
-        latest_vplan_obj = state_store_obj.get_latest_vplan_for_decision(decision_plan_id_int)
-        if latest_vplan_obj is not None:
-            return state_store_obj.block_unsubmitted_core5_vplan(int(latest_vplan_obj.vplan_id_int), status_str)
+    if is_daily_reconcile_release_bool(release_obj):
+        return state_store_obj.block_unsubmitted_daily_cycle(decision_plan_id_int, status_str)
     state_store_obj.mark_decision_plan_status(decision_plan_id_int, status_str)
     return True
 
@@ -2532,20 +2531,11 @@ def expire_stale_decision_plans(
     expired_decision_plan_count_int = 0
     reason_counter_obj: Counter[str] = Counter()
     candidate_plan_dict = {plan_obj.decision_plan_id_int: plan_obj for plan_obj in state_store_obj.get_expirable_decision_plan_list(as_of_ts)}
-    for release_obj in state_store_obj.get_enabled_release_list():
-        if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
-            plan_obj = state_store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str)
-            if is_core5_decision_bool(plan_obj) and plan_obj.status_str == "planned" and plan_obj.snapshot_metadata_dict.get("no_order_bool"):
-                candidate_plan_dict[plan_obj.decision_plan_id_int] = plan_obj
     for decision_plan_obj in candidate_plan_dict.values():
         if pod_id_str is not None and decision_plan_obj.pod_id_str != pod_id_str:
             continue
         release_obj = state_store_obj.get_release_by_id(decision_plan_obj.release_id_str)
         if env_mode_str is not None and release_obj.mode_str != env_mode_str:
-            continue
-        if is_core5_decision_bool(decision_plan_obj) and decision_plan_obj.status_str == "planned" and decision_plan_obj.snapshot_metadata_dict.get("no_order_bool"):
-            state_store_obj.complete_core5_cycle(int(decision_plan_obj.decision_plan_id_int))
-            reason_counter_obj["core5_no_order_cycle_recovered"] += 1
             continue
         if not scheduler_utils.is_execution_window_expired_bool(
             decision_plan_obj.execution_policy_str,
@@ -2647,33 +2637,14 @@ def build_decision_plans(
     reason_counter_obj: Counter[str] = Counter()
 
     for release_obj in due_release_list:
-        if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
-            latest_core5_plan_obj = state_store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str)
-            if latest_core5_plan_obj is not None:
-                # Recover a crash between inserting a no-order decision and its
-                # atomic state commit, before considering a later signal day.
-                if latest_core5_plan_obj.status_str == "planned" and latest_core5_plan_obj.snapshot_metadata_dict.get("no_order_bool"):
-                    state_store_obj.complete_core5_cycle(int(latest_core5_plan_obj.decision_plan_id_int))
-                    latest_core5_plan_obj = state_store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str)
-                signal_date_ts = scheduler_utils.get_latest_completed_session_label_ts(as_of_ts, "XNYS")
-                prior_date_ts = scheduler_utils.session_label_from_timestamp_ts(latest_core5_plan_obj.signal_timestamp_ts, "XNYS")
-                if latest_core5_plan_obj.status_str != "completed" or signal_date_ts is None or prior_date_ts >= signal_date_ts:
+        if is_daily_reconcile_release_bool(release_obj):
+            prior_plan_obj = state_store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str)
+            if prior_plan_obj is not None:
+                signal_date_ts = scheduler_utils.get_latest_completed_session_label_ts(as_of_ts, release_obj.session_calendar_id_str)
+                prior_date_ts = scheduler_utils.session_label_from_timestamp_ts(prior_plan_obj.signal_timestamp_ts, release_obj.session_calendar_id_str)
+                if prior_plan_obj.status_str not in DAILY_TERMINAL_STATUS_SET or signal_date_ts is None or prior_date_ts >= signal_date_ts:
                     skipped_decision_plan_count_int += 1
-                    reason_counter_obj["core5_prior_cycle_unresolved" if latest_core5_plan_obj.status_str != "completed" else "core5_signal_cycle_already_completed"] += 1
-                    continue
-        if release_obj.strategy_import_str.startswith("strategies.mr_capsule."):
-            prior_capsule_plan_obj = state_store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str)
-            if prior_capsule_plan_obj is not None:
-                signal_date_ts = scheduler_utils.get_latest_completed_session_label_ts(as_of_ts, "XNYS")
-                prior_date_ts = scheduler_utils.session_label_from_timestamp_ts(prior_capsule_plan_obj.signal_timestamp_ts, "XNYS")
-                abandoned_unsubmitted_bool = (
-                    prior_capsule_plan_obj.status_str in {"expired", "blocked"}
-                    and prior_capsule_plan_obj.snapshot_metadata_dict.get("mr_capsule_unsubmitted_cycle_abandoned_bool") is True
-                )
-                unresolved_bool = prior_capsule_plan_obj.status_str != "completed" and not abandoned_unsubmitted_bool
-                if unresolved_bool or signal_date_ts is None or prior_date_ts >= signal_date_ts:
-                    skipped_decision_plan_count_int += 1
-                    reason_counter_obj["mr_capsule_prior_cycle_unresolved" if unresolved_bool else "mr_capsule_signal_cycle_already_completed"] += 1
+                    reason_counter_obj["daily_prior_cycle_pending" if prior_plan_obj.status_str not in DAILY_TERMINAL_STATUS_SET else "daily_signal_cycle_already_completed"] += 1
                     continue
         pod_state_obj = _get_model_state_or_default(release_obj, state_store_obj, as_of_ts)
         try:
@@ -2743,10 +2714,10 @@ def build_decision_plans(
             continue
 
         inserted_decision_plan_obj = state_store_obj.insert_decision_plan(decision_plan_obj)
-        if is_core5_decision_bool(inserted_decision_plan_obj) and inserted_decision_plan_obj.snapshot_metadata_dict["no_order_bool"]:
-            state_store_obj.complete_core5_cycle(int(inserted_decision_plan_obj.decision_plan_id_int))
-            inserted_decision_plan_obj = state_store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str)
-            reason_counter_obj["core5_no_order_cycle_completed"] += 1
+        for warning_str in inserted_decision_plan_obj.snapshot_metadata_dict.get("core5_warning_code_list", []):
+            log_event("decision_plan_warning", _build_decision_plan_log_payload_dict(
+                release_obj, inserted_decision_plan_obj, as_of_ts,
+                {"severity_str": "warning", "reason_code_str": warning_str}), log_path_str=log_path_str)
         created_decision_plan_count_int += 1
         log_event(
             "build_decision_plan_created",
@@ -2830,12 +2801,6 @@ def build_vplans(
             continue
         if release_obj.mode_str != env_mode_str:
             reason_counter_obj["env_mode_mismatch"] += 1
-            continue
-        if is_core5_decision_bool(decision_plan_obj) and decision_plan_obj.snapshot_metadata_dict.get("no_order_bool"):
-            # Manual build-vplan calls must recover a no-order cycle just as
-            # scheduler ticks do, without creating an empty execution plan.
-            state_store_obj.complete_core5_cycle(int(decision_plan_obj.decision_plan_id_int))
-            reason_counter_obj["core5_no_order_cycle_recovered"] += 1
             continue
         provenance_block_reason_str = _decision_plan_norgate_provenance_block_reason_str(
             release_obj,
@@ -3216,7 +3181,7 @@ def build_vplans(
             if vplan_obj is None:
                 # A competing worker may already have created the valid VPlan.
                 # Only an invalid candidate can abandon this unsubmitted cycle.
-                state_store_obj.abandon_unsubmitted_mr_capsule_cycle(int(decision_plan_obj.decision_plan_id_int), "blocked")
+                state_store_obj.block_unsubmitted_daily_cycle(int(decision_plan_obj.decision_plan_id_int), "blocked")
             log_event(
                 "mr_capsule_vplan_blocked",
                 _build_decision_plan_log_payload_dict(release_obj, decision_plan_obj, as_of_ts, {"error_str": str(exception_obj)}),
@@ -3368,9 +3333,9 @@ def submit_ready_vplans(
             blocked_action_count_int += 1
             reason_counter_obj["submission_window_expired"] += 1
             if release_obj.strategy_import_str.startswith("strategies.mr_capsule."):
-                state_store_obj.abandon_unsubmitted_mr_capsule_cycle(int(vplan_obj.decision_plan_id_int), "expired")
+                state_store_obj.block_unsubmitted_daily_cycle(int(vplan_obj.decision_plan_id_int), "expired")
             elif release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
-                state_store_obj.block_unsubmitted_core5_vplan(int(vplan_obj.vplan_id_int), "expired")
+                state_store_obj.block_unsubmitted_daily_cycle(int(vplan_obj.decision_plan_id_int), "expired")
             else:
                 state_store_obj.mark_vplan_status(int(vplan_obj.vplan_id_int or 0), "expired")
                 state_store_obj.mark_decision_plan_status(int(vplan_obj.decision_plan_id_int), "expired")
@@ -3480,7 +3445,7 @@ def submit_ready_vplans(
                         release_obj, vplan_obj, as_of_ts, {"error_str": str(exception_obj),
                         "suppressed_buy_count_int": len(suppressed_request_list)}), log_path_str=log_path_str)
                 else:
-                    state_store_obj.abandon_unsubmitted_mr_capsule_cycle(int(vplan_obj.decision_plan_id_int), "blocked")
+                    state_store_obj.block_unsubmitted_daily_cycle(int(vplan_obj.decision_plan_id_int), "blocked")
                     log_event(capsule_block_reason_str, _build_vplan_log_payload_dict(
                         release_obj, vplan_obj, as_of_ts, {"error_str": str(exception_obj)}), log_path_str=log_path_str)
                     continue
@@ -3504,10 +3469,15 @@ def submit_ready_vplans(
             broker_order_request_list = build_broker_order_request_list_from_vplan(vplan_obj)
         send_started_bool = False
         try:
-            if suppressed_request_list:
-                from alpha.live.execution_resolution import record_never_dispatched_requests
-                record_never_dispatched_requests(state_store_obj, release_obj, vplan_obj,
-                    suppressed_request_list, as_of_ts, "funding_check_suppressed_buy")
+            if release_obj.strategy_import_str in MR_CAPSULE_STRATEGY_IMPORT_TUPLE:
+                with state_store_obj._connect() as connection_obj:
+                    metadata_row_obj = connection_obj.execute("SELECT snapshot_metadata_json_str FROM decision_plan WHERE decision_plan_id_int=?",
+                        (vplan_obj.decision_plan_id_int,)).fetchone()
+                    metadata_dict = json.loads(metadata_row_obj[0])
+                    # A proved pre-send retry may now fund the complete batch.
+                    metadata_dict["funding_buys_dropped_bool"] = bool(suppressed_request_list)
+                    connection_obj.execute("UPDATE decision_plan SET snapshot_metadata_json_str=? WHERE decision_plan_id_int=?",
+                        (json.dumps(metadata_dict, sort_keys=True), vplan_obj.decision_plan_id_int))
             if guarded_dispatch_bool:
                 broker_order_request_list = [replace(request_obj,
                     submission_deadline_timestamp_str=moo_dispatch_deadline_ts(vplan_obj).isoformat())
@@ -3951,6 +3921,175 @@ def eod_snapshot(
     }
 
 
+
+
+def _persist_daily_execution_report(state_store_obj, broker_adapter_obj, release_obj, decision_plan_obj,
+        vplan_obj, record_list, event_list, fill_list, as_of_ts, log_path_str, *, late_bool=False):
+    identity_dict = {"decision_plan_id_int": decision_plan_obj.decision_plan_id_int, "vplan_id_int": vplan_obj.vplan_id_int}
+    with state_store_obj._connect() as connection_obj:
+        completion_ref_set = {row_obj[0] for row_obj in connection_obj.execute(
+            "SELECT order_request_key_str FROM daily_completion_request WHERE decision_plan_id_int=?",
+            (decision_plan_obj.decision_plan_id_int,)).fetchall()}
+        legacy_manual_key_dict = {}
+        if connection_obj.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='mr_capsule_execution_request'").fetchone():
+            legacy_row_list = connection_obj.execute("""SELECT r.order_request_key_str,r.request_kind_str,r.request_json_str
+                FROM mr_capsule_execution_request r JOIN vplan v ON v.vplan_id_int=r.vplan_id_int
+                WHERE v.vplan_id_int=? AND v.decision_plan_id_int=? AND v.account_route_str=? AND v.pod_id_str=?""",
+                (vplan_obj.vplan_id_int, decision_plan_obj.decision_plan_id_int,
+                    release_obj.account_route_str, release_obj.pod_id_str)).fetchall()
+            for row_obj in legacy_row_list:
+                request_dict = json.loads(row_obj["request_json_str"])
+                if any(request_dict.get(field_str) != value_obj for field_str, value_obj in {
+                        **identity_dict, "pod_id_str": release_obj.pod_id_str, "account_route_str": release_obj.account_route_str,
+                        "order_request_key_str": row_obj["order_request_key_str"]}.items()):
+                    raise ValueError("Legacy supplemental reporting request has conflicting cycle identity.")
+                completion_ref_set.add(row_obj["order_request_key_str"])
+                manual_prefix_str = f"{vplan_obj.submission_key_str}:manual:"
+                if row_obj["request_kind_str"] == "manual" and row_obj["order_request_key_str"].startswith(manual_prefix_str):
+                    order_id_str = row_obj["order_request_key_str"][len(manual_prefix_str):]
+                    if order_id_str:
+                        legacy_manual_key_dict[order_id_str] = row_obj["order_request_key_str"]
+    known_order_list = state_store_obj.get_broker_order_row_dict_list_for_vplan(vplan_obj.vplan_id_int)
+    known_key_dict = {str(row_dict["broker_order_id_str"]): row_dict.get("order_request_key_str")
+        for row_dict in known_order_list}
+    late_order_id_set = {str(row_dict["broker_order_id_str"]) for row_dict in known_order_list
+        if row_dict.get("order_request_key_str") in completion_ref_set}
+    late_order_id_set.update(record_obj.broker_order_id_str for record_obj in record_list
+        if late_bool or record_obj.order_request_key_str in completion_ref_set)
+    late_order_id_set.update(legacy_manual_key_dict)
+    session_context_dict = _session_open_context_dict(release_obj=release_obj,
+        reference_timestamp_ts=vplan_obj.target_execution_timestamp_ts)
+    try:
+        open_price_list = broker_adapter_obj.get_session_open_price_list(account_route_str=release_obj.account_route_str,
+            asset_str_list=sorted({fill_obj.asset_str for fill_obj in fill_list}),
+            session_open_timestamp_ts=session_context_dict["session_open_timestamp_ts"],
+            session_calendar_id_str=release_obj.session_calendar_id_str)
+        valid_open_list = []
+        for price_obj in open_price_list:
+            if (price_obj.account_route_str != release_obj.account_route_str
+                    or price_obj.session_date_str != session_context_dict["session_date_str"]):
+                raise ValueError("Open reference account/session mismatch.")
+            if price_obj.official_open_price_float is None:
+                continue
+            if not math.isfinite(price_obj.official_open_price_float) or price_obj.official_open_price_float <= 0:
+                raise ValueError("Invalid official open reference.")
+            # ticker.open is the observation day's field, even if the broker
+            # was asked for an older session. Never relabel that price.
+            if (price_obj.open_price_source_str == "ibkr.tick_open" and scheduler_utils.to_market_timestamp_ts(
+                    price_obj.snapshot_timestamp_ts, release_obj.session_calendar_id_str).date().isoformat()
+                    != session_context_dict["session_date_str"]):
+                raise ValueError("Current tick open cannot label a historical execution session.")
+            valid_open_list.append(price_obj)
+        state_store_obj.upsert_session_open_price_list(valid_open_list)
+    except Exception as exception_obj:
+        log_event("daily_open_price_reporting_unavailable", _build_decision_plan_log_payload_dict(
+            release_obj, decision_plan_obj, as_of_ts, {"severity_str": "warning", "error_str": str(exception_obj)}), log_path_str=log_path_str)
+    open_price_map_dict = state_store_obj.get_session_open_price_map_dict(account_route_str=release_obj.account_route_str,
+        session_date_str=session_context_dict["session_date_str"])
+    normalized_fill_list = _annotate_fill_list_with_session_open_price(
+        fill_list=[replace(fill_obj, **identity_dict) for fill_obj in fill_list], session_open_price_map_dict=open_price_map_dict)
+    normalized_fill_list = [replace(fill_obj, official_open_price_float=None, open_price_source_str="late_execution",
+        raw_payload_dict={**fill_obj.raw_payload_dict, "execution_phase_str": "late_execution"})
+        if late_bool or fill_obj.broker_order_id_str in late_order_id_set else fill_obj for fill_obj in normalized_fill_list]
+    state_store_obj.upsert_vplan_broker_order_record_list([replace(record_obj, **identity_dict,
+        order_request_key_str=legacy_manual_key_dict.get(record_obj.broker_order_id_str)
+            or record_obj.order_request_key_str or known_key_dict.get(record_obj.broker_order_id_str)) for record_obj in record_list])
+    state_store_obj.insert_vplan_broker_order_event_list([replace(event_obj, **identity_dict,
+        order_request_key_str=legacy_manual_key_dict.get(event_obj.broker_order_id_str)
+            or event_obj.order_request_key_str or known_key_dict.get(event_obj.broker_order_id_str)) for event_obj in event_list])
+    state_store_obj.upsert_vplan_fill_list(normalized_fill_list)
+
+
+def _reconcile_daily_cycles(state_store_obj, broker_adapter_resolver_obj, as_of_ts, env_mode_str,
+        pod_id_str, log_path_str, trace_enabled_bool, trace_log_root_path_str):
+    completed_count_int = 0
+    for decision_plan_obj in state_store_obj.get_pending_daily_decision_plan_list():
+        if pod_id_str is not None and decision_plan_obj.pod_id_str != pod_id_str:
+            continue
+        release_obj = state_store_obj.get_release_by_id(decision_plan_obj.release_id_str)
+        if release_obj.mode_str != env_mode_str or as_of_ts < decision_plan_obj.target_execution_timestamp_ts:
+            continue
+        assert_authorized_release(release_obj)
+        vplan_obj = state_store_obj.get_latest_vplan_for_decision(decision_plan_obj.decision_plan_id_int)
+        try:
+            broker_adapter_obj = broker_adapter_resolver_obj.get_adapter(release_obj)
+            if vplan_obj is not None:
+                # Recording failure is observable but cannot veto fresh holdings
+                # settlement. The subsequent daily refresh remains mandatory.
+                try:
+                    allowed_order_id_set = {str(row_dict["broker_order_id_str"]) for row_dict in
+                        state_store_obj.get_broker_order_row_dict_list_for_vplan(vplan_obj.vplan_id_int)}
+                    # A legacy manual adoption may have committed before the
+                    # first broker observation. Its saved exact key embeds the
+                    # broker ID; use it only to fetch reporting evidence.
+                    with state_store_obj._connect() as connection_obj:
+                        if connection_obj.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='mr_capsule_execution_request'").fetchone():
+                            legacy_row_list = connection_obj.execute("""SELECT r.order_request_key_str,r.request_json_str
+                                FROM mr_capsule_execution_request r JOIN vplan v ON v.vplan_id_int=r.vplan_id_int
+                                WHERE v.vplan_id_int=? AND v.decision_plan_id_int=? AND v.account_route_str=? AND v.pod_id_str=?
+                                  AND r.request_kind_str='manual'""", (vplan_obj.vplan_id_int, decision_plan_obj.decision_plan_id_int,
+                                    release_obj.account_route_str, release_obj.pod_id_str)).fetchall()
+                            manual_prefix_str = f"{vplan_obj.submission_key_str}:manual:"
+                            for row_obj in legacy_row_list:
+                                request_dict = json.loads(row_obj["request_json_str"])
+                                if any(request_dict.get(field_str) != value_obj for field_str, value_obj in {
+                                        "vplan_id_int": vplan_obj.vplan_id_int, "decision_plan_id_int": decision_plan_obj.decision_plan_id_int,
+                                        "pod_id_str": release_obj.pod_id_str, "account_route_str": release_obj.account_route_str,
+                                        "order_request_key_str": row_obj["order_request_key_str"]}.items()):
+                                    raise ValueError("Legacy manual reporting request has conflicting cycle identity.")
+                                if row_obj["order_request_key_str"].startswith(manual_prefix_str):
+                                    order_id_str = row_obj["order_request_key_str"][len(manual_prefix_str):]
+                                    if order_id_str:
+                                        allowed_order_id_set.add(order_id_str)
+                    record_list, event_list, fill_list = broker_adapter_obj.get_recent_order_state_snapshot(
+                        account_route_str=release_obj.account_route_str,
+                        since_timestamp_ts=vplan_obj.submission_timestamp_ts,
+                        submission_key_str=vplan_obj.submission_key_str or f"vplan:{vplan_obj.decision_plan_id_int}",
+                        allowed_broker_order_id_set=allowed_order_id_set)
+                    _persist_daily_execution_report(state_store_obj, broker_adapter_obj, release_obj, decision_plan_obj,
+                        vplan_obj, record_list, event_list, fill_list, as_of_ts, log_path_str)
+                except Exception as exception_obj:
+                    log_event("daily_fill_reporting_unavailable", _build_decision_plan_log_payload_dict(
+                        release_obj, decision_plan_obj, as_of_ts, {"severity_str": "warning", "error_str": str(exception_obj)}), log_path_str=log_path_str)
+            dispatch_dict = decision_plan_obj.snapshot_metadata_dict.get("opening_dispatch_result_dict", {})
+            vplan_sent_bool = vplan_obj is not None and vplan_obj.status_str in {"submitting", "submitted", "parked"}
+            if dispatch_dict and dispatch_dict.get("reason_code_str") != "dispatch_retry_pending":
+                vplan_sent_bool = bool(dispatch_dict.get("attempted_request_key_list"))
+            daily_result_obj = reconcile_daily_cycle(state_store_obj, broker_adapter_obj, release_obj,
+                decision_plan_obj, as_of_ts, vplan_obj=vplan_obj, vplan_sent_bool=vplan_sent_bool,
+                funding_buys_dropped_bool=bool(decision_plan_obj.snapshot_metadata_dict.get("funding_buys_dropped_bool")))
+            for report_obj in daily_result_obj.reporting_result_list:
+                try:
+                    _persist_daily_execution_report(state_store_obj, broker_adapter_obj, release_obj, decision_plan_obj,
+                        vplan_obj, report_obj.broker_order_record_list, report_obj.broker_order_event_list,
+                        report_obj.broker_order_fill_list, as_of_ts, log_path_str, late_bool=True)
+                    state_store_obj.upsert_vplan_broker_ack_list([replace(ack_obj,
+                        decision_plan_id_int=decision_plan_obj.decision_plan_id_int, vplan_id_int=vplan_obj.vplan_id_int)
+                        for ack_obj in report_obj.broker_order_ack_list])
+                except Exception as exception_obj:
+                    log_event("daily_fill_reporting_unavailable", _build_decision_plan_log_payload_dict(
+                        release_obj, decision_plan_obj, as_of_ts, {"severity_str": "warning", "error_str": str(exception_obj)}), log_path_str=log_path_str)
+            state_store_obj.upsert_broker_snapshot_cache(daily_result_obj.broker_snapshot_obj)
+            if daily_result_obj.status_str in DAILY_TERMINAL_STATUS_SET:
+                completed_count_int += int(state_store_obj.complete_daily_cycle(decision_plan_obj.decision_plan_id_int,
+                    None if vplan_obj is None else vplan_obj.vplan_id_int, daily_result_obj.broker_snapshot_obj,
+                    daily_result_obj.status_str, daily_result_obj.exception_list, as_of_ts))
+            payload_dict = {"status_str": daily_result_obj.status_str, "exception_list": daily_result_obj.exception_list,
+                "completion_asset_list": [request_obj.asset_str for request_obj in daily_result_obj.completion_request_list]}
+            log_event("daily_cycle_reconciled", _build_decision_plan_log_payload_dict(
+                release_obj, decision_plan_obj, as_of_ts, payload_dict), log_path_str=log_path_str)
+            _emit_live_trace_event("vplan.reconcile", release_obj=release_obj, decision_plan_obj=decision_plan_obj,
+                vplan_obj=vplan_obj, as_of_ts=as_of_ts,
+                status_str="WAIT" if daily_result_obj.status_str == "pending" else "WARN" if daily_result_obj.exception_list else "PASS",
+                reason_code_str=daily_result_obj.status_str, payload_dict=payload_dict,
+                trace_enabled_bool=trace_enabled_bool, trace_log_root_path_str=trace_log_root_path_str)
+        except Exception as exception_obj:
+            log_event("daily_cycle_reconcile_retry", _build_decision_plan_log_payload_dict(
+                release_obj, decision_plan_obj, as_of_ts, {"status_str": "pending", "error_str": str(exception_obj),
+                    "severity_str": "error"}), log_path_str=log_path_str)
+    return completed_count_int
+
+
 def post_execution_reconcile(
     state_store_obj: LiveStateStore,
     broker_adapter_obj: BrokerAdapter | None,
@@ -3993,8 +4132,11 @@ def post_execution_reconcile(
         as_of_ts=as_of_ts,
         adapter_factory_func=adapter_factory_func,
     )
+    completed_vplan_count_int = _reconcile_daily_cycles(state_store_obj, broker_adapter_resolver_obj, as_of_ts,
+        env_mode_str, pod_id_str, log_path_str, trace_enabled_bool, trace_log_root_path_str)
     submitted_vplan_list = [vplan_obj for vplan_obj in state_store_obj.get_submitted_vplan_list()
-                            if pod_id_str is None or vplan_obj.pod_id_str == pod_id_str]
+        if (pod_id_str is None or vplan_obj.pod_id_str == pod_id_str)
+        and not is_daily_reconcile_release_bool(state_store_obj.get_release_by_id(vplan_obj.release_id_str))]
     assert_authorized_vplans("post_execution_reconcile", submitted_vplan_list)
     for vplan_obj in submitted_vplan_list:
         if pod_id_str is not None and vplan_obj.pod_id_str != pod_id_str:
@@ -4008,34 +4150,9 @@ def post_execution_reconcile(
         if release_obj.mode_str != env_mode_str:
             continue
         try:
-            if release_obj.strategy_import_str in MR_CAPSULE_STRATEGY_IMPORT_TUPLE:
-                validate_mr_capsule_release(release_obj)
             broker_adapter_obj = broker_adapter_resolver_obj.get_adapter(release_obj)
             decision_plan_obj = state_store_obj.get_decision_plan_by_id(int(vplan_obj.decision_plan_id_int))
-            if release_obj.strategy_import_str in MR_CAPSULE_STRATEGY_IMPORT_TUPLE:
-                reconciliation_result_obj, outcome_str, residual_list, broker_snapshot_obj = reconcile_capsule_cycle(
-                    state_store_obj, broker_adapter_obj, release_obj, vplan_obj, decision_plan_obj, as_of_ts)
-                _emit_live_trace_event("vplan.reconcile", release_obj=release_obj, vplan_obj=vplan_obj,
-                    as_of_ts=as_of_ts, status_str="PASS" if reconciliation_result_obj.passed_bool else "BLOCK",
-                    reason_code_str=outcome_str, payload_dict={
-                        "broker_snapshot_dict": _broker_snapshot_trace_payload_dict(broker_snapshot_obj),
-                        "reconciliation_dict": _reconciliation_trace_payload_dict(reconciliation_result_obj),
-                        "residual_row_dict_list": residual_list},
-                    trace_enabled_bool=trace_enabled_bool, trace_log_root_path_str=trace_log_root_path_str)
-                if reconciliation_result_obj.passed_bool:
-                    completed_vplan_count_int += 1
-                log_event("post_execution_reconcile_completed" if reconciliation_result_obj.passed_bool
-                    else "mr_capsule_execution_unresolved", _build_vplan_log_payload_dict(
-                        release_obj, vplan_obj, as_of_ts, {
-                            "reason_code_str": "completed" if reconciliation_result_obj.passed_bool else outcome_str,
-                            "mr_capsule_execution_outcome_str": outcome_str,
-                            "residual_row_dict_list": residual_list}), log_path_str=log_path_str)
-                continue
-            broker_snapshot_obj = (
-                broker_adapter_obj.get_core5_account_snapshot(vplan_obj.account_route_str)
-                if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR
-                else broker_adapter_obj.get_account_snapshot(vplan_obj.account_route_str)
-            )
+            broker_snapshot_obj = broker_adapter_obj.get_account_snapshot(vplan_obj.account_route_str)
             state_store_obj.upsert_broker_snapshot_cache(broker_snapshot_obj)
             existing_broker_order_row_dict_list = state_store_obj.get_broker_order_row_dict_list_for_vplan(
                 int(vplan_obj.vplan_id_int or 0)
@@ -4068,23 +4185,12 @@ def post_execution_reconcile(
             )
             # *** CRITICAL*** Session-open lookup must be anchored to the target execution session,
             # never a later timestamp, or fill-vs-open slippage would leak future session context.
-            if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
-                try:
-                    session_open_price_list = broker_adapter_obj.get_session_open_price_list(
-                        account_route_str=vplan_obj.account_route_str, asset_str_list=sorted(open_universe_asset_set),
-                        session_open_timestamp_ts=session_open_context_dict["session_open_timestamp_ts"],
-                        session_calendar_id_str=release_obj.session_calendar_id_str)
-                except Exception as exception_obj:
-                    session_open_price_list = []
-                    log_event("core5_open_price_diagnostic_unavailable", _build_vplan_log_payload_dict(
-                        release_obj, vplan_obj, as_of_ts, {"error_str": str(exception_obj)}), log_path_str=log_path_str)
-            else:
-                session_open_price_list = broker_adapter_obj.get_session_open_price_list(
-                    account_route_str=vplan_obj.account_route_str,
-                    asset_str_list=sorted(open_universe_asset_set),
-                    session_open_timestamp_ts=session_open_context_dict["session_open_timestamp_ts"],
-                    session_calendar_id_str=release_obj.session_calendar_id_str,
-                )
+            session_open_price_list = broker_adapter_obj.get_session_open_price_list(
+                account_route_str=vplan_obj.account_route_str,
+                asset_str_list=sorted(open_universe_asset_set),
+                session_open_timestamp_ts=session_open_context_dict["session_open_timestamp_ts"],
+                session_calendar_id_str=release_obj.session_calendar_id_str,
+            )
         except Exception as exception_obj:
             # Record the actual failed Pod/VPlan; a shared scheduler tick may
             # contain several Pods. Preserve its existing exception/retry path.
@@ -4101,10 +4207,6 @@ def post_execution_reconcile(
                 # The scheduler must still receive the original failure if
                 # the event log cannot be written (for example a full disk).
                 pass
-            if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
-                from alpha.live.core5_recovery import record_core5_unresolved_cycle
-                record_core5_unresolved_cycle(state_store_obj, release_obj, vplan_obj, as_of_ts, str(exception_obj))
-                continue
             raise
         state_store_obj.upsert_session_open_price_list(session_open_price_list)
         session_open_price_map_dict = state_store_obj.get_session_open_price_map_dict(
@@ -4165,20 +4267,6 @@ def post_execution_reconcile(
         state_store_obj.upsert_vplan_broker_order_record_list(normalized_broker_order_record_list)
         state_store_obj.insert_vplan_broker_order_event_list(normalized_broker_order_event_list)
         state_store_obj.upsert_vplan_fill_list(normalized_fill_list)
-        core5_evidence_dict = None
-        if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
-            from alpha.live.core5_recovery import refresh_core5_cycle_evidence
-            try:
-                core5_evidence_dict = refresh_core5_cycle_evidence(state_store_obj,
-                    broker_adapter_obj, release_obj, vplan_obj, as_of_ts)
-                broker_snapshot_obj = core5_evidence_dict["broker_snapshot_obj"]
-            except Exception as exception_obj:
-                from alpha.live.core5_recovery import record_core5_unresolved_cycle
-                record_core5_unresolved_cycle(state_store_obj, release_obj, vplan_obj, as_of_ts, str(exception_obj))
-                log_event("core5_execution_evidence_unavailable", _build_vplan_log_payload_dict(
-                    release_obj, vplan_obj, as_of_ts, {"severity_str": "critical", "error_str": str(exception_obj)}),
-                    log_path_str=log_path_str)
-                continue
         expected_broker_position_map_dict = _build_expected_broker_position_map_dict(
             vplan_obj,
             tolerance_float=tolerance_float,
@@ -4189,34 +4277,6 @@ def post_execution_reconcile(
             broker_snapshot_obj=broker_snapshot_obj,
             tolerance_float=tolerance_float,
         )
-        capsule_bool = release_obj.strategy_import_str.startswith("strategies.mr_capsule.")
-        if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR or capsule_bool:
-            # Matching account holdings cannot prove this batch filled. Require
-            # correlated signed fills for every request before completing it.
-            persisted_order_list = state_store_obj.get_broker_order_row_dict_list_for_vplan(int(vplan_obj.vplan_id_int))
-            persisted_fill_list = state_store_obj.get_fill_row_dict_list_for_vplan(int(vplan_obj.vplan_id_int), include_order_identity_bool=True)
-            complete_order_evidence_bool = not broker_snapshot_obj.open_order_id_list
-            for request_obj in build_broker_order_request_list_from_vplan(vplan_obj):
-                matching_order_list = [order_dict for order_dict in persisted_order_list if order_dict.get("order_request_key_str") == request_obj.order_request_key_str]
-                if len(matching_order_list) != 1:
-                    complete_order_evidence_bool = False
-                    continue
-                broker_order_id_str = matching_order_list[0]["broker_order_id_str"]
-                filled_amount_float = sum(float(fill_dict["fill_amount_float"]) for fill_dict in persisted_fill_list if fill_dict["broker_order_id_str"] == broker_order_id_str)
-                if abs(filled_amount_float - request_obj.amount_float) > tolerance_float:
-                    complete_order_evidence_bool = False
-            if not complete_order_evidence_bool:
-                evidence_key_str = "mr_capsule_incomplete_order_evidence_bool" if capsule_bool else "core5_incomplete_order_evidence_bool"
-                reconciliation_result_obj = replace(reconciliation_result_obj, passed_bool=False, status_str="blocked",
-                    mismatch_dict={**reconciliation_result_obj.mismatch_dict, evidence_key_str: True})
-        if core5_evidence_dict is not None and (not core5_evidence_dict["complete_bool"]
-                or decision_plan_obj.snapshot_metadata_dict.get("opening_dispatch_parked_bool")):
-            reconciliation_result_obj = replace(reconciliation_result_obj, passed_bool=False, status_str="blocked",
-                mismatch_dict={**reconciliation_result_obj.mismatch_dict, "core5_reviewed_resume_required_bool": True})
-            if not core5_evidence_dict["terminal_bool"]:
-                from alpha.live.core5_recovery import record_core5_unresolved_cycle
-                record_core5_unresolved_cycle(state_store_obj, release_obj, vplan_obj, as_of_ts,
-                    "Original opening requests still lack complete terminal broker evidence.")
         state_store_obj.insert_vplan_reconciliation_snapshot(
             pod_id_str=vplan_obj.pod_id_str,
             decision_plan_id_int=int(vplan_obj.decision_plan_id_int),
@@ -4225,9 +4285,6 @@ def post_execution_reconcile(
             reconciliation_result_obj=reconciliation_result_obj,
         )
         strategy_state_dict = {} if decision_plan_obj is None else dict(decision_plan_obj.strategy_state_dict)
-        if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
-            prior_core5_state_obj = state_store_obj.get_pod_state(release_obj.pod_id_str)
-            strategy_state_dict = {} if prior_core5_state_obj is None else dict(prior_core5_state_obj.strategy_state_dict)
         state_store_obj.upsert_pod_state(
             PodState(
                 pod_id_str=vplan_obj.pod_id_str,
@@ -4242,12 +4299,6 @@ def post_execution_reconcile(
             snapshot_stage_str="post_execution",
             snapshot_source_str=("virtual_broker" if env_mode_str == "incubation" else "broker"),
         )
-        if core5_evidence_dict is not None and core5_evidence_dict["terminal_bool"] and not reconciliation_result_obj.passed_bool:
-            from alpha.live.core5_recovery import park_core5_cycle
-            park_core5_cycle(state_store_obj, release_obj, vplan_obj, as_of_ts, core5_evidence_dict)
-            log_event("core5_reviewed_resume_required", _build_vplan_log_payload_dict(
-                release_obj, vplan_obj, as_of_ts, {"severity_str": "critical"}), log_path_str=log_path_str)
-            continue
         persisted_broker_order_row_dict_list = state_store_obj.get_broker_order_row_dict_list_for_vplan(
             int(vplan_obj.vplan_id_int or 0)
         )
@@ -4345,13 +4396,8 @@ def post_execution_reconcile(
             )
         completed_bool = bool(reconciliation_result_obj.passed_bool)
         if completed_bool:
-            if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
-                state_store_obj.complete_core5_cycle(int(vplan_obj.decision_plan_id_int), int(vplan_obj.vplan_id_int))
-            elif capsule_bool:
-                state_store_obj.complete_mr_capsule_cycle(int(vplan_obj.decision_plan_id_int), int(vplan_obj.vplan_id_int))
-            else:
-                state_store_obj.mark_vplan_status(int(vplan_obj.vplan_id_int or 0), "completed")
-                state_store_obj.mark_decision_plan_status(int(vplan_obj.decision_plan_id_int), "completed")
+            state_store_obj.mark_vplan_status(int(vplan_obj.vplan_id_int or 0), "completed")
+            state_store_obj.mark_decision_plan_status(int(vplan_obj.decision_plan_id_int), "completed")
             completed_vplan_count_int += 1
             log_event(
                 "post_execution_reconcile_completed",
@@ -4486,14 +4532,18 @@ def get_status_summary(
             else:
                 next_action_str = "post_execution_reconcile"
                 reason_code_str = "waiting_for_post_execution_reconcile"
-        elif latest_decision_plan_obj.status_str in ("completed", "expired", "blocked"):
-            if (release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR
-                    and latest_decision_plan_obj.status_str != "completed"):
-                next_action_str = "resume_core5"
-                reason_code_str = "core5_reviewed_resume_required"
-            elif bool(build_gate_dict["due_bool"]):
+        elif latest_decision_plan_obj.status_str in ("completed", "completed_with_exceptions", "expired", "blocked"):
+            if bool(build_gate_dict["due_bool"]):
                 next_action_str = "build_decision_plan"
                 reason_code_str = "ready_to_build_decision_plan"
+
+        if (is_daily_reconcile_release_bool(release_obj) and latest_decision_plan_obj is not None
+                and latest_decision_plan_obj.status_str not in DAILY_TERMINAL_STATUS_SET
+                and (as_of_ts >= latest_decision_plan_obj.target_execution_timestamp_ts - timedelta(minutes=2)
+                    or latest_decision_plan_obj.status_str in {"submitted", "submitting", "blocked", "expired"})):
+            next_action_str = "post_execution_reconcile"
+            reason_code_str = "daily_cycle_pending"
+            parked_execution_exception_bool = False
 
         pod_status_dict_list.append(
             {
@@ -4898,6 +4948,9 @@ def _pod_has_unresolved_execution_bool(
     state_store_obj: LiveStateStore,
     pod_id_str: str,
 ) -> bool:
+    latest_plan_obj = state_store_obj.get_latest_decision_plan_for_pod(pod_id_str)
+    if latest_plan_obj is not None and is_daily_reconcile_release_bool(state_store_obj.get_release_by_id(latest_plan_obj.release_id_str)):
+        return latest_plan_obj.status_str not in DAILY_TERMINAL_STATUS_SET
     latest_vplan_obj = state_store_obj.get_latest_vplan_for_pod(pod_id_str)
     return latest_vplan_obj is not None and latest_vplan_obj.status_str in ("submitted", "submitting")
 
@@ -5689,31 +5742,6 @@ def _execute_runner_command_detail_dict(
 ) -> dict[str, object]:
     broker_adapter_obj = None
 
-    if parsed_args_obj.command_name_str == "resume_core5":
-        from alpha.live.core5_resume import preview_core5_resume, apply_core5_resume
-        if not parsed_args_obj.pod_id_str:
-            raise ValueError("resume_core5 requires --pod-id.")
-        release_list = load_release_list(parsed_args_obj.releases_root_path_str)
-        validate_enabled_deployment_for_mode(release_list, parsed_args_obj.env_mode_str)
-        release_list = _filter_release_list_for_pod(release_list, parsed_args_obj.pod_id_str)
-        _validate_selected_pod_enabled_for_mode(release_list, parsed_args_obj.env_mode_str, parsed_args_obj.pod_id_str)
-        assert_authorized_release_list(release_list)
-        if len(release_list) != 1:
-            raise ValueError("resume_core5 requires exactly one configured release for the pod.")
-        release_obj = release_list[0]
-        resolver_obj = _coerce_broker_adapter_resolver_obj(broker_adapter_obj=None,
-            broker_adapter_resolver_obj=None,
-            broker_host_str=parsed_args_obj.broker_host_str, broker_port_int=parsed_args_obj.broker_port_int,
-            broker_client_id_int=parsed_args_obj.broker_client_id_int,
-            broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
-            state_store_obj=state_store_obj, as_of_ts=as_of_ts)
-        broker_adapter_obj = resolver_obj.get_adapter(release_obj)
-        if parsed_args_obj.review_hash_str:
-            return apply_core5_resume(state_store_obj, broker_adapter_obj, release_obj, as_of_ts,
-                review_hash_str=parsed_args_obj.review_hash_str, reason_str=parsed_args_obj.reason_str,
-                operator_str=parsed_args_obj.operator_str)
-        return preview_core5_resume(state_store_obj, broker_adapter_obj, release_obj, as_of_ts)
-
     if parsed_args_obj.command_name_str == "build_decision_plans":
         return build_decision_plans(
             state_store_obj=state_store_obj,
@@ -5993,7 +6021,6 @@ def main(argv_list: list[str] | None = None) -> int:
             "show_decision_plan",
             "show_vplan",
             "submit_vplan",
-            "resume_core5",
             "post_execution_reconcile",
             "eod_snapshot",
             "tick",
@@ -6015,9 +6042,6 @@ def main(argv_list: list[str] | None = None) -> int:
     parser_obj.add_argument("--decision-plan-id", dest="decision_plan_id_int", type=int, default=None)
     parser_obj.add_argument("--vplan-id", dest="vplan_id_int", type=int, default=None)
     parser_obj.add_argument("--pod-id", dest="pod_id_str", default=None)
-    parser_obj.add_argument("--review-hash", dest="review_hash_str", default=None)
-    parser_obj.add_argument("--reason", dest="reason_str", default="")
-    parser_obj.add_argument("--operator", dest="operator_str", default="")
     parser_obj.add_argument("--broker-host", dest="broker_host_str", default=None)
     parser_obj.add_argument("--broker-port", dest="broker_port_int", type=int, default=None)
     parser_obj.add_argument("--broker-client-id", dest="broker_client_id_int", type=int, default=None)

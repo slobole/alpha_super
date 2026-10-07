@@ -7,7 +7,7 @@ from alpha.live import runner as runner_module
 from alpha.live.models import BrokerOrderRecord, DecisionPlan, SubmitBatchResult
 from alpha.live.runner import build_decision_plans, eod_snapshot
 from alpha.live.state_store_v2 import LiveStateStore
-from test_live_mr_capsule_execution_policy import alert_rows, reconcile_case, seed_execution
+from test_live_mr_capsule_execution_policy import alert_rows, reconcile_case, seed_execution, close_case
 from test_live_mr_capsule_recovery import (
     MARKET_TIMEZONE_OBJ, RECONCILE_TIMESTAMP_TS, capsule_case,
 )
@@ -40,22 +40,24 @@ def test_accepted_residual_advances_through_eod_with_actual_holdings(
 
     monkeypatch.setattr(broker_obj, "submit_order_request_list", reject_recovery)
     result_tuple = reconcile_case(capsule_case)
-    assert result_tuple[0].passed_bool and result_tuple[1] == "accepted_residual"
+    assert not result_tuple[0].passed_bool and result_tuple[1] == "pending"
+    result_tuple = close_case(capsule_case)
+    assert result_tuple[0].passed_bool and result_tuple[1] == "completed_with_exceptions"
     expected_position_dict = {"AAPL": buy_fill_float, "BIL": 980.0 + bil_fill_float, "MSFT": 5.0}
     assert state_store_obj.get_pod_state(release_obj.pod_id_str).position_amount_map == expected_position_dict
-    assert state_store_obj.get_latest_vplan_for_pod(release_obj.pod_id_str).status_str == "completed"
-    assert state_store_obj.get_decision_plan_by_id(vplan_obj.decision_plan_id_int).status_str == "completed"
+    assert state_store_obj.get_latest_vplan_for_pod(release_obj.pod_id_str).status_str == "completed_with_exceptions"
+    assert state_store_obj.get_decision_plan_by_id(vplan_obj.decision_plan_id_int).status_str == "completed_with_exceptions"
 
     # Restart cannot resend the accepted missed buy or the rejected recovery.
     restarted_store_obj = LiveStateStore(str(tmp_path / "recovery.sqlite3"))
     restarted_case_tuple = (restarted_store_obj, *capsule_case[1:])
-    assert reconcile_case(restarted_case_tuple)[0].passed_bool
+    assert not close_case(restarted_case_tuple)[0].passed_bool  # Already finalized; no second state transition.
     expected_recovery_count_int = int(outcome_str == "rejected_bil_recovery")
     assert len(recovery_request_list) == expected_recovery_count_int
     if recovery_request_list:
         assert (recovery_request_list[0].asset_str, recovery_request_list[0].amount_float) == ("BIL", -60.0)
     alert_row_dict, = alert_rows(restarted_store_obj)
-    assert alert_row_dict["alert_kind_str"] == "accepted_residual"
+    assert alert_row_dict["alert_kind_str"] == "daily_exception"
 
     # The next completed signal session is February 1; its orders would execute
     # on February 2. Exercise the real EOD gate and SQL state write before build.

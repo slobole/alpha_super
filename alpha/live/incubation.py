@@ -130,6 +130,15 @@ class IncubationBrokerAdapter(BrokerAdapter):
     def is_session_ready(self, account_route_str: str) -> bool:
         return self._get_release_for_account_route(account_route_str) is not None
 
+    def get_daily_execution_snapshot(self, account_route_str: str):
+        from alpha.live.daily_broker import DailyExecutionSnapshot
+
+        # Virtual orders settle atomically at their execution mark; they never
+        # remain open at the virtual broker. Missing prices still raise, so an
+        # unsettled simulated account cannot masquerade as a complete snapshot.
+        snapshot_obj = self.get_account_snapshot(account_route_str)
+        return DailyExecutionSnapshot(snapshot_obj, [], self.as_of_ts, self.as_of_ts)
+
     def get_account_snapshot(self, account_route_str: str) -> BrokerSnapshot:
         self._settle_due_vplan_list_for_account(account_route_str)
         release_obj = self._require_release_for_account_route(account_route_str)
@@ -260,6 +269,10 @@ class IncubationBrokerAdapter(BrokerAdapter):
         broker_order_request_list: list[BrokerOrderRequest],
         submitted_timestamp_ts: datetime,
     ) -> SubmitBatchResult:
+        if any(":daily-completion:" in request_obj.order_request_key_str for request_obj in broker_order_request_list):
+            # A current intraday market fill requires a separately qualified
+            # price mark. The opening-auction simulator cannot invent one.
+            raise NotImplementedError("Incubation DAILY market completion has no qualified intraday fill-price model.")
         broker_order_record_list: list[BrokerOrderRecord] = []
         broker_order_event_list: list[BrokerOrderEvent] = []
         broker_order_ack_list: list[BrokerOrderAck] = []
@@ -686,6 +699,31 @@ class IncubationBrokerAdapter(BrokerAdapter):
             # Check each leg too: opposite orders can have a zero net delta.
             return
         release_obj = self.state_store_obj.get_release_by_id(vplan_obj.release_id_str)
+        indexed_row_list = list(enumerate(vplan_obj.vplan_row_list, start=1))
+        from alpha.live.daily_reconcile import is_daily_reconcile_release_bool
+        if is_daily_reconcile_release_bool(release_obj):
+            # A failed DAILY batch remains 'submitted' for end-of-session
+            # reconciliation. Only durable virtual acceptance authorizes a fill.
+            submission_key_str = str(vplan_obj.submission_key_str or f"vplan:{vplan_obj.decision_plan_id_int}")
+            accepted_record_dict = {row_dict["order_request_key_str"]: row_dict for row_dict in
+                self.state_store_obj.get_broker_order_row_dict_list_for_vplan(vplan_obj.vplan_id_int, include_evidence_bool=True)}
+            accepted_row_list = []
+            for ordinal_int, row_obj in indexed_row_list:
+                request_key_str = f"{submission_key_str}:{row_obj.asset_str}:{ordinal_int}"
+                record_dict = accepted_record_dict.get(request_key_str)
+                if record_dict is None or abs(float(row_obj.order_delta_share_float)) <= 1e-9:
+                    continue
+                if (record_dict["account_route_str"] != vplan_obj.account_route_str
+                        or record_dict["raw_payload_dict"].get("broker_str") != "incubation"
+                        or record_dict["broker_order_id_str"] != incubation_broker_order_id_str(request_key_str)
+                        or record_dict["asset_str"] != row_obj.asset_str or record_dict["unit_str"] != "shares"
+                        or record_dict["amount_float"] != float(row_obj.order_delta_share_float)
+                        or record_dict["status_str"] != "PendingSubmit"):
+                    raise RuntimeError("Incubation DAILY acceptance conflicts with its original frozen leg.")
+                accepted_row_list.append((ordinal_int, row_obj))
+            if not accepted_row_list:
+                return
+            indexed_row_list = accepted_row_list
         pod_state_obj = self._get_pod_state_or_default(release_obj)
         fill_price_field_str = "Close" if vplan_obj.execution_policy_str == "same_day_moc" else "Open"
         # *** CRITICAL*** Settlement date is the target execution session from
@@ -706,7 +744,7 @@ class IncubationBrokerAdapter(BrokerAdapter):
         )
         settlement_asset_str_list = [
             str(vplan_row_obj.asset_str)
-            for vplan_row_obj in vplan_obj.vplan_row_list
+            for _, vplan_row_obj in indexed_row_list
             if abs(float(vplan_row_obj.order_delta_share_float)) > 1e-9
         ]
         session_open_price_by_asset_map_dict: dict[str, SessionOpenPrice] = {}
@@ -748,7 +786,7 @@ class IncubationBrokerAdapter(BrokerAdapter):
         cash_ledger_entry_list: list[CashLedgerEntry] = []
         submission_key_str = str(vplan_obj.submission_key_str or f"vplan:{vplan_obj.decision_plan_id_int}")
 
-        for request_idx_int, vplan_row_obj in enumerate(vplan_obj.vplan_row_list, start=1):
+        for request_idx_int, vplan_row_obj in indexed_row_list:
             fill_quantity_float = float(vplan_row_obj.order_delta_share_float)
             if abs(fill_quantity_float) <= 1e-9:
                 continue
