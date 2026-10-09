@@ -2686,6 +2686,18 @@ def build_decision_plans(
                 raise
             skipped_decision_plan_count_int += 1
             reason_code_str = "mr_capsule_decision_blocked" if capsule_bool else "core5_decision_blocked"
+            if capsule_bool:
+                from alpha.live.mr_capsule_adapter import CapsuleHoldingMismatchError
+                if isinstance(exception_obj, CapsuleHoldingMismatchError):
+                    from alpha.live.daily_notifications import enqueue_capsule_holding_halt
+                    signal_date_ts = scheduler_utils.get_latest_completed_session_label_ts(
+                        as_of_ts, release_obj.session_calendar_id_str)
+                    try:
+                        enqueue_capsule_holding_halt(state_store_obj, release_obj, signal_date_ts, exception_obj, as_of_ts)
+                    except Exception as alert_exception_obj:
+                        log_event("daily_alert_enqueue_failed", _build_release_log_payload_dict(release_obj, as_of_ts,
+                            {"severity_str": "critical", "error_str": str(alert_exception_obj),
+                                "cycle_error_str": str(exception_obj)}), log_path_str=log_path_str)
             reason_counter_obj[reason_code_str] += 1
             log_event(reason_code_str, _build_release_log_payload_dict(release_obj, as_of_ts, {"error_str": str(exception_obj)}), log_path_str=log_path_str)
             _emit_live_trace_event("decision_plan.build", release_obj=release_obj, as_of_ts=as_of_ts,
@@ -3415,13 +3427,18 @@ def submit_ready_vplans(
             # Cash postings may change; never resize the saved Close-T intent.
             decision_plan_obj = state_store_obj.get_decision_plan_by_id(int(vplan_obj.decision_plan_id_int))
             capsule_block_reason_str = "mr_capsule_pre_submit_account_changed"
+            if decision_plan_obj.snapshot_metadata_dict.get("funding_buys_dropped_bool"):
+                suppressed_request_list = [request_obj for request_obj in broker_order_request_list
+                    if request_obj.amount_float > 0]
+                broker_order_request_list = [request_obj for request_obj in broker_order_request_list
+                    if request_obj.amount_float < 0]
             try:
                 fresh_capsule_snapshot_obj = broker_adapter_obj.get_capsule_account_snapshot(vplan_obj.account_route_str)
                 validate_mr_capsule_execution_contract(
                     release_obj, decision_plan_obj, fresh_capsule_snapshot_obj
                 )
                 capsule_block_reason_str = "mr_capsule_funding_not_verified"
-                preview_request_list = build_broker_order_request_list_from_vplan(vplan_obj)
+                preview_request_list = list(broker_order_request_list)
                 funding_evidence_dict = ({"simulated_bool": True, "source_str": "incubation"}
                     if release_obj.mode_str == "incubation" else broker_adapter_obj.get_capsule_funding_evidence(
                         vplan_obj.account_route_str, preview_request_list))
@@ -3437,8 +3454,26 @@ def submit_ready_vplans(
                     continue
                 if capsule_block_reason_str == "mr_capsule_funding_not_verified":
                     # Funding can suppress new risk, never a verified exit.
-                    suppressed_request_list = [request_obj for request_obj in broker_order_request_list
-                        if request_obj.amount_float > 0]
+                    from alpha.live.capsule_funding import persist_capsule_buy_drop
+                    try:
+                        drop_saved_bool = persist_capsule_buy_drop(state_store_obj, release_obj, vplan_obj)
+                    except Exception as persistence_exception_obj:
+                        reason_counter_obj["mr_capsule_funding_drop_persist_failed"] += 1
+                        try:
+                            state_store_obj.block_unsubmitted_daily_cycle(int(vplan_obj.decision_plan_id_int), "blocked")
+                        except Exception as block_exception_obj:
+                            log_event("mr_capsule_funding_cycle_block_failed", _build_vplan_log_payload_dict(
+                                release_obj, vplan_obj, as_of_ts, {"severity_str": "critical",
+                                    "error_str": str(block_exception_obj)}), log_path_str=log_path_str)
+                        log_event("mr_capsule_funding_drop_persist_failed", _build_vplan_log_payload_dict(
+                            release_obj, vplan_obj, as_of_ts, {"severity_str": "critical",
+                                "error_str": str(persistence_exception_obj), "funding_error_str": str(exception_obj)}),
+                            log_path_str=log_path_str)
+                        continue
+                    if not drop_saved_bool:
+                        continue
+                    suppressed_request_list.extend(request_obj for request_obj in broker_order_request_list
+                        if request_obj.amount_float > 0)
                     broker_order_request_list = [request_obj for request_obj in broker_order_request_list
                         if request_obj.amount_float < 0]
                     log_event(capsule_block_reason_str, _build_vplan_log_payload_dict(
@@ -3474,10 +3509,13 @@ def submit_ready_vplans(
                     metadata_row_obj = connection_obj.execute("SELECT snapshot_metadata_json_str FROM decision_plan WHERE decision_plan_id_int=?",
                         (vplan_obj.decision_plan_id_int,)).fetchone()
                     metadata_dict = json.loads(metadata_row_obj[0])
-                    # A proved pre-send retry may now fund the complete batch.
-                    metadata_dict["funding_buys_dropped_bool"] = bool(suppressed_request_list)
-                    connection_obj.execute("UPDATE decision_plan SET snapshot_metadata_json_str=? WHERE decision_plan_id_int=?",
-                        (json.dumps(metadata_dict, sort_keys=True), vplan_obj.decision_plan_id_int))
+                    # Another capsule preflight may have latched a drop before
+                    # our claim. Refresh it here; never clear a cycle's drop.
+                    if metadata_dict.get("funding_buys_dropped_bool"):
+                        suppressed_request_list.extend(request_obj for request_obj in broker_order_request_list
+                            if request_obj.amount_float > 0)
+                        broker_order_request_list = [request_obj for request_obj in broker_order_request_list
+                            if request_obj.amount_float < 0]
             if guarded_dispatch_bool:
                 broker_order_request_list = [replace(request_obj,
                     submission_deadline_timestamp_str=moo_dispatch_deadline_ts(vplan_obj).isoformat())
@@ -3924,7 +3962,8 @@ def eod_snapshot(
 
 
 def _persist_daily_execution_report(state_store_obj, broker_adapter_obj, release_obj, decision_plan_obj,
-        vplan_obj, record_list, event_list, fill_list, as_of_ts, log_path_str, *, late_bool=False):
+        vplan_obj, record_list, event_list, fill_list, as_of_ts, log_path_str, *, late_bool=False,
+        collect_open_prices_bool=False):
     identity_dict = {"decision_plan_id_int": decision_plan_obj.decision_plan_id_int, "vplan_id_int": vplan_obj.vplan_id_int}
     with state_store_obj._connect() as connection_obj:
         completion_ref_set = {row_obj[0] for row_obj in connection_obj.execute(
@@ -3959,31 +3998,34 @@ def _persist_daily_execution_report(state_store_obj, broker_adapter_obj, release
     late_order_id_set.update(legacy_manual_key_dict)
     session_context_dict = _session_open_context_dict(release_obj=release_obj,
         reference_timestamp_ts=vplan_obj.target_execution_timestamp_ts)
-    try:
-        open_price_list = broker_adapter_obj.get_session_open_price_list(account_route_str=release_obj.account_route_str,
-            asset_str_list=sorted({fill_obj.asset_str for fill_obj in fill_list}),
-            session_open_timestamp_ts=session_context_dict["session_open_timestamp_ts"],
-            session_calendar_id_str=release_obj.session_calendar_id_str)
-        valid_open_list = []
-        for price_obj in open_price_list:
-            if (price_obj.account_route_str != release_obj.account_route_str
-                    or price_obj.session_date_str != session_context_dict["session_date_str"]):
-                raise ValueError("Open reference account/session mismatch.")
-            if price_obj.official_open_price_float is None:
-                continue
-            if not math.isfinite(price_obj.official_open_price_float) or price_obj.official_open_price_float <= 0:
-                raise ValueError("Invalid official open reference.")
-            # ticker.open is the observation day's field, even if the broker
-            # was asked for an older session. Never relabel that price.
-            if (price_obj.open_price_source_str == "ibkr.tick_open" and scheduler_utils.to_market_timestamp_ts(
-                    price_obj.snapshot_timestamp_ts, release_obj.session_calendar_id_str).date().isoformat()
-                    != session_context_dict["session_date_str"]):
-                raise ValueError("Current tick open cannot label a historical execution session.")
-            valid_open_list.append(price_obj)
-        state_store_obj.upsert_session_open_price_list(valid_open_list)
-    except Exception as exception_obj:
-        log_event("daily_open_price_reporting_unavailable", _build_decision_plan_log_payload_dict(
-            release_obj, decision_plan_obj, as_of_ts, {"severity_str": "warning", "error_str": str(exception_obj)}), log_path_str=log_path_str)
+    open_price_error_str = None
+    if collect_open_prices_bool:
+        try:
+            open_price_list = broker_adapter_obj.get_session_open_price_list(account_route_str=release_obj.account_route_str,
+                asset_str_list=sorted({fill_obj.asset_str for fill_obj in fill_list}),
+                session_open_timestamp_ts=session_context_dict["session_open_timestamp_ts"],
+                session_calendar_id_str=release_obj.session_calendar_id_str)
+            valid_open_list = []
+            for price_obj in open_price_list:
+                if (price_obj.account_route_str != release_obj.account_route_str
+                        or price_obj.session_date_str != session_context_dict["session_date_str"]):
+                    raise ValueError("Open reference account/session mismatch.")
+                if price_obj.official_open_price_float is None:
+                    continue
+                if not math.isfinite(price_obj.official_open_price_float) or price_obj.official_open_price_float <= 0:
+                    raise ValueError("Invalid official open reference.")
+                # ticker.open is the observation day's field, even if the broker
+                # was asked for an older session. Never relabel that price.
+                if (price_obj.open_price_source_str == "ibkr.tick_open" and scheduler_utils.to_market_timestamp_ts(
+                        price_obj.snapshot_timestamp_ts, release_obj.session_calendar_id_str).date().isoformat()
+                        != session_context_dict["session_date_str"]):
+                    raise ValueError("Current tick open cannot label a historical execution session.")
+                valid_open_list.append(price_obj)
+            state_store_obj.upsert_session_open_price_list(valid_open_list)
+        except Exception as exception_obj:
+            open_price_error_str = str(exception_obj) or type(exception_obj).__name__
+            log_event("daily_open_price_reporting_unavailable", _build_decision_plan_log_payload_dict(
+                release_obj, decision_plan_obj, as_of_ts, {"severity_str": "warning", "error_str": open_price_error_str}), log_path_str=log_path_str)
     open_price_map_dict = state_store_obj.get_session_open_price_map_dict(account_route_str=release_obj.account_route_str,
         session_date_str=session_context_dict["session_date_str"])
     normalized_fill_list = _annotate_fill_list_with_session_open_price(
@@ -3998,10 +4040,13 @@ def _persist_daily_execution_report(state_store_obj, broker_adapter_obj, release
         order_request_key_str=legacy_manual_key_dict.get(event_obj.broker_order_id_str)
             or event_obj.order_request_key_str or known_key_dict.get(event_obj.broker_order_id_str)) for event_obj in event_list])
     state_store_obj.upsert_vplan_fill_list(normalized_fill_list)
+    return open_price_error_str
 
 
 def _reconcile_daily_cycles(state_store_obj, broker_adapter_resolver_obj, as_of_ts, env_mode_str,
         pod_id_str, log_path_str, trace_enabled_bool, trace_log_root_path_str):
+    from alpha.live.daily_reporting import claim_post_close_report_attempt, finish_post_close_report_attempt
+
     completed_count_int = 0
     for decision_plan_obj in state_store_obj.get_pending_daily_decision_plan_list():
         if pod_id_str is not None and decision_plan_obj.pod_id_str != pod_id_str:
@@ -4013,9 +4058,18 @@ def _reconcile_daily_cycles(state_store_obj, broker_adapter_resolver_obj, as_of_
         vplan_obj = state_store_obj.get_latest_vplan_for_decision(decision_plan_obj.decision_plan_id_int)
         try:
             broker_adapter_obj = broker_adapter_resolver_obj.get_adapter(release_obj)
+            collect_report_bool = False
             if vplan_obj is not None:
+                try:
+                    collect_report_bool = claim_post_close_report_attempt(
+                        state_store_obj, release_obj, decision_plan_obj, as_of_ts)
+                except Exception as exception_obj:
+                    log_event("daily_report_audit_unavailable", _build_decision_plan_log_payload_dict(
+                        release_obj, decision_plan_obj, as_of_ts, {"severity_str": "warning", "error_str": str(exception_obj)}), log_path_str=log_path_str)
+            if collect_report_bool:
                 # Recording failure is observable but cannot veto fresh holdings
                 # settlement. The subsequent daily refresh remains mandatory.
+                reporting_error_str = None
                 try:
                     allowed_order_id_set = {str(row_dict["broker_order_id_str"]) for row_dict in
                         state_store_obj.get_broker_order_row_dict_list_for_vplan(vplan_obj.vplan_id_int)}
@@ -4046,10 +4100,17 @@ def _reconcile_daily_cycles(state_store_obj, broker_adapter_resolver_obj, as_of_
                         since_timestamp_ts=vplan_obj.submission_timestamp_ts,
                         submission_key_str=vplan_obj.submission_key_str or f"vplan:{vplan_obj.decision_plan_id_int}",
                         allowed_broker_order_id_set=allowed_order_id_set)
-                    _persist_daily_execution_report(state_store_obj, broker_adapter_obj, release_obj, decision_plan_obj,
-                        vplan_obj, record_list, event_list, fill_list, as_of_ts, log_path_str)
+                    reporting_error_str = _persist_daily_execution_report(state_store_obj, broker_adapter_obj, release_obj, decision_plan_obj,
+                        vplan_obj, record_list, event_list, fill_list, as_of_ts, log_path_str,
+                        collect_open_prices_bool=True)
                 except Exception as exception_obj:
+                    reporting_error_str = str(exception_obj) or type(exception_obj).__name__
                     log_event("daily_fill_reporting_unavailable", _build_decision_plan_log_payload_dict(
+                        release_obj, decision_plan_obj, as_of_ts, {"severity_str": "warning", "error_str": str(exception_obj)}), log_path_str=log_path_str)
+                try:
+                    finish_post_close_report_attempt(state_store_obj, decision_plan_obj, reporting_error_str)
+                except Exception as exception_obj:
+                    log_event("daily_report_audit_unavailable", _build_decision_plan_log_payload_dict(
                         release_obj, decision_plan_obj, as_of_ts, {"severity_str": "warning", "error_str": str(exception_obj)}), log_path_str=log_path_str)
             dispatch_dict = decision_plan_obj.snapshot_metadata_dict.get("opening_dispatch_result_dict", {})
             vplan_sent_bool = vplan_obj is not None and vplan_obj.status_str in {"submitting", "submitted", "parked"}
@@ -4084,6 +4145,16 @@ def _reconcile_daily_cycles(state_store_obj, broker_adapter_resolver_obj, as_of_
                 reason_code_str=daily_result_obj.status_str, payload_dict=payload_dict,
                 trace_enabled_bool=trace_enabled_bool, trace_log_root_path_str=trace_log_root_path_str)
         except Exception as exception_obj:
+            # The daily-only helper checks the exchange close + one hour and
+            # deduplicates by cycle before enqueueing any CRITICAL notification.
+            from alpha.live.daily_notifications import enqueue_daily_cycle_overdue
+            try:
+                enqueue_daily_cycle_overdue(state_store_obj, release_obj, decision_plan_obj, as_of_ts,
+                    error_str=str(exception_obj))
+            except Exception as alert_exception_obj:
+                log_event("daily_alert_enqueue_failed", _build_decision_plan_log_payload_dict(
+                    release_obj, decision_plan_obj, as_of_ts, {"severity_str": "critical",
+                        "error_str": str(alert_exception_obj), "cycle_error_str": str(exception_obj)}), log_path_str=log_path_str)
             log_event("daily_cycle_reconcile_retry", _build_decision_plan_log_payload_dict(
                 release_obj, decision_plan_obj, as_of_ts, {"status_str": "pending", "error_str": str(exception_obj),
                     "severity_str": "error"}), log_path_str=log_path_str)

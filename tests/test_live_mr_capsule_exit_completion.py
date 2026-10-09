@@ -118,25 +118,41 @@ def test_partially_filled_stock_market_completion_is_not_retried_after_restart(c
 
 
 @pytest.mark.parametrize("hour_int,minute_int,recovery_expected_bool", [(12, 59, True), (13, 0, False), (13, 1, False)])
-def test_market_completion_respects_actual_early_close(capsule_case, hour_int, minute_int, recovery_expected_bool):
+def test_market_completion_respects_actual_early_close(capsule_case, hour_int, minute_int, recovery_expected_bool, monkeypatch):
     target_timestamp_ts = datetime(2024, 11, 29, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ)
     as_of_ts = target_timestamp_ts.replace(hour=hour_int, minute=minute_int)
     case_tuple = _exit_case(capsule_case, "MSFT", target_timestamp_ts=target_timestamp_ts)
     store_obj, broker_obj, release_obj, _, _, _ = seed_execution(case_tuple, {"MSFT": -4.0})
     snapshot_obj = broker_obj.get_account_snapshot(release_obj.account_route_str)
     broker_obj._snapshot_map[release_obj.account_route_str] = replace(snapshot_obj, snapshot_timestamp_ts=as_of_ts)
+    history_call_list = []
+    original_history_fn = broker_obj.get_recent_order_state_snapshot
+
+    def record_history_fn(**argument_dict):
+        history_call_list.append(argument_dict)
+        return original_history_fn(**argument_dict)
+
+    monkeypatch.setattr(broker_obj, "get_recent_order_state_snapshot", record_history_fn)
     result_tuple = reconcile_case(case_tuple, as_of_ts)
     assert result_tuple[0].passed_bool == (not recovery_expected_bool)
     assert len(broker_obj.submitted_order_request_list) == int(recovery_expected_bool)
     assert result_tuple[1] == ("pending" if recovery_expected_bool else "completed_with_exceptions")
     if recovery_expected_bool:
         assert broker_obj.submitted_order_request_list[0].execution_deadline_timestamp_str == "2024-11-29T13:00:00-05:00"
-        # Stub send reports only ACKs. A later normal poll records its fill;
-        # neither the send nor lifecycle completion waits on fill reporting.
+        # Stub send reports only ACKs. In-session polls do not fetch history;
+        # the first post-close poll records the original intraday fill time.
+        assert history_call_list == []
         reconcile_case(case_tuple, as_of_ts)
+        assert history_call_list == []
+        assert store_obj.get_fill_row_dict_list_for_vplan(case_tuple[3].vplan_id_int) == []
+        final_result_tuple = close_case(case_tuple)
+        assert final_result_tuple[0].passed_bool and final_result_tuple[1] == "completed"
+        assert broker_obj.get_account_snapshot(release_obj.account_route_str).snapshot_timestamp_ts == target_timestamp_ts.replace(hour=13, minute=0)
+        assert len(history_call_list) == 1
         assert len(broker_obj.submitted_order_request_list) == 1
         late_fill_list = [row_dict for row_dict in store_obj.get_fill_row_dict_list_for_vplan(case_tuple[3].vplan_id_int)
                          if row_dict["open_price_source_str"] == "late_execution"]
+        assert len(late_fill_list) == 1
         assert datetime.fromisoformat(late_fill_list[0]["fill_timestamp_str"]) == as_of_ts
 
 

@@ -44,6 +44,7 @@ if str(REPO_ROOT_PATH) not in sys.path:
 import alpha.live.dashboard as dashboard_module
 import alpha.live.dashboard_v3.notifications as notifications_module
 import alpha.live.mr_capsule_notifications as capsule_notifications_module
+import alpha.live.daily_notifications as daily_notifications_module
 import alpha.live.ops_report as ops_report_module
 from scripts.norgate_config_env import load_config_env_file
 
@@ -227,6 +228,21 @@ def _run_capsule_notifications_tuple(summary_dict, mode_str, webhook_url_str):
                 result_dict["capsule_notification_pending_count_int"] += pending_int
             if pod_key_tuple[0] == "live" and result_dict["capsule_notification_pending_live_count_int"] is not None:
                 result_dict["capsule_notification_pending_live_count_int"] += pending_int
+            # Additional daily-only outbox supports holding halts before a
+            # DecisionPlan exists, plus overdue cycles. Legacy pods never enter.
+            phase_str = "delivery"
+            daily_delivery_list = daily_notifications_module.deliver_daily_alerts(
+                pod_summary_dict, webhook_url_str=webhook_url_str,
+                webhook_poster_fn=notifications_module.post_discord_webhook_bool, mode_str=mode_str)
+            if result_dict["capsule_notification_attempt_count_int"] is not None:
+                result_dict["capsule_notification_attempt_count_int"] += len(daily_delivery_list)
+            phase_str = "pending"
+            daily_pending_int = daily_notifications_module.pending_daily_alert_count_int(
+                pod_summary_dict, mode_str=mode_str)
+            if result_dict["capsule_notification_pending_count_int"] is not None:
+                result_dict["capsule_notification_pending_count_int"] += daily_pending_int
+            if pod_key_tuple[0] == "live" and result_dict["capsule_notification_pending_live_count_int"] is not None:
+                result_dict["capsule_notification_pending_live_count_int"] += daily_pending_int
         except Exception as exception_obj:
             # A partly completed delivery/read cannot honestly report zero.
             if phase_str != "pending":

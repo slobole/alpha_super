@@ -52,10 +52,13 @@ def test_saved_supplemental_id_keeps_late_label_during_sparse_refresh(daily_case
     runner._persist_daily_execution_report(store_obj, broker_obj, release_obj, decision_obj, plan_obj,
         [replace(record_obj, order_request_key_str=None)], [], [_fill(release_obj, decision_obj, plan_obj)],
         CLOSE_TS, str(tmp_path / "report.log"))
-    fill_dict, = store_obj.get_fill_row_dict_list_for_vplan(plan_obj.vplan_id_int, include_evidence_bool=True)
+    fill_dict, = store_obj.get_fill_row_dict_list_for_vplan(plan_obj.vplan_id_int)
+    with store_obj._connect() as connection_obj:
+        payload_str, = connection_obj.execute("SELECT raw_payload_json_str FROM vplan_fill WHERE vplan_id_int=?",
+            (plan_obj.vplan_id_int,)).fetchone()
     assert fill_dict["official_open_price_float"] is None
     assert fill_dict["open_price_source_str"] == "late_execution"
-    assert fill_dict["raw_payload_dict"]["execution_phase_str"] == "late_execution"
+    assert json.loads(payload_str)["execution_phase_str"] == "late_execution"
     assert store_obj.get_broker_order_row_dict_list_for_vplan(plan_obj.vplan_id_int)[0]["order_request_key_str"] == request_obj.order_request_key_str
 
 

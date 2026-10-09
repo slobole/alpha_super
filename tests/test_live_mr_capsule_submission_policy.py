@@ -163,7 +163,7 @@ def test_base_adapter_refuses_unimplemented_funding_and_gateway_uses_opt_in_meth
     assert [entry_tuple[0] for entry_tuple in called_method_list] == ["snapshot", "orders", "funding"]
 
 
-def test_funded_retry_clears_buy_drop_before_daily_bil_completion(capsule_case, monkeypatch):
+def test_funded_retry_keeps_buy_drop_and_withholds_daily_bil_completion(capsule_case, monkeypatch):
     store_obj, broker_obj, release_obj, plan_obj, option_dict, _ = capsule_case
     original_funding_fn = broker_obj.get_capsule_funding_evidence
     original_trace_fn = runner_module._emit_live_trace_event
@@ -196,18 +196,99 @@ def test_funded_retry_clears_buy_drop_before_daily_bil_completion(capsule_case, 
 
     assert runner_module.submit_ready_vplans(store_obj, broker_obj,
         SUBMIT_TIMESTAMP_TS, "paper", False, **option_dict)["submitted_vplan_count_int"] == 1
-    assert [request_obj.asset_str for request_obj in broker_obj.submitted_order_request_list] == ["BIL", "AAPL"]
-    assert store_obj.get_decision_plan_by_id(plan_obj.decision_plan_id_int).snapshot_metadata_dict["funding_buys_dropped_bool"] is False
+    assert [request_obj.asset_str for request_obj in broker_obj.submitted_order_request_list] == ["BIL"]
+    assert store_obj.get_decision_plan_by_id(plan_obj.decision_plan_id_int).snapshot_metadata_dict["funding_buys_dropped_bool"] is True
 
-    # Fresh broker truth, not fill totals, determines the still-required BIL sale.
+    # No supplemental BIL sale is allowed after this cycle's buys were dropped.
     snapshot_obj = broker_obj.get_account_snapshot(release_obj.account_route_str)
     broker_obj.seed_account_snapshot(release_obj.account_route_str, snapshot_obj.cash_float,
         snapshot_obj.net_liq_float, {**snapshot_obj.position_amount_map, "BIL": plan_obj.target_share_map["BIL"] + 60},
         RECONCILE_TIMESTAMP_TS, session_mode_str="paper")
     runner_module.post_execution_reconcile(store_obj, broker_obj, RECONCILE_TIMESTAMP_TS, "paper", **option_dict)
-    completion_obj = broker_obj.submitted_order_request_list[-1]
-    assert (completion_obj.asset_str, completion_obj.amount_float, completion_obj.broker_order_type_str) == ("BIL", -60.0, "MKT")
-    assert len(broker_obj.submitted_order_request_list) == 3
+    assert len(broker_obj.submitted_order_request_list) == 1
     assert runner_module.submit_ready_vplans(store_obj, broker_obj,
         SUBMIT_TIMESTAMP_TS, "paper", False, **option_dict)["submitted_vplan_count_int"] == 0
-    assert len(broker_obj.submitted_order_request_list) == 3
+    assert len(broker_obj.submitted_order_request_list) == 1
+
+
+def test_funding_drop_survives_crash_before_claim_and_reopened_store(capsule_case, monkeypatch):
+    from alpha.live.state_store_v2 import LiveStateStore
+
+    store_obj, broker_obj, _, plan_obj, option_dict, _ = capsule_case
+    original_funding_fn = broker_obj.get_capsule_funding_evidence
+
+    def funding_failure_fn(*argument_tuple):
+        raise ValueError("Insufficient broker buying power")
+
+    def crash_fn(vplan_id_int):
+        assert store_obj.get_decision_plan_by_id(plan_obj.decision_plan_id_int).snapshot_metadata_dict["funding_buys_dropped_bool"]
+        raise KeyboardInterrupt("Synthetic process stop before claim")
+
+    monkeypatch.setattr(broker_obj, "get_capsule_funding_evidence", funding_failure_fn)
+    monkeypatch.setattr(store_obj, "claim_vplan_for_submission", crash_fn)
+    with pytest.raises(KeyboardInterrupt, match="Synthetic"):
+        runner_module.submit_ready_vplans(store_obj, broker_obj, SUBMIT_TIMESTAMP_TS, "paper", False, **option_dict)
+    assert not broker_obj.submitted_order_request_list
+    restarted_store_obj = LiveStateStore(store_obj.db_path_str)
+
+    def funding_recovered_fn(account_route_str, request_list):
+        assert all(request_obj.amount_float < 0 for request_obj in request_list)
+        return original_funding_fn(account_route_str, request_list)
+
+    monkeypatch.setattr(broker_obj, "get_capsule_funding_evidence", funding_recovered_fn)
+    assert runner_module.submit_ready_vplans(restarted_store_obj, broker_obj,
+        SUBMIT_TIMESTAMP_TS, "paper", False, **option_dict)["submitted_vplan_count_int"] == 1
+    assert [request_obj.asset_str for request_obj in broker_obj.submitted_order_request_list] == ["BIL"]
+    assert restarted_store_obj.get_decision_plan_by_id(plan_obj.decision_plan_id_int).snapshot_metadata_dict["funding_buys_dropped_bool"]
+
+
+def test_drop_from_concurrent_preflight_is_reloaded_after_claim(capsule_case, monkeypatch):
+    from alpha.live.capsule_funding import persist_capsule_buy_drop
+
+    store_obj, broker_obj, release_obj, plan_obj, option_dict, _ = capsule_case
+    original_claim_fn = store_obj.claim_vplan_for_submission
+
+    def concurrent_claim_fn(vplan_id_int):
+        assert persist_capsule_buy_drop(store_obj, release_obj, plan_obj)
+        return original_claim_fn(vplan_id_int)
+
+    monkeypatch.setattr(store_obj, "claim_vplan_for_submission", concurrent_claim_fn)
+    assert runner_module.submit_ready_vplans(store_obj, broker_obj,
+        SUBMIT_TIMESTAMP_TS, "paper", False, **option_dict)["submitted_vplan_count_int"] == 1
+    assert [request_obj.asset_str for request_obj in broker_obj.submitted_order_request_list] == ["BIL"]
+
+
+def test_losing_funding_preflight_cannot_change_already_claimed_batch(capsule_case):
+    from alpha.live.capsule_funding import persist_capsule_buy_drop
+
+    store_obj, _, release_obj, plan_obj, _, _ = capsule_case
+    assert store_obj.claim_vplan_for_submission(plan_obj.vplan_id_int)
+    assert not persist_capsule_buy_drop(store_obj, release_obj, plan_obj)
+    assert not store_obj.get_decision_plan_by_id(plan_obj.decision_plan_id_int).snapshot_metadata_dict.get("funding_buys_dropped_bool")
+
+
+def test_failed_funding_drop_write_never_claims_or_aborts_the_run(capsule_case, monkeypatch):
+    store_obj, broker_obj, _, plan_obj, option_dict, _ = capsule_case
+    original_funding_fn = broker_obj.get_capsule_funding_evidence
+    with store_obj._connect() as connection_obj:
+        connection_obj.execute("""CREATE TRIGGER reject_funding_drop BEFORE UPDATE OF snapshot_metadata_json_str
+            ON decision_plan BEGIN SELECT RAISE(ABORT,'synthetic funding metadata failure'); END""")
+
+    def funding_failure_fn(*argument_tuple):
+        raise ValueError("Insufficient broker buying power")
+
+    monkeypatch.setattr(broker_obj, "get_capsule_funding_evidence", funding_failure_fn)
+    monkeypatch.setattr(store_obj, "claim_vplan_for_submission", lambda *_args:
+        pytest.fail("Cannot claim without durable funding suppression"))
+    result_dict = runner_module.submit_ready_vplans(store_obj, broker_obj,
+        SUBMIT_TIMESTAMP_TS, "paper", False, **option_dict)
+    assert result_dict["reason_count_map_dict"]["mr_capsule_funding_drop_persist_failed"] == 1
+    assert not broker_obj.submitted_order_request_list
+    assert store_obj.get_vplan_by_id(plan_obj.vplan_id_int).status_str == "blocked"
+    with store_obj._connect() as connection_obj:
+        connection_obj.execute("DROP TRIGGER reject_funding_drop")
+    monkeypatch.setattr(broker_obj, "get_capsule_funding_evidence", original_funding_fn)
+    retry_result_dict = runner_module.submit_ready_vplans(store_obj, broker_obj,
+        SUBMIT_TIMESTAMP_TS, "paper", False, **option_dict)
+    assert retry_result_dict["submitted_vplan_count_int"] == 0
+    assert not broker_obj.submitted_order_request_list

@@ -1,6 +1,7 @@
 """Normal daily CORE5 replay, hold drift and missed-event catch-up."""
 from copy import deepcopy
 from dataclasses import replace
+import math
 from types import SimpleNamespace
 
 import pandas as pd
@@ -177,6 +178,60 @@ def test_missed_event_is_caught_even_when_long_state_returns_to_prior_value(rele
     assert decision_obj.strategy_state_dict["last_rebalance_date_str"] == "2026-09-14"
     assert decision_obj.snapshot_metadata_dict["rebalance_bool"]
     assert decision_obj.snapshot_metadata_dict["core5_catch_up_bool"]
+
+
+@pytest.mark.parametrize("revision_str", ["dbc_last_bit", "adjusted_history", "reporting_weights_missing"])
+def test_same_applied_event_holds_shares_despite_reporting_weight_revision(release_obj, pricing_df, monkeypatch, revision_str):
+    signal_df = fixture_module._controlled_signals(monkeypatch, pricing_df)
+    signal_df[(core5_module.signal_namespace_str("DBC"), "long_state_ser")] = 0.0
+    signal_df[(core5_module.signal_namespace_str("DBC"), "short_state_ser")] = 1.0
+    signal_df[(core5_module.signal_namespace_str("DBC"), "annualized_volatility_ser")] = .5
+    first_obj = _build(release_obj, pricing_df, fixture_module._state(release_obj, "2026-09-10"), "2026-09-10")
+    position_dict = dict(first_obj.snapshot_metadata_dict["fixed_target_share_map_dict"])
+    committed_state_dict = deepcopy(fixture_module._committed_state_dict(first_obj))
+    event_date_str = first_obj.strategy_state_dict["last_rebalance_date_str"]
+    if revision_str == "reporting_weights_missing":
+        committed_state_dict["core5_execution_receipt_dict"].pop("last_applied_target_weight_map_dict")
+    else:
+        # Controlled features isolate a vendor adjusted-history revision without
+        # a new long-state/month-end event; this is not a broker share split.
+        volatility_float = math.nextafter(.5, math.inf) if revision_str == "dbc_last_bit" else .625
+        signal_df.loc[event_date_str, (core5_module.signal_namespace_str("DBC"), "annualized_volatility_ser")] = volatility_float
+        if revision_str == "adjusted_history":
+            signal_df.loc[:"2026-09-11", (core5_module.signal_namespace_str("DBC"), "Close")] *= .9
+    state_obj = fixture_module._state(release_obj, "2026-09-11", position_dict, committed_state_dict, 500_000)
+    decision_obj = _build(release_obj, pricing_df, state_obj)
+    metadata_dict = decision_obj.snapshot_metadata_dict
+    assert decision_obj.strategy_state_dict["last_rebalance_date_str"] == event_date_str
+    assert metadata_dict["long_state_changed_bool"] is False
+    assert metadata_dict["month_end_bool"] is False
+    assert metadata_dict["rebalance_bool"] is False
+    assert metadata_dict["no_order_bool"] is True
+    assert metadata_dict["fixed_target_share_map_dict"] == position_dict
+    assert "core5_execution_receipt_invalid" not in metadata_dict["core5_warning_code_list"]
+    if revision_str != "reporting_weights_missing":
+        assert decision_obj.full_target_weight_map_dict["DBC"] != first_obj.full_target_weight_map_dict["DBC"]
+        assert metadata_dict["core5_data_revision_warning_bool"] is True
+    assert metadata_dict["core5_candidate_execution_receipt_dict"]["last_applied_target_weight_map_dict"] == decision_obj.strategy_state_dict["last_target_weight_map_dict"]
+    assert fixture_module.build_broker_order_request_list_from_vplan(fixture_module._vplan(release_obj, decision_obj)) == []
+
+
+def test_changed_broker_shares_after_split_still_require_catch_up(release_obj, pricing_df, monkeypatch):
+    signal_df = fixture_module._controlled_signals(monkeypatch, pricing_df)
+    first_obj = _build(release_obj, pricing_df, fixture_module._state(release_obj, "2026-09-10"), "2026-09-10")
+    position_dict = dict(first_obj.snapshot_metadata_dict["fixed_target_share_map_dict"])
+    position_dict["SPY"] *= 2
+    # A real share-count change is different from revised adjusted history.
+    # Keep the broker units authoritative; no implicit receipt split adjustment.
+    revised_price_df = pricing_df.copy()
+    revised_price_df.loc["2026-09-11", ("SPY", "Close")] /= 2
+    signal_df.loc["2026-09-11", ("SPY", "Close")] = revised_price_df.loc["2026-09-11", ("SPY", "Close")]
+    state_obj = fixture_module._state(release_obj, "2026-09-11", position_dict, fixture_module._committed_state_dict(first_obj))
+    decision_obj = _build(release_obj, revised_price_df, state_obj)
+    assert decision_obj.strategy_state_dict["last_rebalance_date_str"] == first_obj.strategy_state_dict["last_rebalance_date_str"]
+    assert decision_obj.snapshot_metadata_dict["rebalance_bool"] is True
+    assert decision_obj.snapshot_metadata_dict["core5_catch_up_bool"] is True
+    assert decision_obj.decision_base_position_map["SPY"] == position_dict["SPY"]
 
 
 def test_data_revision_warning_does_not_make_cached_signals_authoritative(release_obj, pricing_df, monkeypatch):

@@ -1533,6 +1533,15 @@ def _build_stuck_operator_message_spec_list(
                     },
                 )
             )
+        if is_daily_reconcile_release_bool(release_obj):
+            # Daily cycles intentionally poll during their target session.
+            # Preserve the existing operator timer once that session closes.
+            target_session_ts = scheduler_utils.session_label_from_timestamp_ts(
+                latest_vplan_obj.target_execution_timestamp_ts, release_obj.session_calendar_id_str)
+            close_ts = scheduler_utils.get_session_close_timestamp_ts(
+                target_session_ts, release_obj.session_calendar_id_str)
+            if as_of_ts < close_ts:
+                continue
         if (
             latest_vplan_obj.status_str == "submitted"
             and not state_store_obj.has_post_execution_reconciliation_snapshot(int(latest_vplan_obj.vplan_id_int))

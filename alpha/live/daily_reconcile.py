@@ -31,6 +31,9 @@ def is_daily_reconcile_release_bool(release_obj):
 
 
 def ensure_daily_reconcile_schema(connection_obj):
+    from alpha.live.daily_notifications import ensure_daily_alert_schema
+
+    ensure_daily_alert_schema(connection_obj)
     connection_obj.execute("""CREATE TABLE IF NOT EXISTS daily_completion_request (
         decision_plan_id_int INTEGER NOT NULL, asset_str TEXT NOT NULL,
         vplan_id_int INTEGER NOT NULL, pod_id_str TEXT NOT NULL, account_route_str TEXT NOT NULL,
@@ -217,11 +220,22 @@ def reconcile_daily_cycle(state_store_obj, broker_adapter_obj, release_obj, deci
         owned_ref_set = load_daily_owned_order_ref_set(state_store_obj, release_obj, decision_plan_obj,
             daily_snapshot_obj.open_order_row_list)
         if any(row_dict.get("order_ref_str") in owned_ref_set for row_dict in daily_snapshot_obj.open_order_row_list):
-            daily_snapshot_obj = broker_adapter_obj.cancel_daily_owned_orders(release_obj.account_route_str,
-                owned_ref_set, session_close_timestamp_ts=close_ts)
-            _validate_snapshot(daily_snapshot_obj, release_obj, as_of_ts)
-            if any(row_dict.get("order_ref_str") in owned_ref_set for row_dict in daily_snapshot_obj.open_order_row_list):
-                raise RuntimeError("Daily close is waiting for confirmation that our open orders are cancelled.")
+            owned_order_row_list = [row_dict for row_dict in daily_snapshot_obj.open_order_row_list
+                if row_dict.get("order_ref_str") in owned_ref_set]
+            try:
+                daily_snapshot_obj = broker_adapter_obj.cancel_daily_owned_orders(release_obj.account_route_str,
+                    owned_ref_set, session_close_timestamp_ts=close_ts)
+                _validate_snapshot(daily_snapshot_obj, release_obj, as_of_ts)
+                if any(row_dict.get("order_ref_str") in owned_ref_set for row_dict in daily_snapshot_obj.open_order_row_list):
+                    owned_order_row_list = [row_dict for row_dict in daily_snapshot_obj.open_order_row_list
+                        if row_dict.get("order_ref_str") in owned_ref_set]
+                    raise RuntimeError("Daily close is waiting for confirmation that our open orders are cancelled.")
+            except Exception as error_obj:
+                from alpha.live.daily_notifications import enqueue_daily_cycle_overdue
+
+                enqueue_daily_cycle_overdue(state_store_obj, release_obj, decision_plan_obj, as_of_ts,
+                    error_str=str(error_obj), owned_order_row_list=owned_order_row_list)
+                raise
         snapshot_obj = daily_snapshot_obj.broker_snapshot_obj
         exception_list = _exception_list(decision_plan_obj, vplan_obj, snapshot_obj,
             vplan_sent_bool=vplan_sent_bool, funding_buys_dropped_bool=funding_buys_dropped_bool)

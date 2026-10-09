@@ -43,8 +43,7 @@ def _copy_cycle(target_obj, *, minutes_int=10, target_days_int=0):
                     if row_dict.get(field_str):
                         row_dict[field_str] = row_dict[field_str].replace("vplan:1", "vplan:2")
                 if table_str == "vplan_fill":
-                    row_dict["broker_execution_id_str"] = "second-" + row_dict["broker_order_id_str"]
-                    row_dict["raw_payload_json_str"] = json.dumps({"exec_id_str": row_dict["broker_execution_id_str"]})
+                    row_dict["raw_payload_json_str"] = json.dumps({"exec_id_str": "second-" + row_dict["broker_order_id_str"]})
                 connection_obj.execute("INSERT INTO " + table_str + " (" + ",".join(row_dict) + ") VALUES ("
                     + ",".join("?" for _ in row_dict) + ")", tuple(row_dict.values()))
 

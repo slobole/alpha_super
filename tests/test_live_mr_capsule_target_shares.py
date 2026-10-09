@@ -247,6 +247,7 @@ def test_target_roundtrip_restart_preserves_request_keys_and_atomic_claim(tmp_pa
     release_obj, decision_plan_obj, broker_snapshot_obj, quote_obj = _capsule_inputs()
     db_path_str = str(tmp_path / "capsule.sqlite3")
     state_store_obj = LiveStateStore(db_path_str)
+    state_store_obj.upsert_release(release_obj)
     decision_plan_obj = state_store_obj.insert_decision_plan(decision_plan_obj)
     vplan_obj = state_store_obj.insert_vplan(build_vplan(release_obj, decision_plan_obj, broker_snapshot_obj, quote_obj))
     request_list = build_broker_order_request_list_from_vplan(vplan_obj)
@@ -259,13 +260,13 @@ def test_target_roundtrip_restart_preserves_request_keys_and_atomic_claim(tmp_pa
     assert not state_store_obj.claim_vplan_for_submission(vplan_obj.vplan_id_int)
 
 
-def test_old_decision_database_migrates_without_changing_existing_intents(tmp_path):
+def test_old_decision_database_restarts_without_altering_existing_intents(tmp_path):
     _, decision_plan_obj, _, _ = _capsule_inputs()
     db_path_str = str(tmp_path / "old.sqlite3")
     state_store_obj = LiveStateStore(db_path_str)
     decision_plan_obj = state_store_obj.insert_decision_plan(replace(decision_plan_obj, target_share_map_dict={}))
     with sqlite3.connect(db_path_str) as connection_obj:
-        connection_obj.execute("ALTER TABLE decision_plan DROP COLUMN target_share_json_str")
+        assert "target_share_json_str" not in {row_tuple[1] for row_tuple in connection_obj.execute("PRAGMA table_info(decision_plan)")}
     migrated_store_obj = LiveStateStore(db_path_str)
     restored_plan_obj = migrated_store_obj.get_decision_plan_by_id(decision_plan_obj.decision_plan_id_int)
     assert restored_plan_obj.target_share_map_dict == {}
@@ -276,9 +277,10 @@ def test_old_decision_database_migrates_without_changing_existing_intents(tmp_pa
 def test_operator_decision_display_and_trace_show_explicit_parking_target(tmp_path, monkeypatch):
     from alpha.live import runner
 
-    _, decision_plan_obj, _, _ = _capsule_inputs()
+    release_obj, decision_plan_obj, _, _ = _capsule_inputs()
     decision_plan_obj = replace(decision_plan_obj, entry_target_weight_map_dict={}, target_weight_map={})
     state_store_obj = LiveStateStore(str(tmp_path / "display.sqlite3"))
+    state_store_obj.upsert_release(release_obj)
     decision_plan_obj = state_store_obj.insert_decision_plan(decision_plan_obj)
     monkeypatch.setattr(runner, "_load_release_list_and_sync", lambda *argument_tuple, **keyword_dict: [])
     detail_dict = runner.show_decision_plan_summary(

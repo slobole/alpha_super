@@ -1,11 +1,11 @@
-"""Identical execution tuples must reconcile through the real capsule persistence path."""
+"""Daily closure uses actual holdings despite the restored legacy fill tuple key."""
 from alpha.live.execution_engine import build_broker_order_request_list_from_vplan
 from alpha.live.models import BrokerOrderFill, BrokerOrderRecord
 from alpha.live.runner import post_execution_reconcile
 from test_live_mr_capsule_recovery import capsule_case, CLOSE_TIMESTAMP_TS
 
 
-def test_identical_partial_executions_complete_capsule_cycle(capsule_case):
+def test_actual_holdings_complete_capsule_despite_legacy_identical_fill_collapse(capsule_case):
     store_obj, broker_obj, release_obj, vplan_obj, runner_kwarg_dict, _ = capsule_case
     store_obj.mark_vplan_status(vplan_obj.vplan_id_int, "submitted")
     store_obj.mark_decision_plan_status(vplan_obj.decision_plan_id_int, "submitted")
@@ -35,7 +35,9 @@ def test_identical_partial_executions_complete_capsule_cycle(capsule_case):
     )
     result_dict = post_execution_reconcile(store_obj, broker_obj, CLOSE_TIMESTAMP_TS, **runner_kwarg_dict)
     assert result_dict["completed_vplan_count_int"] == 1
-    assert len(store_obj.get_fill_row_dict_list_for_vplan(vplan_obj.vplan_id_int)) == 4
+    # The owner restored baseline recording: equal tuples collapse to one row.
+    # Completion must depend on refreshed actual holdings, never this fill count.
+    assert len(store_obj.get_fill_row_dict_list_for_vplan(vplan_obj.vplan_id_int)) == 2
     assert store_obj.get_vplan_by_id(vplan_obj.vplan_id_int).status_str == "completed"
     assert store_obj.get_pod_state(release_obj.pod_id_str).position_amount_map == {"AAPL": 80.0, "BIL": 880.0, "MSFT": 5.0}
     assert broker_obj.submitted_order_request_list == []

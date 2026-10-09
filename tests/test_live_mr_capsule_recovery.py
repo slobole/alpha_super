@@ -484,12 +484,20 @@ def test_capsule_vplan_validation_error_does_not_starve_another_due_plan(capsule
     for added_release_obj in (bad_release_obj, healthy_release_obj):
         state_store_obj.upsert_release(added_release_obj)
         bad_bool = added_release_obj.pod_id_str == "bad_capsule"
+        # The healthy parent is a legacy DV2 release, so it carries only its
+        # own strategy identity and data lineage, never capsule target metadata.
+        plan_metadata_dict = dict(original_plan_obj.snapshot_metadata_dict) if bad_bool else {
+            "strategy_import_str": added_release_obj.strategy_import_str,
+            "norgate_snapshot_date_str": original_plan_obj.snapshot_metadata_dict["norgate_snapshot_date_str"],
+            "norgate_manifest_hash_str": original_plan_obj.snapshot_metadata_dict["norgate_manifest_hash_str"],
+        }
+        plan_metadata_dict["norgate_data_profile_str"] = added_release_obj.data_profile_str
         state_store_obj.insert_decision_plan(replace(
             original_plan_obj, decision_plan_id_int=None, status_str="planned", release_id_str=added_release_obj.release_id_str,
             pod_id_str=added_release_obj.pod_id_str, account_route_str=added_release_obj.account_route_str,
             decision_base_position_map=original_plan_obj.decision_base_position_map if bad_bool else {},
             target_share_map_dict=original_plan_obj.target_share_map_dict if bad_bool else {},
-            snapshot_metadata_dict={**original_plan_obj.snapshot_metadata_dict, "norgate_data_profile_str": added_release_obj.data_profile_str},
+            snapshot_metadata_dict=plan_metadata_dict,
         ))
         broker_adapter_obj.seed_account_snapshot(
             account_route_str=added_release_obj.account_route_str, cash_float=float("inf") if bad_bool else 100000.0,

@@ -70,17 +70,15 @@ def _status_pair(db_path_str: str, decision_obj: DecisionPlan, vplan_obj: VPlan)
     return decision_row[0], vplan_status_str, json.loads(decision_row[1])
 
 
-def test_upgraded_database_gains_the_target_share_column_before_any_write(tmp_path):
-    """Every pod's decision insert writes target_share_json_str; an upgraded DB must get the column first."""
+def test_daily_targets_persist_without_altering_the_existing_decision_table(tmp_path):
+    """Daily targets are metadata; shared table shape and legacy inserts stay unchanged."""
     db_path_str = str(tmp_path / "pre_capsule.sqlite3")
     LiveStateStore(db_path_str)
-    with sqlite3.connect(db_path_str) as connection_obj:
-        connection_obj.execute("ALTER TABLE decision_plan DROP COLUMN target_share_json_str")
     upgraded_store_obj = LiveStateStore(db_path_str)
     with sqlite3.connect(db_path_str) as connection_obj:
         column_list = [row for row in connection_obj.execute("PRAGMA table_info(decision_plan)") if row[1] == "target_share_json_str"]
-    # (cid, name, type, notnull, default, pk): NOT NULL DEFAULT '{}' keeps old INSERTs valid after a rollback.
-    assert len(column_list) == 1 and column_list[0][3] == 1 and column_list[0][4] == "'{}'"
+    assert column_list == []
+    _register_capsule_release(upgraded_store_obj)
     capsule_obj = upgraded_store_obj.insert_decision_plan(_capsule_decision(target_share_map_dict={"BIL": 400}))
     dv2_obj = upgraded_store_obj.insert_decision_plan(replace(
         _capsule_decision(target_share_map_dict={}, metadata_dict={}),
@@ -161,12 +159,10 @@ def test_daily_close_undoes_holdings_and_vplan_if_decision_write_fails(ready_cyc
 
 
 
-def test_two_workers_can_upgrade_the_same_pre_capsule_database(tmp_path, monkeypatch):
-    """Force both old-schema readers to overlap; real SQLite must serialize the upgrade."""
+def test_two_workers_can_open_the_same_baseline_database_without_a_new_shared_migration(tmp_path, monkeypatch):
+    """Overlapping startup reads need no target-share/revision schema mutation."""
     db_path_str = str(tmp_path / "simultaneous_upgrade.sqlite3")
     LiveStateStore(db_path_str)
-    with sqlite3.connect(db_path_str) as connection_obj:
-        connection_obj.execute("ALTER TABLE decision_plan DROP COLUMN target_share_json_str")
     schema_barrier_obj = threading.Barrier(2)
     second_worker_event_obj = threading.Event()
     counter_lock_obj = threading.Lock()
@@ -225,5 +221,6 @@ def test_two_workers_can_upgrade_the_same_pre_capsule_database(tmp_path, monkeyp
         assert not any(worker_obj.is_alive() for worker_obj in worker_list)
     assert error_list == []
     upgraded_store_obj = LiveStateStore(db_path_str)
+    _register_capsule_release(upgraded_store_obj)
     decision_obj = upgraded_store_obj.insert_decision_plan(_capsule_decision(target_share_map_dict={"BIL": 400}))
     assert upgraded_store_obj.get_decision_plan_by_id(decision_obj.decision_plan_id_int).target_share_map_dict == {"BIL": 400.0}

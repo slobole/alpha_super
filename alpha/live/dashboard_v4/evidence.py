@@ -200,7 +200,6 @@ def load_cycle_evidence_dict(target_obj, pod_row_dict: dict[str, Any], *, as_of_
                 raise _EvidenceError("The broker order has no quantity and its acknowledgement could not be verified.")
         execution_id_set: set[str] = set()
         fill_key_set: set[tuple] = set()
-        identified_fill_key_set: set[tuple] = set()
         for fill_row_obj in fill_row_list:
             fill_dict = dict(fill_row_obj)
             order_dict = order_map_dict.get(str(fill_dict["broker_order_id_str"]))
@@ -213,22 +212,17 @@ def load_cycle_evidence_dict(target_obj, pod_row_dict: dict[str, Any], *, as_of_
             if fill_float * order_dict["requested_share_float"] <= 0:
                 raise _EvidenceError("A fill's buy or sell direction differs from the order.")
             payload_dict = json.loads(fill_dict["raw_payload_json_str"])
-            execution_id_str = str(payload_dict.get("exec_id_str") or "").strip()
+            execution_id_str = str(payload_dict.get("exec_id_str") or "")
             if order_dict["sparse_terminal_bool"] and (not isinstance(payload_dict.get("exec_id_str"), str) or not execution_id_str.strip()):
                 raise _EvidenceError("A saved fill has no execution ID to verify the broker's empty order summary.")
             price_float = _quantity_float(fill_dict["fill_price_float"])
             if price_float <= 0:
                 raise _EvidenceError("A saved fill price is invalid.")
             fill_key_tuple = (fill_dict["broker_order_id_str"], fill_ts, fill_float, price_float)
-            if fill_key_tuple in (fill_key_set if execution_id_str else identified_fill_key_set):
-                raise _EvidenceError("Identified and legacy fills overlap; their execution identity is ambiguous.")
-            if (execution_id_str in execution_id_set if execution_id_str else fill_key_tuple in fill_key_set):
+            if (execution_id_str and execution_id_str in execution_id_set) or fill_key_tuple in fill_key_set:
                 raise _EvidenceError("A fill appears more than once in the saved records.")
-            if execution_id_str:
-                execution_id_set.add(execution_id_str)
-                identified_fill_key_set.add(fill_key_tuple)
-            else:
-                fill_key_set.add(fill_key_tuple)
+            execution_id_set.add(execution_id_str)
+            fill_key_set.add(fill_key_tuple)
             order_dict["filled_share_float"] += fill_float
             order_dict["fill_timestamp_list"].append(fill_ts)
         order_list = []

@@ -30,6 +30,18 @@ MR_CAPSULE_PROFILE_TUPLE = (
 )
 
 
+class CapsuleHoldingMismatchError(ValueError):
+    """Decision remains blocked; structured details feed one durable operator alert."""
+
+    def __init__(self, reason_str, position_map_dict):
+        super().__init__(reason_str)
+        self.reason_str = reason_str
+        self.holding_row_list = [{"asset_str": asset_str, "quantity_float": amount_float}
+            for asset_str, amount_float in sorted(position_map_dict.items())]
+        self.required_action_str = ("Verify the dedicated account and configured capsule variant; reconcile the listed holdings "
+            "and strategy ownership before retrying the decision. Do not automatically adopt or trade these holdings.")
+
+
 def validate_mr_capsule_release(release_obj: LiveRelease) -> None:
     if release_obj.strategy_import_str not in MR_CAPSULE_STRATEGY_IMPORT_TUPLE:
         raise ValueError("Unsupported MR capsule strategy identity.")
@@ -98,12 +110,14 @@ def _validate_account_state(release_obj: LiveRelease, pod_state_obj: PodState | 
             position_map_dict[str(asset_str)] = amount_float
     prior_identity_str = pod_state_obj.strategy_state_dict.get("mr_capsule_strategy_import_str")
     if prior_identity_str not in (None, release_obj.strategy_import_str) or (position_map_dict and prior_identity_str is None):
-        raise ValueError("MR capsule cannot adopt positions or state from another strategy; reconcile initialization explicitly.")
+        raise CapsuleHoldingMismatchError("MR capsule cannot adopt positions or state from another strategy; reconcile initialization explicitly.", position_map_dict)
     parking_mode_str = release_obj.strategy_import_str.rsplit("_", 1)[-1]
     if (parking_mode_str == "cash" and {"BIL", "SPMO"} & set(position_map_dict)) or (
         parking_mode_str == "bil" and "SPMO" in position_map_dict
     ):
-        raise ValueError("MR capsule parking holdings do not match the frozen variant.")
+        wrong_parking_dict = {asset_str: amount_float for asset_str, amount_float in position_map_dict.items()
+            if asset_str in ({"BIL", "SPMO"} if parking_mode_str == "cash" else {"SPMO"})}
+        raise CapsuleHoldingMismatchError("MR capsule parking holdings do not match the frozen variant.", wrong_parking_dict)
     return position_map_dict
 
 

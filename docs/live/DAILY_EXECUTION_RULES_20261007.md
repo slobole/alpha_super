@@ -3,8 +3,9 @@
 This is the owner's replacement for the 2026-10-05 recovery design, implemented
 locally on `live-wiring-20261005` from baseline `8bce05a`. It covers CORE5 and the
 supported MR capsule releases only. NDX/TAA strategy, sizing, submission,
-reconciliation and parking behavior remain unchanged. Fill recording by broker
-execution ID applies to every pod. No UI, release enablement, deployment, push or
+reconciliation and parking behavior remain unchanged. The 2026-10-09 follow-up
+restores production `54b417f` fill recording and existing shared table schemas.
+No UI, release enablement, deployment, push or
 real-broker action is authorized by this document.
 
 ## Decision at Close T; execution at the next open
@@ -35,10 +36,12 @@ signal memory generates a warning and is rebuilt; it does not require a manual
 resume command. Exact snapshot date, profile and manifest identity remain
 required; a current revised snapshot is not proof of the original data vintage.
 
-A separate execution receipt records the last successfully applied event, target
-weights and whole-share book. If that receipt matches the replayed event/weights
-and actual shares, CORE5 retains the existing shares: price and cash drift do not
-cause daily rebalancing. A new event, missing/invalid receipt, missed rebalance or
+A separate execution receipt records the last successfully applied event date,
+target weights and whole-share book. If its event date matches the replayed event
+date and its recorded whole shares match actual shares, CORE5 retains the existing
+shares. Receipt weights are reporting only: adjusted-history revisions, floating
+precision, price drift and cash drift do not trigger a new rebalance for that same
+applied event. A new event, missing/invalid receipt, missed rebalance or
 partial application instead creates catch-up intent from current Close-T NAV:
 
 ```text
@@ -92,8 +95,11 @@ CORE5 quotes are non-blocking diagnostics; frozen Close-T prices are explicitly
 labeled. **There is no new NAV/cash deviation guard and no quote-based resize.**
 Existing account identity, holdings/open-order, validity, funding, borrow and
 qualification checks still apply. A permanent capsule funding-preflight failure
-drops buys while retaining verified initial sells, including BIL sells. Transient
-preflight failures retain the complete batch for retry.
+drops buys while retaining verified initial sells, including BIL sells. The drop
+is committed before submission claim and remains true for the entire cycle,
+including process restarts and every transient retry. A later successful funding
+preview cannot restore those buys. Transient failures before any permanent drop
+retain the complete batch for retry.
 
 After the target open and strictly before its exchange close, an already-sent
 cycle may make **one claimed MKT SELL attempt per decision and asset**:
@@ -153,13 +159,31 @@ guarantee. Normal completed cycles have no exception alert.
 
 ## Fill recording and reference diagnostics
 
-`vplan_fill.broker_execution_id_str` identifies each execution within its account.
-Repeated delivery is idempotent; different execution IDs preserve two rows even
-when order, second, quantity and price match. Migration backfills available raw
-IDs and preserves legacy tuple identity for rows without an ID. Conflicting
-lineage/economic details, or ambiguous identified/unidentified observations, fail
-closed without silently deleting or reallocating records. Migration cannot
-recreate historical fills already collapsed; those require broker records.
+All pods use the exact `54b417f` fill table, unique tuple and recording behavior.
+Identical order/time/quantity/price tuples can collapse even if broker execution
+IDs differ; raw broker evidence remains available for reporting. Fills never
+determine daily-cycle completion. No execution-ID column or identity migration
+is added to production databases. Daily explicit share targets persist atomically
+inside daily-only decision metadata; the production decision table and unique
+key are retained without the removed intent-revision migration.
+
+Daily holdings/open-order reconciliation keeps its existing polling cadence.
+Fill-history collection and official-open requests run only on the first
+reconcile attempt after the target exchange close. A new `daily_post_close_report`
+table records the attempt before broker I/O and its `reported` or `failed` outcome;
+a process stop can leave `attempted`. Reporting failures are logged and do not
+block the mandatory fresh holdings snapshot or settlement. These history queries
+are not repeated on later polls or after restart. In-session completion responses
+are still recorded directly, without fetching history or opening prices.
+
+A cycle still open at exchange close plus one hour queues one CRITICAL alert,
+including observed owned-order symbol, remaining quantity, side and client ID.
+Missing broker evidence is stated explicitly and never permits closure. The
+legacy `reconcile.stuck` warning is suppressed during the session for daily pods
+only. Capsule holding/parking mismatches queue one alert per signal session with
+the holdings and required operator action. Both use the additive `daily_pod_alert`
+outbox and existing watchdog; delivery is at least once across a network/process
+failure. NDX/TAA reconciliation, history requests and warning behavior are unchanged.
 
 Fills remain accounting/reporting evidence. An unavailable official open is not
 zero slippage. CORE5's explicitly named frozen-close deviation is a diagnostic,
@@ -169,7 +193,7 @@ not masquerade as opening-auction fills.
 ## Verification boundary
 
 Offline tests cover broker failures/incomplete refresh, exact cross-client
-cancellation, subscription cleanup, duplicate executions, legacy migration,
+cancellation, subscription cleanup, production fill-tuple behavior, schema rollback,
 claim/send failures, deadlines, per-asset completion, restart idempotency,
 transaction rollback, decision-only alerts and monthly-pod scheduler fairness.
 CORE5 tests cover replay/cache gaps, future-tail invariance, event timing and

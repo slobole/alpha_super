@@ -264,7 +264,6 @@ def build_core5_decision_from_prices(
             receipt_share_dict = prior_receipt_dict["last_applied_target_share_map_dict"]
             receipt_matches_bool = (
                 prior_receipt_dict["last_applied_rebalance_date_str"] == replay_state_dict["last_rebalance_date_str"]
-                and prior_receipt_dict["last_applied_target_weight_map_dict"] == target_weight_dict
                 and set(receipt_share_dict) == set(CORE5_ASSET_TUPLE)
                 and _whole_position_map_dict(receipt_share_dict) == position_map_dict
             )
@@ -272,6 +271,8 @@ def build_core5_decision_from_prices(
             receipt_invalid_bool = True
     # Signal memory always comes from prices. The separate execution receipt
     # only preserves share units between successfully applied strategy events.
+    # Receipt weights are reporting only: revised adjusted history or floating
+    # precision cannot create another rebalance for the same applied event.
     rebalance_bool = not receipt_matches_bool
     close_price_dict = {asset_str: float(close_row_ser[(asset_str, "Close")]) for asset_str in CORE5_ASSET_TUPLE}
     # NAV_Close_T = EOD cash + sum(signed shares_i * Close_T_i).

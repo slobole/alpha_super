@@ -57,6 +57,64 @@ Internal names you will see:
 
 Normal operators should think in sleeves and order plans. The internal names are there for commands, logs, and debugging.
 
+## Back Up Every Pod Database Before Updating Code
+
+Complete this procedure **before `git pull` or checking out updated code**, and
+before starting any command that could initialize/migrate a state database. It
+applies to every pod in this deployment, including NDX/TAA, disabled pods and all
+modes, not just the strategy being updated. These are deployment instructions;
+they do not authorize a production update or broker action.
+
+1. Stop the deployment's scheduler, watchdog/automatic restart tasks, OPS and
+   other processes that can open or write pod databases. Confirm they stay
+   stopped. Stopping these processes does not cancel existing broker orders;
+   record their state and use an approved maintenance window.
+2. Inventory every database path used by launch commands and scheduled tasks:
+   `alpha/live/state/<mode>/*.sqlite3`, legacy `alpha/live/live_state.sqlite3`,
+   and every explicit `--db-path`, including paths outside this checkout.
+   Match every configured pod to a path; a shared database needs one backup.
+   Do not infer the inventory from enabled releases alone.
+3. In a new, access-controlled backup folder outside the checkout, save
+   `git rev-parse HEAD`, the source-to-backup path list, and the local ignored
+   release YAMLs and `config.env` (which contains secrets). Back up **every
+   inventoried database** with SQLite's backup API. A plain copy of only the
+   `.sqlite3` file can omit committed WAL data. For each source/backup pair,
+   run the following with absolute paths and an already-created backup folder:
+
+   ```powershell
+   @'
+   import sqlite3
+   import sys
+   from pathlib import Path
+   source_path_obj, backup_path_obj = map(Path, sys.argv[1:])
+   if not source_path_obj.is_file() or backup_path_obj.exists():
+       raise SystemExit("Source missing or backup already exists; stop.")
+   with sqlite3.connect(source_path_obj.resolve().as_uri() + "?mode=ro", uri=True) as source_obj:
+       with sqlite3.connect(backup_path_obj) as backup_obj:
+           source_obj.backup(backup_obj)
+           check_list = backup_obj.execute("PRAGMA quick_check").fetchall()
+           if check_list != [("ok",)]:
+               raise SystemExit(f"Backup integrity check failed: {check_list}")
+   print(f"Verified backup: {source_path_obj} -> {backup_path_obj}")
+   '@ | uv run python - C:\absolute\source\pod.sqlite3 C:\absolute\backup\pod.sqlite3
+   ```
+
+4. Check the saved path list against the full inventory and confirm every
+   backup passed `quick_check`. Only then proceed with the approved code update,
+   validation and restart. Keep the backups until deployment verification ends.
+
+### Short Rollback Procedure
+
+Keep all database users and automatic restarts stopped. Preserve the failed
+deployment's databases and their `-wal`/`-shm` sidecars for diagnosis, then return
+to the recorded pre-update code revision and matching local configuration.
+If no broker orders/fills or account changes have occurred since the backup,
+restore each verified database to its original inventoried path, with no stale
+sidecars from the failed database left beside it. Check integrity and run the
+approved validation before restarting. If broker/account state has advanced,
+**do not restore an older ledger or resume trading from it**: keep automation
+stopped and review reconciliation against current broker evidence first.
+
 ## Norgate Artifact Server
 
 Use this only on the Windows Norgate node. It serves validated Parquet snapshots over Tailscale; it does not connect to IBKR or submit orders.
@@ -83,6 +141,9 @@ NORGATE_API_PORT=8787
 Use the Norgate node Tailscale IP for `NORGATE_API_HOST`. Client machines must use the same token when syncing snapshots.
 
 Start the server and run the doctor:
+
+Before the checkout/pull below, complete the database backup procedure above
+for any pods hosted in this deployment.
 
 ```powershell
 cd C:\Users\Administrator\Documents\workspace\alpha_super
@@ -133,6 +194,9 @@ and are ignored by Git. Copy tracked examples from `docs/live/release_templates/
 when creating a new POD, then edit the local YAML only.
 
 Run the client doctor before starting a scheduler on a new client VPS:
+
+Before the checkout/pull below on an existing deployment, complete the database
+backup procedure above for every pod.
 
 ```powershell
 cd C:\Users\Administrator\Documents\workspace\alpha_super
