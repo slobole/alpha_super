@@ -41,7 +41,8 @@ from alpha.live.logging_utils import (
 from alpha.live.models import BrokerOrderEvent, DecisionPlan, LivePriceSnapshot, LiveRelease, PodState, SubmitBatchResult, VPlan
 from alpha.live.mr_capsule_adapter import MR_CAPSULE_STRATEGY_IMPORT_TUPLE, validate_mr_capsule_release
 from alpha.live.daily_reconcile import (
-    DAILY_TERMINAL_STATUS_SET, is_daily_reconcile_release_bool, reconcile_daily_cycle,
+    DAILY_TERMINAL_STATUS_SET, _refresh as refresh_daily_snapshot,
+    is_daily_reconcile_release_bool, reconcile_daily_cycle,
 )
 from alpha.live.norgate_snapshot_sync import ensure_norgate_snapshots_for_live_tick
 from alpha.live.order_clerk import BrokerAdapter, IBKRGatewayBrokerAdapter
@@ -547,7 +548,7 @@ def _validate_state_store_releases_for_mutation(
     state_store_obj: LiveStateStore,
     env_mode_str: str,
     pod_id_str: str | None = None,
-) -> None:
+) -> list[LiveRelease]:
     release_list = state_store_obj.get_enabled_release_list()
     validate_enabled_deployment_for_mode(release_list, env_mode_str)
     selected_release_list = _filter_release_list_for_pod(release_list, pod_id_str)
@@ -556,6 +557,7 @@ def _validate_state_store_releases_for_mutation(
             validate_mr_capsule_release(release_obj)
     _validate_selected_pod_enabled_for_mode(selected_release_list, env_mode_str, pod_id_str)
     assert_authorized_release_list(selected_release_list)
+    return selected_release_list
 
 
 def _load_enabled_release_list_for_mode(
@@ -4044,12 +4046,15 @@ def _persist_daily_execution_report(state_store_obj, broker_adapter_obj, release
 
 def _reconcile_daily_cycles(state_store_obj, broker_adapter_resolver_obj, as_of_ts, env_mode_str,
         pod_id_str, log_path_str, trace_enabled_bool, trace_log_root_path_str, decision_plan_id_list=None):
-    from alpha.live.daily_reporting import claim_post_close_report_attempt, finish_post_close_report_attempt
+    from alpha.live.daily_reporting import (claim_post_close_report_attempt,
+        finish_post_close_report_attempt, get_retry_post_close_report_decision_id_list)
 
     completed_count_int = 0
     if decision_plan_id_list is None:
         decision_plan_id_list = state_store_obj.get_pending_daily_decision_plan_id_list(
             pod_id_str=pod_id_str, env_mode_str=env_mode_str)
+        decision_plan_id_list = list(dict.fromkeys([*decision_plan_id_list,
+            *get_retry_post_close_report_decision_id_list(state_store_obj, as_of_ts, pod_id_str, env_mode_str)]))
     for decision_plan_id_int in decision_plan_id_list:
         decision_plan_obj = None
         release_obj = None
@@ -4063,6 +4068,9 @@ def _reconcile_daily_cycles(state_store_obj, broker_adapter_resolver_obj, as_of_
             assert_authorized_release(release_obj)
             vplan_obj = state_store_obj.get_latest_vplan_for_decision(decision_plan_id_int)
             broker_adapter_obj = broker_adapter_resolver_obj.get_adapter(release_obj)
+            # A failed first broker refresh must leave the report unclaimed so
+            # the next pass can still collect this session's fills and opens.
+            initial_daily_snapshot_obj = refresh_daily_snapshot(broker_adapter_obj, release_obj, as_of_ts)
             collect_report_bool = False
             if vplan_obj is not None:
                 try:
@@ -4117,13 +4125,25 @@ def _reconcile_daily_cycles(state_store_obj, broker_adapter_resolver_obj, as_of_
                 except Exception as exception_obj:
                     log_event("daily_report_audit_unavailable", _build_decision_plan_log_payload_dict(
                         release_obj, decision_plan_obj, as_of_ts, {"severity_str": "warning", "error_str": str(exception_obj)}), log_path_str=log_path_str)
+            if decision_plan_obj.status_str in DAILY_TERMINAL_STATUS_SET:
+                # A completed cycle can still retry optional reporting. Never
+                # reopen its settlement or send a second completion order.
+                continue
             dispatch_dict = decision_plan_obj.snapshot_metadata_dict.get("opening_dispatch_result_dict", {})
             vplan_sent_bool = vplan_obj is not None and vplan_obj.status_str in {"submitting", "submitted", "parked"}
             if dispatch_dict and dispatch_dict.get("reason_code_str") != "dispatch_retry_pending":
                 vplan_sent_bool = bool(dispatch_dict.get("attempted_request_key_list"))
+            target_session_date_obj = scheduler_utils.to_market_timestamp_ts(
+                decision_plan_obj.target_execution_timestamp_ts, release_obj.session_calendar_id_str).date()
+            target_close_ts = scheduler_utils.get_session_close_timestamp_ts(
+                target_session_date_obj, release_obj.session_calendar_id_str)
+            # Post-close reporting can take time. Settlement must observe the
+            # broker again after it, before cancelling orders or committing holdings.
+            settlement_snapshot_obj = None if as_of_ts >= target_close_ts else initial_daily_snapshot_obj
             daily_result_obj = reconcile_daily_cycle(state_store_obj, broker_adapter_obj, release_obj,
                 decision_plan_obj, as_of_ts, vplan_obj=vplan_obj, vplan_sent_bool=vplan_sent_bool,
-                funding_buys_dropped_bool=bool(decision_plan_obj.snapshot_metadata_dict.get("funding_buys_dropped_bool")))
+                funding_buys_dropped_bool=bool(decision_plan_obj.snapshot_metadata_dict.get("funding_buys_dropped_bool")),
+                initial_daily_snapshot_obj=settlement_snapshot_obj)
             for report_obj in daily_result_obj.reporting_result_list:
                 try:
                     _persist_daily_execution_report(state_store_obj, broker_adapter_obj, release_obj, decision_plan_obj,
@@ -4151,8 +4171,18 @@ def _reconcile_daily_cycles(state_store_obj, broker_adapter_resolver_obj, as_of_
                 trace_enabled_bool=trace_enabled_bool, trace_log_root_path_str=trace_log_root_path_str)
         except Exception as exception_obj:
             if decision_plan_obj is None or release_obj is None:
+                failed_pod_id_str = pod_id_str or getattr(decision_plan_obj, "pod_id_str", None)
+                if failed_pod_id_str is None:
+                    try:
+                        with state_store_obj._connect() as connection_obj:
+                            identity_row_obj = connection_obj.execute(
+                                "SELECT pod_id_str FROM decision_plan WHERE decision_plan_id_int=?",
+                                (decision_plan_id_int,)).fetchone()
+                        failed_pod_id_str = None if identity_row_obj is None else identity_row_obj[0]
+                    except Exception:
+                        pass
                 log_event("daily_cycle_load_failed", {"decision_plan_id_int": decision_plan_id_int,
-                    "pod_id_str": pod_id_str, "mode_str": env_mode_str, "severity_str": "error",
+                    "pod_id_str": failed_pod_id_str, "mode_str": env_mode_str, "severity_str": "error",
                     "error_str": str(exception_obj)}, log_path_str=log_path_str)
                 continue
             # The daily-only helper checks the exchange close + one hour and
@@ -4189,9 +4219,10 @@ def post_execution_reconcile(
     trace_log_root_path_str: str = DEFAULT_POD_TRACE_LOG_ROOT_PATH_STR,
 ) -> dict[str, object]:
     if releases_root_path_str is None:
-        _validate_state_store_releases_for_mutation(state_store_obj, env_mode_str, pod_id_str=pod_id_str)
+        selected_release_list = _validate_state_store_releases_for_mutation(
+            state_store_obj, env_mode_str, pod_id_str=pod_id_str)
     else:
-        _load_release_list_validate_and_sync(
+        selected_release_list = _load_release_list_validate_and_sync(
             releases_root_path_str,
             state_store_obj,
             env_mode_str,
@@ -4215,10 +4246,16 @@ def post_execution_reconcile(
     )
     daily_decision_id_list = state_store_obj.get_pending_daily_decision_plan_id_list(
         pod_id_str=pod_id_str, env_mode_str=env_mode_str)
-    if daily_decision_id_list:
+    retry_report_id_list = []
+    if any(release_obj.enabled_bool and release_obj.mode_str == env_mode_str
+            and is_daily_reconcile_release_bool(release_obj) for release_obj in selected_release_list):
+        from alpha.live.daily_reporting import get_retry_post_close_report_decision_id_list
+        retry_report_id_list = get_retry_post_close_report_decision_id_list(
+            state_store_obj, as_of_ts, pod_id_str, env_mode_str)
+    if daily_decision_id_list or retry_report_id_list:
         completed_vplan_count_int = _reconcile_daily_cycles(state_store_obj, broker_adapter_resolver_obj, as_of_ts,
             env_mode_str, pod_id_str, log_path_str, trace_enabled_bool, trace_log_root_path_str,
-            decision_plan_id_list=daily_decision_id_list)
+            decision_plan_id_list=list(dict.fromkeys([*daily_decision_id_list, *retry_report_id_list])))
     submitted_vplan_list = [vplan_obj for vplan_obj in state_store_obj.get_submitted_vplan_list(exclude_daily_reconcile_bool=True)
         if pod_id_str is None or vplan_obj.pod_id_str == pod_id_str]
     assert_authorized_vplans("post_execution_reconcile", submitted_vplan_list)

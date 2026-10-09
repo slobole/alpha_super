@@ -145,6 +145,12 @@ part of this procedure.
 Keep all database users and automatic restarts stopped. Preserve the failed
 deployment's databases and their `-wal`/`-shm` sidecars for diagnosis, then return
 to the recorded pre-update code revision and matching local configuration.
+Before starting `54b417f`, inventory **every release root** read by any serve,
+watchdog or scheduled task and remove every CORE5 and MR capsule YAML from those
+roots. This includes disabled daily releases: `54b417f` parses the whole root
+and can reject a daily YAML before an NDX/TAA serve starts. Its MR capsule
+strategy imports are unsupported. Preserve the YAMLs in the saved
+configuration backup outside all active roots; do not delete the backup.
 If no broker orders/fills or account changes have occurred since the backup,
 restore each verified database to its original inventoried path, with no stale
 sidecars from the failed database left beside it. Check integrity and run the
@@ -371,7 +377,7 @@ Setup, once per VPS:
 4. Verify:
 
    ```powershell
-   uv run python scripts/live_ops_watchdog.py --json
+   uv run python scripts/live_ops_watchdog.py --mode live --json
    Start-ScheduledTask -TaskName AlphaLiveOpsWatchdog
    Get-ScheduledTaskInfo -TaskName AlphaLiveOpsWatchdog
    ```
@@ -683,9 +689,23 @@ In the current deployment model, this path should normally contain releases for 
 ### Validate Staged Releases Before Copying Them Into The Active Root
 
 Each `serve` parses **every `*.yaml` under its configured release root**, including
-disabled releases, before applying `--pod-id`. An invalid new CORE5/capsule YAML
-can therefore stop an existing NDX/TAA serve that reads the same root. Keeping a
-new release disabled does not protect the other serves from a parsing error.
+disabled releases, before applying `--pod-id`. Keep CORE5 and MR capsule YAMLs in
+their **own daily release root**, separate from every NDX/TAA release root. Point
+each daily serve and its LIVE watchdog at that root with `--releases-root` and
+run the watchdog with `--mode live`. The NDX/TAA serves and watchdog continue to
+read only their existing root. A rejected daily YAML then cannot stop those
+NDX/TAA serves. A disabled daily release still has to parse successfully within
+the daily root.
+
+For a daily-root deployment, use its own scheduled task, report and notification
+state paths. Verify its command before scheduling it (replace the example paths):
+
+```powershell
+uv run python scripts/live_ops_watchdog.py --mode live --daily-heartbeat --releases-root C:\alpha\daily_releases --output-path C:\alpha\daily_watchdog\ops_report_latest.json --notification-state-path C:\alpha\daily_watchdog\notification_state.json --json
+```
+
+The existing NDX/TAA watchdog keeps its current root and state paths. Do not
+point two watchdog tasks at the same report or notification state file.
 
 Prepare new YAML files outside every active release root. Make an offline staging
 copy of the complete root that the serves will read, add the proposed files there,

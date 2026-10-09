@@ -14,6 +14,7 @@ from alpha.live.mr_capsule_adapter import MR_CAPSULE_STRATEGY_IMPORT_TUPLE
 
 
 DAILY_TERMINAL_STATUS_SET = {"completed", "completed_with_exceptions"}
+DAILY_STRATEGY_IMPORT_TUPLE = (*MR_CAPSULE_STRATEGY_IMPORT_TUPLE, CORE5_STRATEGY_IMPORT_STR)
 QUANTITY_TOLERANCE_FLOAT = 1e-9
 
 
@@ -27,7 +28,7 @@ class DailyReconcileResult:
 
 
 def is_daily_reconcile_release_bool(release_obj):
-    return release_obj.strategy_import_str in (*MR_CAPSULE_STRATEGY_IMPORT_TUPLE, CORE5_STRATEGY_IMPORT_STR)
+    return release_obj.strategy_import_str in DAILY_STRATEGY_IMPORT_TUPLE
 
 
 def ensure_daily_reconcile_schema(connection_obj):
@@ -195,7 +196,9 @@ def _exception_list(decision_plan_obj, vplan_obj, snapshot_obj, *, vplan_sent_bo
             continue
         reason_str = "actual_holding_differs_from_vplan"
         if funding_buys_dropped_bool and (residual_float > 0 or asset_str == "BIL"):
-            reason_str = "funding_buys_dropped" if asset_str != "BIL" else "bil_sale_withheld_after_funding_buys_dropped"
+            reason_str = ("funding_buys_dropped" if asset_str != "BIL" else
+                "bil_buy_withheld_after_funding_buys_dropped" if residual_float > 0 else
+                "bil_sale_withheld_after_funding_buys_dropped")
         exception_list.append({"asset_str": asset_str, "quantity_float": abs(residual_float),
             "side_str": "BUY" if residual_float > 0 else "SELL", "reason_str": reason_str,
             "expected_share_float": expected_float, "actual_share_float": actual_float,
@@ -204,7 +207,8 @@ def _exception_list(decision_plan_obj, vplan_obj, snapshot_obj, *, vplan_sent_bo
 
 
 def reconcile_daily_cycle(state_store_obj, broker_adapter_obj, release_obj, decision_plan_obj, as_of_ts,
-        *, vplan_obj=None, vplan_sent_bool=True, funding_buys_dropped_bool=False):
+        *, vplan_obj=None, vplan_sent_bool=True, funding_buys_dropped_bool=False,
+        initial_daily_snapshot_obj=None):
     """Poll within the session; after its close return actual holdings for commit.
 
     The caller commits final holdings, strategy memory, status and one exception
@@ -214,7 +218,8 @@ def reconcile_daily_cycle(state_store_obj, broker_adapter_obj, release_obj, deci
     target_ts = decision_plan_obj.target_execution_timestamp_ts
     session_date_obj = scheduler_utils.to_market_timestamp_ts(target_ts, release_obj.session_calendar_id_str).date()
     close_ts = scheduler_utils.get_session_close_timestamp_ts(session_date_obj, release_obj.session_calendar_id_str)
-    daily_snapshot_obj = _refresh(broker_adapter_obj, release_obj, as_of_ts)
+    daily_snapshot_obj = initial_daily_snapshot_obj or _refresh(broker_adapter_obj, release_obj, as_of_ts)
+    _validate_snapshot(daily_snapshot_obj, release_obj, as_of_ts)
     completion_request_list, reporting_result_list = [], []
     if as_of_ts >= close_ts:
         owned_ref_set = load_daily_owned_order_ref_set(state_store_obj, release_obj, decision_plan_obj,
@@ -241,19 +246,34 @@ def reconcile_daily_cycle(state_store_obj, broker_adapter_obj, release_obj, deci
             vplan_sent_bool=vplan_sent_bool, funding_buys_dropped_bool=funding_buys_dropped_bool)
         return DailyReconcileResult("completed_with_exceptions" if exception_list else "completed", snapshot_obj, exception_list)
     if vplan_obj is not None and vplan_sent_bool and target_ts < as_of_ts:
+        # Freeze the candidate set from this poll's first observation. Later
+        # refreshes only revalidate a candidate immediately before its send.
+        first_snapshot_obj = daily_snapshot_obj
+        candidate_list = []
         for asset_str, target_float in sorted(vplan_obj.target_share_map.items()):
             if (asset_str == "BIL" and (funding_buys_dropped_bool or target_float < 0)) or (
                     asset_str != "BIL" and abs(target_float) > QUANTITY_TOLERANCE_FLOAT):
                 continue
-            # Refresh before EACH asset: an earlier send/manual trade can change
-            # holdings. Every open order for this symbol blocks its completion.
+            snapshot_obj = first_snapshot_obj.broker_snapshot_obj
+            if not target_ts < snapshot_obj.snapshot_timestamp_ts < close_ts:
+                break
+            if any(row_dict["asset_str"] == asset_str for row_dict in first_snapshot_obj.open_order_row_list):
+                continue
+            # Q_sell = max(actual broker shares - frozen target shares, 0).
+            remainder_float = max(float(snapshot_obj.position_amount_map.get(asset_str, 0.0)) - float(target_float), 0.0)
+            if remainder_float <= QUANTITY_TOLERANCE_FLOAT:
+                continue
+            candidate_list.append((asset_str, target_float))
+        for asset_str, target_float in candidate_list:
+            # The first poll snapshot selects candidates. Refresh immediately
+            # before an actual order, since a manual trade or earlier send can
+            # change the holdings and open-order set in the meantime.
             daily_snapshot_obj = _refresh(broker_adapter_obj, release_obj, as_of_ts)
             snapshot_obj = daily_snapshot_obj.broker_snapshot_obj
             if not target_ts < snapshot_obj.snapshot_timestamp_ts < close_ts:
                 break
             if any(row_dict["asset_str"] == asset_str for row_dict in daily_snapshot_obj.open_order_row_list):
                 continue
-            # Q_sell = max(actual broker shares - frozen target shares, 0).
             remainder_float = max(float(snapshot_obj.position_amount_map.get(asset_str, 0.0)) - float(target_float), 0.0)
             if remainder_float <= QUANTITY_TOLERANCE_FLOAT:
                 continue

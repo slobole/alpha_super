@@ -45,6 +45,7 @@ import alpha.live.dashboard as dashboard_module
 import alpha.live.dashboard_v3.notifications as notifications_module
 import alpha.live.mr_capsule_notifications as capsule_notifications_module
 import alpha.live.daily_notifications as daily_notifications_module
+import alpha.live.daily_watchdog as daily_watchdog_module
 import alpha.live.ops_report as ops_report_module
 from scripts.norgate_config_env import load_config_env_file
 
@@ -184,7 +185,7 @@ def _build_summary_and_report_tuple(
     return summary_dict, report_dict
 
 
-def _run_capsule_notifications_tuple(summary_dict, mode_str, webhook_url_str):
+def _run_capsule_notifications_tuple(summary_dict, mode_str, webhook_url_str, suppressed_session_key_set=None):
     """Contain capsule failures per pod; preserve cross-pod scope validation."""
     from alpha.live.mr_capsule_adapter import MR_CAPSULE_STRATEGY_IMPORT_TUPLE
     from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR
@@ -233,7 +234,8 @@ def _run_capsule_notifications_tuple(summary_dict, mode_str, webhook_url_str):
             phase_str = "delivery"
             daily_delivery_list = daily_notifications_module.deliver_daily_alerts(
                 pod_summary_dict, webhook_url_str=webhook_url_str,
-                webhook_poster_fn=notifications_module.post_discord_webhook_bool, mode_str=mode_str)
+                webhook_poster_fn=notifications_module.post_discord_webhook_bool, mode_str=mode_str,
+                suppressed_session_key_set=suppressed_session_key_set)
             if result_dict["capsule_notification_attempt_count_int"] is not None:
                 result_dict["capsule_notification_attempt_count_int"] += len(daily_delivery_list)
             phase_str = "pending"
@@ -293,8 +295,30 @@ def _run_report_pipeline_tuple(
     )
     receipt_context_dict = {"summary_dict": summary_dict,
         "notification_configured_bool": bool(webhook_url_str)}
+    suppressed_session_key_set = set()
+    from alpha.live.daily_reconcile import DAILY_STRATEGY_IMPORT_TUPLE
+    daily_scope_bool = parsed_args_obj.daily_heartbeat_bool or any(
+        row_dict.get("strategy_import_str") in DAILY_STRATEGY_IMPORT_TUPLE
+        and (parsed_args_obj.mode_str is None or row_dict.get("mode_str") == parsed_args_obj.mode_str)
+        for row_dict in summary_dict.get("pod_row_dict_list") or [])
+    if daily_scope_bool:
+        notification_path_obj = Path(parsed_args_obj.notification_state_path_str)
+        daily_state_path_str = str(notification_path_obj.with_name(notification_path_obj.stem + ".daily.sqlite3"))
+        try:
+            daily_heartbeat_alert_list = daily_watchdog_module.daily_heartbeat_alert_list(
+                parsed_args_obj.releases_root_path_str or dashboard_module.DEFAULT_RELEASES_ROOT_PATH_STR,
+                parsed_args_obj.dashboard_config_path_str or dashboard_module.DEFAULT_CONFIG_PATH_STR,
+                dashboard_module.DEFAULT_EVENT_LOG_PATH_STR, as_of_ts, parsed_args_obj.mode_str)
+            if daily_heartbeat_alert_list:
+                daily_watchdog_module.deliver_daily_heartbeat_alerts(daily_heartbeat_alert_list,
+                    daily_state_path_str, webhook_url_str, notifications_module.post_discord_webhook_bool)
+            suppressed_session_key_set = daily_watchdog_module.load_delivered_key_set(daily_state_path_str)
+        except Exception:
+            # A broken daily monitor cannot suppress the existing Inspector alerts,
+            # run receipt or external dead-man heartbeat.
+            pass
     capsule_result_dict, invalid_scope_row_list = _run_capsule_notifications_tuple(
-        summary_dict, parsed_args_obj.mode_str, webhook_url_str)
+        summary_dict, parsed_args_obj.mode_str, webhook_url_str, suppressed_session_key_set)
     if capsule_result_dict:
         receipt_context_dict.update(capsule_result_dict)
         # An invalid DB path does not invalidate the pod's receipt identity.
@@ -333,6 +357,7 @@ def main(argv_list: list[str] | None = None) -> int:
     )
     parser_obj.add_argument("--vps-id", dest="vps_id_str", default=None)
     parser_obj.add_argument("--releases-root", dest="releases_root_path_str", default=None)
+    parser_obj.add_argument("--daily-heartbeat", dest="daily_heartbeat_bool", action="store_true")
     parser_obj.add_argument(
         "--mode",
         dest="mode_str",

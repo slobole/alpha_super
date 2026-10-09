@@ -4,6 +4,7 @@ from dataclasses import replace
 import pytest
 
 from alpha.live import runner as runner_module
+from alpha.live.daily_broker import DailyExecutionSnapshot
 from alpha.live.execution_engine import build_broker_order_request_list_from_vplan
 from alpha.live.daily_reconcile import DailyReconcileResult
 from alpha.live.order_clerk import BrokerAdapter, IBKRGatewayBrokerAdapter
@@ -123,6 +124,7 @@ def test_capsule_daily_reconcile_runs_even_when_fill_reporting_is_unavailable(ca
     state_store_obj.mark_vplan_status(vplan_obj.vplan_id_int, "submitted")
     state_store_obj.mark_decision_plan_status(vplan_obj.decision_plan_id_int, "submitted")
     snapshot_obj = replace(broker_adapter_obj.get_account_snapshot(release_obj.account_route_str), snapshot_timestamp_ts=RECONCILE_TIMESTAMP_TS)
+    daily_snapshot_obj = DailyExecutionSnapshot(snapshot_obj, [], RECONCILE_TIMESTAMP_TS, RECONCILE_TIMESTAMP_TS)
     called_vplan_list = []
     def recovery_fn(store_obj, adapter_obj, passed_release_obj, decision_obj, as_of_ts, *, vplan_obj, **_kwarg_dict):
         assert store_obj is state_store_obj and adapter_obj is broker_adapter_obj
@@ -132,6 +134,7 @@ def test_capsule_daily_reconcile_runs_even_when_fill_reporting_is_unavailable(ca
     def unavailable_reporting_fn(**_kwarg_dict):
         raise TimeoutError("Synthetic fill history outage")
     monkeypatch.setattr(runner_module, "reconcile_daily_cycle", recovery_fn)
+    monkeypatch.setattr(broker_adapter_obj, "get_daily_execution_snapshot", lambda _: daily_snapshot_obj)
     monkeypatch.setattr(broker_adapter_obj, "get_account_snapshot", lambda *_: pytest.fail("Legacy observation ran"))
     monkeypatch.setattr(broker_adapter_obj, "get_recent_order_state_snapshot", unavailable_reporting_fn)
     result_dict = runner_module.post_execution_reconcile(state_store_obj, broker_adapter_obj,

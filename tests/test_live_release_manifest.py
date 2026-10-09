@@ -12,6 +12,7 @@ from alpha.live.release_manifest import (
     validate_enabled_deployment_for_mode,
     validate_release_manifest,
 )
+import alpha.live.release_manifest as release_manifest_module
 
 
 RELEASE_TEMPLATE_PATH_TUPLE: tuple[Path, ...] = (
@@ -312,6 +313,32 @@ def test_disabled_qpi_release_blocks_the_whole_releases_root(tmp_path):
         load_release_list(str(tmp_path))
     # The operator must be told which file to remove.
     assert "pod_qpi_01.yaml" in str(exc_info.value)
+
+
+def test_separate_daily_root_cannot_block_ndx_root_or_baseline_rollback(tmp_path, monkeypatch):
+    legacy_root_path_obj = tmp_path / "ndx_taa"
+    daily_root_path_obj = tmp_path / "daily"
+    legacy_root_path_obj.mkdir()
+    daily_root_path_obj.mkdir()
+    ndx_template_str = RELEASE_TEMPLATE_PATH_TUPLE[5].read_text(encoding="utf-8")
+    (legacy_root_path_obj / "pod_ndx.yaml").write_text(ndx_template_str, encoding="utf-8")
+    capsule_template_str = RELEASE_TEMPLATE_PATH_TUPLE[8].read_text(encoding="utf-8")
+    (daily_root_path_obj / "pod_capsule.yaml").write_text(capsule_template_str, encoding="utf-8")
+    assert len(load_release_list(str(legacy_root_path_obj))) == 1
+    assert len(load_release_list(str(daily_root_path_obj))) == 1
+    # 54b417f does not support MR capsule imports. Emulate that parser's
+    # supported-import gate while verifying whole-root isolation and cleanup.
+    monkeypatch.setattr(release_manifest_module, "SUPPORTED_STRATEGY_IMPORT_TUPLE",
+        tuple(strategy_str for strategy_str in SUPPORTED_STRATEGY_IMPORT_TUPLE
+            if not strategy_str.startswith("strategies.mr_capsule.")))
+    with pytest.raises(Exception):
+        load_release_list(str(daily_root_path_obj))
+    (legacy_root_path_obj / "pod_capsule.yaml").write_text(capsule_template_str, encoding="utf-8")
+    with pytest.raises(Exception):
+        load_release_list(str(legacy_root_path_obj))
+    # The 54b417f rollback needs every daily YAML removed from every root.
+    (legacy_root_path_obj / "pod_capsule.yaml").unlink()
+    assert len(load_release_list(str(legacy_root_path_obj))) == 1
 
 
 def test_release_template_vxn_scaled_ndx_exposes_vxn_knobs():

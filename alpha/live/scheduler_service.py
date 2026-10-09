@@ -1513,6 +1513,8 @@ def _build_stuck_operator_message_spec_list(
         if latest_vplan_obj is None or latest_vplan_obj.vplan_id_int is None:
             continue
         if (
+            not is_daily_reconcile_release_bool(release_obj)
+            and
             latest_vplan_obj.status_str == "submitting"
             and state_store_obj.count_broker_orders_for_vplan(int(latest_vplan_obj.vplan_id_int)) == 0
             and (
