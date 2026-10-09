@@ -40,10 +40,10 @@
   let failure_count_int = 0;
   let request_in_flight_bool = false;
   let last_poll_ms = Date.now();
-  // Money panels are dated facts (last close): they refresh on their own, slowly.
-  const MONEY_REFRESH_MS = 300000;
-  let last_money_ms = Date.now();
-  let money_open_key_list = [];
+  // Panels with data-own-refresh-ms refresh on their own cadence (money panels,
+  // dated facts from the last close; the Activity timeline). Never while hidden.
+  const own_seen_map = new WeakMap();
+  let own_open_key_list = [];
   const clock_formatter_obj = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
   });
@@ -133,18 +133,26 @@
     shell_obj.dispatchEvent(new CustomEvent('v4poll'));
   }
 
-  function refresh_money(now_bool = false) {
-    if (document.hidden || typeof document.querySelector !== 'function') return;
-    if (!now_bool && Date.now() - last_money_ms < MONEY_REFRESH_MS) return;
-    const money_obj = document.querySelector('[data-money-panel][hx-get]');
-    if (!money_obj || typeof money_obj.dispatchEvent !== 'function' || typeof CustomEvent !== 'function') return;
-    last_money_ms = Date.now();
-    money_obj.dispatchEvent(new CustomEvent('v4money'));
+  function dispatch_own(element_obj) {
+    if (typeof element_obj.dispatchEvent !== 'function' || typeof CustomEvent !== 'function') return;
+    own_seen_map.set(element_obj, Date.now());
+    element_obj.dispatchEvent(new CustomEvent('v4own'));
   }
 
-  function money_event(event_obj) {
+  function refresh_own() {
+    // Each panel counts its interval from when it was first seen in the page.
+    if (document.hidden || typeof document.querySelectorAll !== 'function') return;
+    document.querySelectorAll('[data-own-refresh-ms]').forEach((element_obj) => {
+      const interval_ms = Number(element_obj.getAttribute('data-own-refresh-ms'));
+      if (!(interval_ms > 0)) return;
+      if (!own_seen_map.has(element_obj)) own_seen_map.set(element_obj, Date.now());
+      else if (Date.now() - own_seen_map.get(element_obj) >= interval_ms) dispatch_own(element_obj);
+    });
+  }
+
+  function own_event(event_obj) {
     const target_obj = event_obj.detail && (event_obj.detail.target || event_obj.detail.elt);
-    return Boolean(target_obj && target_obj.closest && target_obj.closest('[data-money-panel]'));
+    return Boolean(target_obj && target_obj.closest && target_obj.closest('[data-own-refresh-ms]'));
   }
 
   function update_clock() {
@@ -249,8 +257,8 @@
   }
 
   function overview_event(event_obj) {
-    // A money panel's own request never counts as an operating-status refresh.
-    if (money_event(event_obj)) return false;
+    // A panel's own request never counts as an operating-status refresh.
+    if (own_event(event_obj)) return false;
     const target_obj = event_obj.detail && (event_obj.detail.target || event_obj.detail.elt);
     return target_obj && (target_obj.id === 'overview-shell' || target_obj.closest('#overview-shell'));
   }
@@ -393,24 +401,25 @@
         && !unchanged_selection_bool(window.getSelection(), selection_snapshot_obj)) selection_snapshot_obj = null;
   });
   document.addEventListener('htmx:beforeSwap', (event_obj) => {
-    if (!money_event(event_obj) || event_obj.detail.isError) return;
+    if (!own_event(event_obj) || event_obj.detail.isError) return;
     const target_obj = event_obj.detail.target;
-    money_open_key_list = Array.from(target_obj.querySelectorAll('details[data-keep-open][open]'))
+    own_open_key_list = Array.from(target_obj.querySelectorAll('details[data-keep-open][open]'))
       .map((detail_obj) => detail_obj.getAttribute('data-keep-open'));
   });
   document.addEventListener('htmx:afterSettle', (event_obj) => {
-    if (money_event(event_obj)) {
-      // A refreshed money block keeps the sections the operator had opened.
-      document.querySelectorAll('[data-money-panel] details[data-keep-open]').forEach((detail_obj) => {
-        if (money_open_key_list.includes(detail_obj.getAttribute('data-keep-open'))) detail_obj.setAttribute('open', '');
+    if (own_event(event_obj)) {
+      // A refreshed panel keeps the sections the operator had opened.
+      document.querySelectorAll('[data-own-refresh-ms] details[data-keep-open]').forEach((detail_obj) => {
+        if (own_open_key_list.includes(detail_obj.getAttribute('data-keep-open'))) detail_obj.setAttribute('open', '');
       });
-      money_open_key_list = [];
+      own_open_key_list = [];
       return;
     }
     // A placeholder that found no panel to keep (first load, or the Pod changed
-    // between normal and issue layout) loads its money at once.
-    if (overview_event(event_obj) && typeof document.querySelector === 'function'
-        && document.querySelector('[data-money-placeholder]')) refresh_money(true);
+    // between normal and issue layout) loads at once.
+    if (overview_event(event_obj) && typeof document.querySelectorAll === 'function') {
+      document.querySelectorAll('[data-own-placeholder]').forEach(dispatch_own);
+    }
   });
   document.addEventListener('htmx:afterSettle', (event_obj) => {
     if (!overview_event(event_obj) || !focus_period_str) return;
@@ -434,13 +443,13 @@
     check_expiry();
     update_clock();
     maybe_poll();
-    refresh_money();
+    refresh_own();
   }, 1000);
   document.addEventListener('visibilitychange', () => {
     check_expiry();
     if (!document.hidden) {
       maybe_poll(Date.now() - last_poll_ms >= 1000);
-      refresh_money();
+      refresh_own();
     }
   });
   window.addEventListener('pageshow', (event_obj) => {

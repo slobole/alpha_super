@@ -338,8 +338,8 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
     def positions_refresh():
         return render_template("_overview.html", **context_dict(positions_bool=True))
 
-    def activity_response(*, refresh_bool=False):
-        if set(request.args) - {"days"} or len(request.args.getlist("days")) > 1:
+    def activity_response(*, refresh_bool=False, body_bool=False):
+        if set(request.args) - {"days", "pod"} or any(len(request.args.getlist(key_str)) > 1 for key_str in request.args):
             abort(400)
         days_str = request.args.get("days", "7")
         if days_str not in {"7", "14", "30", "90"}:
@@ -350,6 +350,9 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             if operations_workspace_fn is None else operations_workspace_fn())
         overview_dict = build_overview_dict(workspace_dict, None, provider_obj,
             as_of_ts=clock_fn(), demo_bool=demo_bool, include_finance_bool=False)
+        pod_str = request.args.get("pod", "")
+        if pod_str and not any(pod_dict["pod_id_str"] == pod_str for pod_dict in overview_dict["pod_list"]):
+            abort(404)  # Before any log scan.
         from_ts = acquisition_ts.astimezone(MARKET_TIMEZONE_OBJ).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days_int - 1)
         source_dict = (provider_obj.get_activity_source_dict(as_of_ts=acquisition_ts, days_int=days_int)
             if hasattr(provider_obj, "get_activity_source_dict") else load_activity_source_dict(provider_obj, as_of_ts=acquisition_ts, days_int=days_int))
@@ -361,13 +364,19 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         # Reading historical evidence cannot renew live shell health.
         overview_dict = build_overview_dict(workspace_dict, None, provider_obj,
             as_of_ts=render_ts, demo_bool=demo_bool, include_finance_bool=False)
-        overview_dict.update(refresh_url_str=url_for("activity_refresh", days=days_int), refresh_seconds_int=15)
+        # The 15 s poll renews only header status; the timeline refreshes itself.
+        overview_dict.update(refresh_url_str=url_for("activity_status"), refresh_seconds_int=15)
         finalize_system_dict(overview_dict, workspace_dict)
         activity_page_dict = build_activity_page_dict(overview_dict, source_dict, cycle_dict,
             as_of_ts=acquisition_ts, days_int=days_int)
+        activity_page_dict.update(initial_pod_str=pod_str,
+            body_url_str=url_for("activity_body", days=days_int, pod=pod_str or None))
         next_days_int = next((value_int for value_int in (14, 30, 90) if value_int > days_int), None)
         if next_days_int is not None:
-            activity_page_dict["load_older_url_str"] = url_for("activity", days=next_days_int)
+            activity_page_dict.update(load_older_days_int=next_days_int,
+                load_older_url_str=url_for("activity", days=next_days_int, pod=pod_str or None))
+        if body_bool:
+            return render_template("_activity_body.html", overview_dict=overview_dict, activity_page_dict=activity_page_dict)
         template_str = "_overview.html" if refresh_bool or request.headers.get("HX-Request") == "true" else "overview.html"
         return render_template(template_str, overview_dict=overview_dict, activity_page_dict=activity_page_dict)
 
@@ -378,6 +387,21 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
     @flask_app_obj.get("/activity/refresh")
     def activity_refresh():
         return activity_response(refresh_bool=True)
+
+    @flask_app_obj.get("/activity/body")
+    def activity_body():
+        return activity_response(body_bool=True)
+
+    @flask_app_obj.get("/activity/status")
+    def activity_status():
+        if request.args:
+            abort(400)
+        workspace_dict = (load_operations_workspace_dict(provider_obj, as_of_ts=clock_fn())
+            if operations_workspace_fn is None else operations_workspace_fn())
+        overview_dict = build_overview_dict(workspace_dict, None, provider_obj,
+            as_of_ts=clock_fn(), demo_bool=demo_bool, include_finance_bool=False)
+        finalize_system_dict(overview_dict, workspace_dict)
+        return render_template("_activity_status.html", overview_dict=overview_dict)
 
     def finalize_system_dict(overview_dict, workspace_dict, source_dict=None):
         """One saved-service assessment for every page and status refresh."""

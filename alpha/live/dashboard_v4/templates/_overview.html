@@ -2,7 +2,7 @@
 {% set state_label_dict = {'done': 'Done', 'now': 'Now', 'next': 'Planned', 'late': 'Late', 'fail': 'Failed', 'skip': 'None', 'unk': 'Unknown'} %}
 {% set pill_class_dict = {'done': 'ok', 'now': 'work', 'next': 'idle', 'late': 'late', 'fail': 'act', 'skip': 'idle', 'unk': 'unk'} %}
 {% set is_overview_bool = pod_page_dict is not defined and positions_page_dict is not defined and performance_page_dict is not defined and activity_page_dict is not defined and system_page_dict is not defined and tools_page_dict is not defined and console_page_dict is not defined %}
-{% set status_only_page_bool = performance_page_dict is defined or tools_page_dict is defined or console_page_dict is defined %}
+{% set status_only_page_bool = performance_page_dict is defined or tools_page_dict is defined or console_page_dict is defined or activity_page_dict is defined %}
 {% from "_state.html" import mark %}
 {# Frame refreshes keep the money panels already in the page (hx-preserve). #}
 {% set money_placeholder_bool = not overview_dict.get('money_bool', true) %}

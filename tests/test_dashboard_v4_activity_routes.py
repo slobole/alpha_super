@@ -31,7 +31,7 @@ def test_demo_activity_is_scoped_read_only_and_finance_free(monkeypatch):
     for method_str in ("load_workspace_snapshot_tuple", "load_operations_workspace_dict", "load_activity_source_dict"):
         monkeypatch.setattr("alpha.live.dashboard_v4.app." + method_str, _forbidden)
     client_obj = app_obj.test_client()
-    for path_str in ("/activity", "/activity/refresh?days=14", "/activity?days=90"):
+    for path_str in ("/activity", "/activity/refresh?days=14", "/activity?days=90", "/activity/body?days=14"):
         response_obj = client_obj.get(path_str)
         html_str = response_obj.get_data(as_text=True)
         assert response_obj.status_code == 200
@@ -41,7 +41,10 @@ def test_demo_activity_is_scoped_read_only_and_finance_free(monkeypatch):
         assert "Manual order requested." in html_str
         assert "Alert delivered." not in html_str
         assert "Open cycle completed." in html_str
-        assert "Load older" in html_str or "days=90" in path_str
+        # The link names the next window, not the current one.
+        next_str = {"/activity": "Load 14 days", "/activity/refresh?days=14": "Load 30 days",
+            "/activity/body?days=14": "Load 30 days"}.get(path_str, "")
+        assert (next_str in html_str) if next_str else "Load " not in html_str
         assert "action_token" not in html_str and "DEMO-owner" not in html_str
         assert "script-src 'self'" in response_obj.headers["Content-Security-Policy"]
     response_obj = client_obj.get("/activity")
@@ -64,3 +67,31 @@ def test_slow_read_does_not_renew_live_shell(monkeypatch):
     html_str = app_obj.test_client().get("/activity").get_data(as_text=True)
     assert 'data-source-valid-ms="0"' in html_str
     assert "System unknown" in html_str
+
+
+def test_activity_shell_polls_status_only_and_the_timeline_refreshes_itself():
+    client_obj = create_demo_app().test_client()
+    html_str = client_obj.get("/activity").get_data(as_text=True)
+    assert 'id="overview-shell" hx-get="/activity/status" hx-trigger="v4poll"' in html_str
+    assert 'hx-swap="none"' in html_str and 'id="performance-status"' in html_str
+    assert ('id="activity-body" data-activity-page data-own-refresh-ms="60000" hx-get="/activity/body?days=7"'
+        ' hx-trigger="v4own" hx-target="this" hx-swap="outerHTML"') in html_str
+    status_str = client_obj.get("/activity/status").get_data(as_text=True)
+    assert status_str.count('hx-swap-oob="outerHTML"') >= 3 and "activity-body" not in status_str
+    assert client_obj.get("/activity/status?days=7").status_code == 400
+    body_str = client_obj.get("/activity/body?days=14").get_data(as_text=True)
+    assert body_str.lstrip().startswith("<section") and 'id="overview-shell"' not in body_str
+    assert 'hx-get="/activity/body?days=14"' in body_str
+
+
+def test_pod_link_opens_activity_filtered_and_unknown_pod_is_rejected_before_scanning(monkeypatch):
+    client_obj = create_demo_app().test_client()
+    html_str = client_obj.get("/activity?pod=demo_1_1").get_data(as_text=True)
+    assert 'data-initial-pod="demo_1_1"' in html_str
+    assert 'hx-get="/activity/body?days=7&amp;pod=demo_1_1"' in html_str
+    assert 'href="/activity?days=14&amp;pod=demo_1_1"' in html_str
+    monkeypatch.setattr("alpha.live.dashboard_v4.app.load_activity_source_dict", _forbidden)
+    assert client_obj.get("/activity?pod=unknown_pod").status_code == 404
+    assert client_obj.get("/activity?pod=a&pod=b").status_code == 400
+    pod_str = client_obj.get("/pods/demo_1_1").get_data(as_text=True)
+    assert 'href="/activity?pod=demo_1_1"' in pod_str

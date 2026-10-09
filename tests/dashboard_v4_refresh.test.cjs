@@ -1085,35 +1085,41 @@ test('unknown status also hides deadlines and the open-item count', () => {
 });
 
 
-function money_obj(env_obj, placeholder_bool = false) {
+function own_obj(env_obj, interval_ms = 300000, placeholder_bool = false) {
   const result_obj = element_obj();
-  result_obj.setAttribute('data-money-panel', '');
-  result_obj.setAttribute('hx-get', '/overview/money?period=All');
+  result_obj.setAttribute('data-own-refresh-ms', String(interval_ms));
   result_obj.parentElement = env_obj.current_obj.shell_obj;
   const parent_closest_fn = result_obj.closest;
-  result_obj.closest = (selector_str) => (selector_str === '[data-money-panel]' ? result_obj : parent_closest_fn(selector_str));
+  result_obj.closest = (selector_str) => (selector_str === '[data-own-refresh-ms]' ? result_obj : parent_closest_fn(selector_str));
   result_obj.event_list = [];
   result_obj.dispatchEvent = (event_obj) => { result_obj.event_list.push(event_obj.type); return true; };
-  env_obj.current_obj.selector_dict['[data-money-panel][hx-get]'] = [result_obj];
-  if (placeholder_bool) env_obj.current_obj.selector_dict['[data-money-placeholder]'] = [result_obj];
+  const list_obj = env_obj.current_obj.selector_dict['[data-own-refresh-ms]'] || [];
+  env_obj.current_obj.selector_dict['[data-own-refresh-ms]'] = [...list_obj, result_obj];
+  if (placeholder_bool) env_obj.current_obj.selector_dict['[data-own-placeholder]'] = [result_obj];
   return result_obj;
 }
 
-test('money panels refresh every five minutes, never while hidden', () => {
+test('own-refresh panels keep their own cadence from first sight, never while hidden', () => {
   const env_obj = environment_obj(600000);
-  const panel_obj = money_obj(env_obj);
-  env_obj.advance(299000); env_obj.timer();
-  assert.deepEqual(panel_obj.event_list, []);
+  const money_panel_obj = own_obj(env_obj, 300000);
+  const activity_panel_obj = own_obj(env_obj, 60000);
+  env_obj.timer();  // First sight starts each interval.
+  env_obj.advance(59000); env_obj.timer();
+  assert.deepEqual(activity_panel_obj.event_list, []);
   env_obj.advance(1000); env_obj.timer();
-  assert.deepEqual(panel_obj.event_list, ['v4money']);
+  assert.deepEqual(activity_panel_obj.event_list, ['v4own']);
+  assert.deepEqual(money_panel_obj.event_list, []);
+  env_obj.advance(240000); env_obj.timer();
+  assert.deepEqual(money_panel_obj.event_list, ['v4own']);
   env_obj.hide(true);
   env_obj.advance(300000); env_obj.timer();
-  assert.deepEqual(panel_obj.event_list, ['v4money']);
+  assert.deepEqual(money_panel_obj.event_list, ['v4own']);
+  assert.equal(activity_panel_obj.event_list.length, 2);  // One refresh when overdue; no catch-up burst.
 });
 
-test('a failed money request never degrades operating status', () => {
+test('a failed own-panel request never degrades operating status or blocks the status poll', () => {
   const env_obj = environment_obj();
-  const panel_obj = money_obj(env_obj);
+  const panel_obj = own_obj(env_obj);
   for (const event_str of ['htmx:responseError', 'htmx:timeout', 'htmx:sendError']) {
     env_obj.fire(event_str, {detail: {target: panel_obj}});
   }
@@ -1125,13 +1131,13 @@ test('a failed money request never degrades operating status', () => {
   shell_obj.poll_list = [];
   shell_obj.dispatchEvent = (event_obj) => { shell_obj.poll_list.push(event_obj.type); return true; };
   env_obj.advance(15000); env_obj.timer();
-  assert.deepEqual(shell_obj.poll_list, ['v4poll']);  // A money request is not a status request in flight.
+  assert.deepEqual(shell_obj.poll_list, ['v4poll']);
 });
 
-test('a placeholder left after a frame refresh loads its money at once', () => {
+test('a placeholder left after a frame refresh loads at once', () => {
   const env_obj = environment_obj();
   env_obj.replace();
-  const panel_obj = money_obj(env_obj, true);
+  const panel_obj = own_obj(env_obj, 300000, true);
   env_obj.fire('htmx:afterSettle');
-  assert.deepEqual(panel_obj.event_list, ['v4money']);
+  assert.deepEqual(panel_obj.event_list, ['v4own']);
 });

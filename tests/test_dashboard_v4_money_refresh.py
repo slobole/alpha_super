@@ -42,9 +42,10 @@ def test_overview_refresh_sends_preserved_placeholders_and_builds_no_finance(cli
     element_dict = _element_dict(refresh_str)
     for id_str in ("overview-money-tiles", "overview-money-asof", "overview-money-panels"):
         assert element_dict[id_str]["hx-preserve"] == "true"
-    assert "data-money-placeholder" in element_dict["overview-money-tiles"]
+    assert "data-own-placeholder" in element_dict["overview-money-tiles"]
     assert element_dict["overview-money-tiles"]["hx-get"] == "/overview/money?period=All"
-    assert element_dict["overview-money-tiles"]["hx-trigger"] == "v4money"
+    assert element_dict["overview-money-tiles"]["hx-trigger"] == "v4own"
+    assert element_dict["overview-money-tiles"]["data-own-refresh-ms"] == "300000"
     # Explicit, or htmx inherits the frame's hx-target and replaces the whole frame.
     assert element_dict["overview-money-tiles"]["hx-target"] == "this"
     assert "data-history-chart" not in refresh_str and "Portfolio return" not in refresh_str
@@ -55,7 +56,7 @@ def test_full_page_renders_money_without_preserve(client_obj):
     element_dict = _element_dict(client_obj.get("/").get_data(as_text=True))
     for id_str in ("overview-money-tiles", "overview-money-asof", "overview-money-panels"):
         assert "hx-preserve" not in element_dict[id_str] and "hx-swap-oob" not in element_dict[id_str]
-    assert "data-money-placeholder" not in element_dict["overview-money-tiles"]
+    assert "data-own-placeholder" not in element_dict["overview-money-tiles"]
 
 
 def test_overview_money_route_replaces_tiles_and_sends_the_rest_out_of_band(client_obj):
@@ -78,7 +79,7 @@ def test_pod_refresh_keeps_a_mode_specific_money_block(client_obj, monkeypatch, 
     monkeypatch.setattr(app_module, "build_pod_finance_dict", _forbidden)
     refresh_str = client_obj.get(f"/pods/{pod_id_str}/refresh").get_data(as_text=True)
     block_dict = _element_dict(refresh_str)["pod-money-" + mode_str]
-    assert block_dict["hx-preserve"] == "true" and "data-money-placeholder" in block_dict
+    assert block_dict["hx-preserve"] == "true" and "data-own-placeholder" in block_dict
     assert block_dict["hx-get"] == f"/pods/{pod_id_str}/money?period=All" and block_dict["hx-target"] == "this"
     assert "data-pod-allocation" not in refresh_str
 
