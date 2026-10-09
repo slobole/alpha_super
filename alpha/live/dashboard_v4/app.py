@@ -1,6 +1,8 @@
 """LIVE read-only operator views, with isolated synthetic Tools demonstrations."""
 
 from datetime import UTC, date, datetime, timedelta
+import hashlib
+import json
 from pathlib import Path
 import re
 import threading
@@ -220,6 +222,7 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             abort(404)
         source_dict = {"status_str": "unknown", "reason_str": "Saved cycle unavailable"}
         selected_current_bool = not cycle_str
+        money_key_str = "unverified"
         if overview_dict["source_fresh_bool"]:
             summary_dict = workspace_dict.get("summary_dict") or {}
             matched_list = [item_dict for item_dict in summary_dict.get("pod_row_dict_list") or []
@@ -228,6 +231,12 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             identity_list = [item_dict for item_dict in account_list if item_dict.get("pod_id") == pod_id_str]
             if len(matched_list) == len(identity_list) == 1 and matched_list[0].get("account_route_str") == identity_list[0]["account_route"]:
                 row_dict = matched_list[0]
+                # Saved positions and cash change after fills and reconcile: a new
+                # key gives the kept money block a new id, so it reloads at once.
+                money_key_str = hashlib.sha256(json.dumps([row_dict.get(key_str) for key_str in (
+                    "latest_pod_state_timestamp_str", "latest_reconciliation_timestamp_str",
+                    "latest_vplan_status_str", "latest_vplan_id_int")] + [(row_dict.get("eod_snapshot_dict") or {}).get(
+                    "latest_timestamp_str")], default=str).encode()).hexdigest()[:12]
                 if cycle_match_obj:
                     selected_current_bool = int(cycle_match_obj[2]) == row_dict.get(
                         "latest_decision_plan_id_int" if cycle_match_obj[1] == "decision" else "latest_vplan_id_int")
@@ -300,7 +309,9 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         overview_dict["refresh_url_str"] = url_for("pod_refresh", pod_id_str=pod_id_str,
             period=period_str, cycle=cycle_str, tab=tab_str)
         overview_dict["money_bool"] = money_bool
-        pod_page_dict["money_url_str"] = url_for("pod_money", pod_id_str=pod_id_str, period=period_str)
+        # The money block follows the selected cycle and tab: its layout and links depend on them.
+        pod_page_dict.update(money_key_str=money_key_str, money_url_str=url_for("pod_money", pod_id_str=pod_id_str,
+            period=period_str, cycle=cycle_str or None, tab=tab_str or None))
         return {"overview_dict": overview_dict, "pod_page_dict": pod_page_dict}
 
     @flask_app_obj.get("/")
@@ -370,6 +381,7 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         activity_page_dict = build_activity_page_dict(overview_dict, source_dict, cycle_dict,
             as_of_ts=acquisition_ts, days_int=days_int)
         activity_page_dict.update(initial_pod_str=pod_str,
+            updated_label_str=acquisition_ts.astimezone(MARKET_TIMEZONE_OBJ).strftime("%H:%M:%S") + " ET",
             body_url_str=url_for("activity_body", days=days_int, pod=pod_str or None))
         next_days_int = next((value_int for value_int in (14, 30, 90) if value_int > days_int), None)
         if next_days_int is not None:

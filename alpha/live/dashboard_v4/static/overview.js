@@ -150,6 +150,18 @@
     });
   }
 
+  function mark_own_failed(event_obj) {
+    // The status poll stays healthy, so the panel itself must say it is behind.
+    const target_obj = event_obj.detail && (event_obj.detail.target || event_obj.detail.elt);
+    const panel_obj = target_obj && target_obj.closest && target_obj.closest('[data-own-refresh-ms]');
+    if (!panel_obj) return;
+    panel_obj.setAttribute('data-own-failed', 'true');
+    if (typeof panel_obj.querySelectorAll !== 'function') return;
+    panel_obj.querySelectorAll('[data-own-status]').forEach((status_obj) => {
+      status_obj.textContent = '· Update failed · last ' + (status_obj.getAttribute('data-own-updated') || 'unknown');
+    });
+  }
+
   function own_event(event_obj) {
     const target_obj = event_obj.detail && (event_obj.detail.target || event_obj.detail.elt);
     return Boolean(target_obj && target_obj.closest && target_obj.closest('[data-own-refresh-ms]'));
@@ -314,6 +326,7 @@
 
   ['htmx:responseError', 'htmx:sendError', 'htmx:timeout', 'htmx:swapError'].forEach((event_str) => {
     document.addEventListener(event_str, (event_obj) => {
+      if (own_event(event_obj)) mark_own_failed(event_obj);
       if (overview_event(event_obj)) {
         selection_snapshot_obj = null;
         scheduler_check_snapshot_obj = null;

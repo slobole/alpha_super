@@ -1141,3 +1141,15 @@ test('a placeholder left after a frame refresh loads at once', () => {
   env_obj.fire('htmx:afterSettle');
   assert.deepEqual(panel_obj.event_list, ['v4own']);
 });
+
+test('a failed own-panel refresh marks the panel itself as behind', () => {
+  const env_obj = environment_obj();
+  const panel_obj = own_obj(env_obj, 60000);
+  const status_obj = element_obj('· updated 09:41:07 ET');
+  status_obj.setAttribute('data-own-updated', '09:41:07 ET');
+  panel_obj.querySelectorAll = (selector_str) => (selector_str === '[data-own-status]' ? [status_obj] : []);
+  env_obj.fire('htmx:responseError', {detail: {target: panel_obj}});
+  assert.equal(panel_obj.getAttribute('data-own-failed'), 'true');
+  assert.equal(status_obj.textContent, '· Update failed · last 09:41:07 ET');
+  assert.equal(env_obj.current_obj.shell_obj.getAttribute('data-refresh-degraded'), null);
+});

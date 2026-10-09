@@ -16,7 +16,7 @@ from alpha.live.dashboard_v4.data import LiveDataProvider
 
 
 # Successful polls would print a line every few seconds per open tab.
-QUIET_PATH_RE = re.compile(r"^(GET|HEAD) /(?:[^ ?]*/)?(?:refresh|status|tail|money)(?:[ ?]|$)")
+QUIET_PATH_RE = re.compile(r"^(GET|HEAD) /(?:[^ ?]*/)?(?:refresh|status|tail|money|body)(?:[ ?]|$)")
 
 
 class QuietPollFilter(logging.Filter):
