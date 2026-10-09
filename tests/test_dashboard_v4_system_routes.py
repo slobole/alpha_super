@@ -113,7 +113,8 @@ def test_page_and_refresh_use_operations_only_and_preserve_shared_shell(monkeypa
     shell_dict, = [attribute_dict for _, attribute_dict in page_obj.element_list
         if attribute_dict.get("id") == "overview-shell"]
     assert shell_dict["hx-get"] == "/system/refresh"
-    assert shell_dict["hx-trigger"] == "every 15s"
+    assert shell_dict["hx-trigger"] == "v4poll"
+    assert shell_dict["data-refresh-ms"] == "15000"
     assert shell_dict["hx-swap"] == "outerHTML"
     assert shell_dict["data-selection-scope"].startswith("system:")
     assert any("system-page" in attribute_dict.get("class", "").split()

@@ -83,8 +83,8 @@ def test_positions_shell_security_and_local_search_contract(positions_fixture_tu
     assert 'data-position-search-empty hidden' in html_str
     assert 'aria-label="Saved portfolio summary"' in html_str
     assert "READ-ONLY" not in html_str and "Free cash" not in html_str and "Show all" not in html_str
-    assert 'title="PAPER is not available in V4 yet"' in html_str
-    assert 'title="INCUBATION is not available in V4 yet"' in html_str
+    # Modes without V4 views are hidden, not shown as dead controls.
+    assert "PAPER is not available" not in html_str and "INCUBATION is not available" not in html_str
     assert len(page_dict["pod_row_list"]) == 4
     assert response_obj.headers["Cache-Control"] == "no-store"
     assert response_obj.headers["X-Content-Type-Options"] == "nosniff"

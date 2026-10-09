@@ -12,7 +12,8 @@ from alpha.live.dashboard_v4.cycle import build_cycle_view_dict
 from alpha.live.dashboard_v4.finance import build_financial_overview_dict
 from alpha.live.dashboard_v4.market import build_market_view_dict
 from alpha.live.dashboard_v4.next_operation import build_next_operation_dict
-from alpha.live.dashboard_v4.scheduler_view import apply_scheduler_to_steps, scheduler_issue_dict, scheduler_note_str
+from alpha.live.dashboard_v4.scheduler_view import (
+    apply_scheduler_to_steps, scheduler_hold_dict, scheduler_issue_dict, scheduler_note_str)
 from alpha.live.ops_report import parse_timestamp_ts
 
 
@@ -23,6 +24,8 @@ STATE_CLASS_DICT = {
     "red": "fail", "gray": "unk", "neutral": "skip",
 }
 STATE_RANK_DICT = {"fail": 0, "late": 1, "unk": 2, "now": 3, "next": 4, "done": 5, "skip": 6}
+# A manual submit becomes urgent this close to the planned trade.
+DEADLINE_URGENT_SECONDS_INT = 600
 
 
 def _state_str(value_str):
@@ -34,6 +37,42 @@ def _duration_str(seconds_float):
     hours_int, remaining_int = divmod(seconds_int, 3600)
     minutes_int, seconds_int = divmod(remaining_int, 60)
     return f"{hours_int:02}:{minutes_int:02}:{seconds_int:02}"
+
+
+def _human_duration_str(seconds_float):
+    minutes_int = max(0, int(seconds_float)) // 60
+    if minutes_int < 1:
+        return "under 1 min"
+    if minutes_int < 60:
+        return f"{minutes_int} min"
+    hours_int, minutes_int = divmod(minutes_int, 60)
+    if hours_int < 24:
+        return f"{hours_int} h {minutes_int:02} min"
+    return f"{hours_int // 24} d {hours_int % 24} h"
+
+
+def _deadline_dict(row_dict, as_of_ts):
+    """Only a manual submit has an operator deadline: the planned trade time."""
+    if row_dict.get("next_action_str") != "review_vplan":
+        return {}
+    target_ts = parse_timestamp_ts(row_dict.get("latest_vplan_target_execution_timestamp_str"))
+    if target_ts is None:
+        return {}
+    market_ts = target_ts.astimezone(MARKET_TIMEZONE_OBJ)
+    time_str = market_ts.strftime("%H:%M" if market_ts.date() == as_of_ts.astimezone(MARKET_TIMEZONE_OBJ).date() else "%m-%d %H:%M")
+    remaining_float = (target_ts - as_of_ts).total_seconds()
+    if remaining_float <= 0:
+        # Still waiting for a manual submit after the planned trade: never quieter.
+        return {"deadline_timestamp_str": target_ts.isoformat(), "deadline_urgent_bool": True,
+            "deadline_str": "You submit · trade time passed " + time_str + " ET"}
+    return {"deadline_timestamp_str": target_ts.isoformat(), "deadline_urgent_bool": remaining_float < DEADLINE_URGENT_SECONDS_INT,
+        "deadline_str": "You submit · trade " + time_str + " ET · in " + _human_duration_str(remaining_float)}
+
+
+def _attention_sort_tuple(attention_dict):
+    # Deadlines first (soonest first), then failures, then reviews.
+    deadline_str = attention_dict.get("deadline_timestamp_str") or ""
+    return (0 if deadline_str else 1, deadline_str, STATE_RANK_DICT.get(attention_dict["state_str"], 9))
 
 
 def _data_time_str(value_str):
@@ -135,6 +174,7 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
             "next_forecast_bool": next_dict["next_forecast_bool"], "next_timestamp_str": next_dict["next_timestamp_str"],
             "step_list": step_list,
             "scheduler_dict": scheduler_dict,
+            "auto_submit_enabled_bool": row_dict.get("auto_submit_enabled_bool"),
         })
         database_failed_bool = row_dict.get("db_status_str") in {"missing", "error"}
         if fresh_bool and matched_bool and (database_failed_bool
@@ -149,6 +189,10 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
                 "detail_str": "Cycle evidence cannot be read." if database_failed_bool else (required_dict.get("reason_str") or required_dict.get("detail_str") or "") if action_required_bool else cycle_dict["now_detail_str"],
                 "age_str": age_str,
             })
+            if action_required_bool and not database_failed_bool:
+                attention_list[-1].update(_deadline_dict(row_dict, as_of_ts))
+                if attention_list[-1].get("deadline_urgent_bool"):
+                    attention_list[-1]["state_str"] = "fail"
             # A Pod-level gate or unreadable DB is part of its current state,
             # even when the last trading cycle completed successfully.
             attention_dict = attention_list[-1]
@@ -178,9 +222,19 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
                 next_forecast_bool=False, next_timestamp_str="")
         elif fresh_bool and matched_bool:
             existing_dict = next((item_dict for item_dict in attention_list if item_dict["pod_id_str"] == pod_id_str), None)
+            hold_dict = scheduler_hold_dict(scheduler_dict)
             if existing_dict:
                 existing_dict["scheduler_note_str"] = scheduler_note_str(scheduler_dict)
+            elif hold_dict:
+                last_seen_ts = parse_timestamp_ts(scheduler_dict.get("last_seen_timestamp_str"))
+                hold_dict.update(pod_id_str=pod_id_str, pod_name_str=name_str,
+                    age_str=_duration_str((as_of_ts - last_seen_ts).total_seconds()) if last_seen_ts and last_seen_ts <= as_of_ts else "—")
+                attention_list.append(hold_dict)
+                pod_list[-1].update(state_str="late", pill_str="Needs review", now_str=hold_dict["title_str"],
+                    now_detail_str=hold_dict["detail_str"], next_str="Review saved evidence", next_time_str="",
+                    next_detail_str="you · now", next_forecast_bool=False, next_timestamp_str="")
 
+    attention_list.sort(key=_attention_sort_tuple)
     scoped_summary_dict = {**source_dict, "pod_row_dict_list": scoped_row_list}
     if demo_bool:
         from alpha.live.dashboard_v4.system_demo import build_demo_health_rollup

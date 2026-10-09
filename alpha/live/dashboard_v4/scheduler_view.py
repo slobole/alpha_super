@@ -20,7 +20,8 @@ def scheduler_issue_dict(status_dict, *, now_ts):
     title_str = {"late": "Scheduler check overdue", "stopped": "Scheduler not responding",
                  "error": "Scheduler error"}[state_str]
     if state_str == "error":
-        detail_str = "The scheduler reported an error. Check its log."
+        reason_str = status_dict.get("error_reason_str") or ""
+        detail_str = ("Reason: " + reason_str.rstrip(".") + ".") if reason_str else "The scheduler reported an error."
         if status_dict.get("promised_wake_timestamp_str"):
             detail_str += " Retry due " + _time_str(status_dict["promised_wake_timestamp_str"], now_ts) + "."
     else:
@@ -28,7 +29,25 @@ def scheduler_issue_dict(status_dict, *, now_ts):
         if status_dict.get("promised_wake_timestamp_str"):
             detail_str += " Expected check " + _time_str(status_dict["promised_wake_timestamp_str"], now_ts) + "."
     return {"state_str": "late" if state_str == "late" else "fail", "title_str": title_str,
-            "detail_str": detail_str, "timestamp_str": status_dict.get("last_seen_timestamp_str") or ""}
+            "detail_str": detail_str, "timestamp_str": status_dict.get("last_seen_timestamp_str") or "",
+            "console_bool": True}
+
+
+HOLD_REASON_DICT = {
+    "execution_exception_parked": "An execution problem is parked for your review.",
+    "manual_review_required": "A plan waits for your review before it can be sent.",
+    "mr_capsule_eod_snapshot_untrusted": "The saved end-of-day snapshot is not trusted.",
+}
+
+
+def scheduler_hold_dict(status_dict):
+    """A live scheduler that holds a Pod will not retry by itself: the operator must act."""
+    if status_dict.get("alive_bool") is not True or status_dict.get("state_str") != "holding":
+        return {}
+    reason_str = HOLD_REASON_DICT.get(status_dict.get("reason_code_str") or "", "The scheduler holds this Pod.")
+    return {"state_str": "late", "title_str": "Waiting for you",
+            "detail_str": reason_str + " It will not retry by itself.",
+            "timestamp_str": status_dict.get("last_seen_timestamp_str") or "", "console_bool": True}
 
 
 def scheduler_note_str(status_dict):

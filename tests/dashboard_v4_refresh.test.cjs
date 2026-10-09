@@ -22,7 +22,7 @@ for (const trigger_str of ['expiry', 'htmx:responseError', 'htmx:timeout']) {
     selector_dict['[data-system-expected]'] = expected_obj;
     selector_dict['[data-system-release]'] = release_obj;
     if (trigger_str === 'expiry') { env_obj.advance(1000); env_obj.timer(); }
-    else env_obj.fire(trigger_str);
+    else { env_obj.fire(trigger_str); env_obj.fire(trigger_str); env_obj.fire(trigger_str); }
     assert.ok(status_list.every((status_obj) => status_obj.textContent === 'Unknown'));
     assert.ok(mark_list.every((mark_obj) => mark_obj.className === 'st st-unk'));
     assert.equal(expected_obj.textContent, 'Each wakes when it said it would');
@@ -173,6 +173,7 @@ function environment_obj(valid_ms = 120000, initial_latency_ms = 0, clock_timest
     window: window_obj,
     Date: {now: () => wall_ms, parse: Date.parse}, performance: {now: () => initial_latency_ms},
     NodeFilter: {SHOW_TEXT: 4},
+    CustomEvent: class { constructor(type_str) { this.type = type_str; } },
     setInterval: (handler_fn) => { timer_fn = handler_fn; },
   });
   return {
@@ -186,6 +187,7 @@ function environment_obj(valid_ms = 120000, initial_latency_ms = 0, clock_timest
       return event_obj;
     },
     select: (selection_obj) => { window_obj.getSelection = () => selection_obj; },
+    hide: (hidden_bool) => { document_obj.hidden = hidden_bool; },
     focus: (element_obj) => { document_obj.activeElement = element_obj; },
     replace: (remaining_ms = 120000, next_clock_str) => {
       current_obj.shell_obj.isConnected = false;
@@ -420,14 +422,30 @@ test('expired next operations cannot claim either saved-plan or forecast freshne
 });
 
 for (const event_str of ['htmx:responseError', 'htmx:sendError', 'htmx:timeout', 'htmx:swapError']) {
-  test(event_str + ' marks every operating claim unknown while retaining the last plan label', () => {
+  test('one ' + event_str + ' keeps the last saved status, dimmed, with a retry banner', () => {
     const env_obj = environment_obj();
     env_obj.fire(event_str);
+    const selector_dict = env_obj.current_obj.selector_dict;
+    assert.equal(env_obj.current_obj.shell_obj.getAttribute('data-refresh-degraded'), 'true');
+    assert.equal(env_obj.current_obj.shell_obj.getAttribute('data-source-stale'), null);
+    assert.equal(selector_dict['.refresh-error'].hidden, false);
+    assert.equal(selector_dict['[data-refresh-reason]'].textContent, 'Retrying. Showing the last saved status.');
+    assert.equal(selector_dict['[data-pod-now]'].textContent, 'Current');
+    assert.equal(selector_dict['.step'].className, 'step is-done is-sel');
+    assert.equal(selector_dict['[data-evidence-status]'].textContent, 'Acked');
+    env_obj.fire(event_str);
+    assert.equal(selector_dict['[data-pod-now]'].textContent, 'Current');
+  });
+
+  test('three consecutive ' + event_str + ' mark every operating claim unknown while retaining the last plan label', () => {
+    const env_obj = environment_obj();
+    env_obj.fire(event_str); env_obj.fire(event_str); env_obj.fire(event_str);
     assert.equal(env_obj.current_obj.selector_dict['[data-pod-pill]'].className, 'pill pill-unk');
     assert.equal(env_obj.current_obj.selector_dict['[data-pod-now]'].textContent, 'Unknown');
     assert.equal(env_obj.current_obj.selector_dict['[data-status-label]'].textContent, 'Unknown');
     assert.equal(env_obj.current_obj.selector_dict['.tk'].title, 'Fill · Unknown');
-    assert.equal(env_obj.current_obj.selector_dict['[data-refresh-reason]'].textContent, 'Update failed.');
+    assert.equal(env_obj.current_obj.selector_dict['[data-refresh-reason]'].textContent, 'Update failed 3 times in a row.');
+    assert.equal(env_obj.current_obj.shell_obj.getAttribute('data-refresh-degraded'), null);
     assert.equal(env_obj.current_obj.selector_dict['[data-next-detail]'].textContent, 'Not current');
     assert.equal(env_obj.current_obj.selector_dict['.step'].className, 'step is-unk');
     assert.equal(env_obj.current_obj.selector_dict['[data-step-fact]'].textContent, 'Unknown');
@@ -455,6 +473,8 @@ for (const trigger_str of ['expiry', 'htmx:responseError', 'htmx:sendError', 'ht
       assert.equal(evidence_list[0].textContent, 'Acked');
       env_obj.advance(1); env_obj.timer();
     } else {
+      env_obj.fire(trigger_str); env_obj.fire(trigger_str);
+      assert.equal(fact_list[4].textContent, '9 of 9');
       env_obj.fire(trigger_str);
     }
     assert.ok(step_list.every((step_obj) => step_obj.className === 'step is-unk'));
@@ -519,9 +539,9 @@ for (const [timestamp_str, expected_str] of [
   });
 }
 
-test('clock continues after failed refresh but cannot restore operating status', () => {
+test('clock continues after failed refreshes but cannot restore operating status', () => {
   const env_obj = environment_obj();
-  env_obj.fire('htmx:sendError');
+  env_obj.fire('htmx:sendError'); env_obj.fire('htmx:sendError'); env_obj.fire('htmx:sendError');
   env_obj.advance(1000); env_obj.timer();
   assert.equal(env_obj.current_obj.selector_dict['[data-live-clock]'][0].textContent, '09:41:08 ET');
   assert.equal(env_obj.current_obj.selector_dict['[data-status-label]'].textContent, 'Unknown');
@@ -711,7 +731,7 @@ test('selection does not cancel HTMX error handling before its responseError eve
   });
   assert.equal(error_obj.defaultPrevented, false);
   env_obj.fire('htmx:responseError');
-  assert.equal(env_obj.current_obj.selector_dict['[data-status-label]'].textContent, 'Unknown');
+  assert.equal(env_obj.current_obj.shell_obj.getAttribute('data-refresh-degraded'), 'true');
   assert.equal(env_obj.current_obj.selector_dict['[data-broker-id]'].textContent, 'perm:123456789');
 });
 
@@ -723,8 +743,8 @@ test('failed refresh cannot replay a captured selection or renew evidence lifeti
   env_obj.fire('htmx:swapError');
   env_obj.fire('htmx:afterSwap');
   assert.equal(selected_obj.restored_int, 0);
-  assert.equal(env_obj.current_obj.selector_dict['[data-status-label]'].textContent, 'Unknown');
   env_obj.advance(1000); env_obj.timer();
+  assert.equal(env_obj.current_obj.selector_dict['[data-status-label]'].textContent, 'Unknown');
   assert.equal(env_obj.current_obj.selector_dict['[data-refresh-reason]'].textContent, 'Saved status is out of date.');
 });
 
@@ -936,3 +956,126 @@ for (const change_str of ['before_swap', 'after_capture', 'hover_only']) {
     assert_allocation_highlight(refreshed_obj.panel_obj, null);
   });
 }
+
+function poll_shell_obj(env_obj, interval_ms = 15000) {
+  const shell_obj = env_obj.current_obj.shell_obj;
+  shell_obj.setAttribute('data-refresh-ms', String(interval_ms));
+  shell_obj.poll_list = [];
+  shell_obj.dispatchEvent = (event_obj) => { shell_obj.poll_list.push(event_obj.type); return true; };
+  return shell_obj;
+}
+
+test('a success between failures resets the failure count', () => {
+  const env_obj = environment_obj();
+  env_obj.fire('htmx:timeout'); env_obj.fire('htmx:timeout');
+  env_obj.fire('htmx:afterRequest', {detail: {target: env_obj.current_obj.shell_obj, successful: true}});
+  env_obj.fire('htmx:timeout'); env_obj.fire('htmx:timeout');
+  assert.equal(env_obj.current_obj.selector_dict['[data-pod-now]'].textContent, 'Current');
+  assert.equal(env_obj.current_obj.shell_obj.getAttribute('data-refresh-degraded'), 'true');
+  env_obj.fire('htmx:timeout');
+  assert.equal(env_obj.current_obj.selector_dict['[data-pod-now]'].textContent, 'Unknown');
+});
+
+test('a degraded page still expires at the saved status lifetime', () => {
+  const env_obj = environment_obj(5000);
+  env_obj.fire('htmx:sendError');
+  assert.equal(env_obj.current_obj.selector_dict['[data-pod-now]'].textContent, 'Current');
+  env_obj.advance(5000); env_obj.timer();
+  assert.equal(env_obj.current_obj.selector_dict['[data-pod-now]'].textContent, 'Unknown');
+  assert.equal(env_obj.current_obj.selector_dict['[data-refresh-reason]'].textContent, 'Saved status is out of date.');
+});
+
+test('the shell polls once per interval, never while hidden or while a request is in flight', () => {
+  const env_obj = environment_obj();
+  const shell_obj = poll_shell_obj(env_obj, 15000);
+  env_obj.advance(14000); env_obj.timer();
+  assert.deepEqual(shell_obj.poll_list, []);
+  env_obj.advance(1000); env_obj.timer();
+  assert.deepEqual(shell_obj.poll_list, ['v4poll']);
+  env_obj.fire('htmx:beforeRequest');
+  env_obj.advance(11000); env_obj.timer();
+  assert.equal(shell_obj.poll_list.length, 1);
+  env_obj.fire('htmx:afterRequest', {detail: {target: shell_obj, successful: true}});
+  env_obj.timer();
+  assert.equal(shell_obj.poll_list.length, 1);
+  env_obj.advance(4000); env_obj.timer();
+  assert.equal(shell_obj.poll_list.length, 2);
+  env_obj.hide(true);
+  env_obj.advance(60000); env_obj.timer();
+  assert.equal(shell_obj.poll_list.length, 2);
+});
+
+test('a request stuck in flight stops blocking polls after the transport limit', () => {
+  const env_obj = environment_obj();
+  const shell_obj = poll_shell_obj(env_obj, 15000);
+  env_obj.advance(15000); env_obj.timer();
+  env_obj.fire('htmx:beforeRequest');
+  env_obj.advance(16000); env_obj.timer();
+  assert.equal(shell_obj.poll_list.length, 2);
+});
+
+test('a request in flight blocks a due poll until the transport limit', () => {
+  const env_obj = environment_obj();
+  const shell_obj = poll_shell_obj(env_obj, 5000);
+  env_obj.fire('htmx:beforeRequest');
+  env_obj.advance(11000); env_obj.timer();
+  assert.equal(shell_obj.poll_list.length, 0);
+  env_obj.advance(1000); env_obj.timer();
+  assert.equal(shell_obj.poll_list.length, 1);
+});
+
+test('returning to a hidden tab polls at once and still checks expiry first', () => {
+  const env_obj = environment_obj(20000);
+  const shell_obj = poll_shell_obj(env_obj, 15000);
+  env_obj.hide(true);
+  env_obj.advance(30000); env_obj.timer();
+  assert.deepEqual(shell_obj.poll_list, []);
+  env_obj.hide(false);
+  env_obj.fire('visibilitychange');
+  assert.deepEqual(shell_obj.poll_list, ['v4poll']);
+  assert.equal(env_obj.current_obj.selector_dict['[data-pod-now]'].textContent, 'Unknown');
+});
+
+test('a missing or invalid poll interval never polls', () => {
+  for (const interval_str of [null, '0', 'abc']) {
+    const env_obj = environment_obj();
+    const shell_obj = poll_shell_obj(env_obj);
+    if (interval_str === null) shell_obj.removeAttribute('data-refresh-ms');
+    else shell_obj.setAttribute('data-refresh-ms', interval_str);
+    env_obj.advance(60000); env_obj.timer();
+    assert.deepEqual(shell_obj.poll_list, []);
+  }
+});
+
+for (const same_scope_bool of [true, false]) {
+  test('an opened folded section ' + (same_scope_bool ? 'stays open' : 'does not reopen') + ' after a refresh of ' + (same_scope_bool ? 'the same' : 'another') + ' view', () => {
+    const env_obj = environment_obj();
+    const open_obj = element_obj();
+    open_obj.setAttribute('data-keep-open', 'pod-money');
+    open_obj.setAttribute('open', '');
+    env_obj.current_obj.selector_dict['details[data-keep-open][open]'] = [open_obj];
+    env_obj.fire('htmx:beforeSwap');
+    env_obj.replace();
+    if (!same_scope_bool) env_obj.current_obj.shell_obj.setAttribute('data-selection-scope', 'pod:other');
+    const refreshed_obj = element_obj();
+    refreshed_obj.setAttribute('data-keep-open', 'pod-money');
+    env_obj.current_obj.selector_dict['details[data-keep-open]'] = [refreshed_obj];
+    env_obj.fire('htmx:afterSwap');
+    assert.equal(refreshed_obj.getAttribute('open'), same_scope_bool ? '' : null);
+  });
+}
+
+test('unknown status also hides deadlines and the open-item count', () => {
+  const env_obj = environment_obj(1000);
+  const deadline_obj = element_obj('You submit · trade 09:30 ET · in 3 min');
+  const count_obj = element_obj('2');
+  deadline_obj.hidden = false;
+  count_obj.hidden = false;
+  env_obj.current_obj.selector_dict['.deadline'] = [deadline_obj];
+  env_obj.current_obj.selector_dict['.mode-count'] = [count_obj];
+  env_obj.fire('htmx:timeout');
+  assert.equal(deadline_obj.hidden, false);  // Degraded only: still the last saved claim.
+  env_obj.advance(1000); env_obj.timer();
+  assert.equal(deadline_obj.hidden, true);
+  assert.equal(count_obj.hidden, true);
+});

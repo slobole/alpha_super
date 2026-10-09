@@ -3,6 +3,8 @@
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 import re
+import threading
+import time
 
 from flask import Flask, Response, abort, jsonify, render_template, request, send_from_directory, url_for
 
@@ -17,6 +19,8 @@ from alpha.live.dashboard_v4.status import load_operations_workspace_dict
 from alpha.live.dashboard_v4.activity import build_activity_page_dict
 from alpha.live.dashboard_v4.activity_data import load_activity_source_dict
 from alpha.live.dashboard_v4.activity_cycles import build_activity_cycles_dict
+from alpha.live.dashboard_v4.console import build_console_page_dict, load_console_pod_list, resolve_console_log_path_str
+from alpha.live.dashboard_v4.console_data import build_console_download_str, read_console_tail_dict
 from alpha.live.dashboard_v4.system import build_system_page_dict, system_scope_matches_bool
 from alpha.live.dashboard_v4.system_data import load_system_source_dict
 from alpha.live.dashboard_v4.tools import build_tools_page_dict, resolve_tools_target_obj
@@ -93,6 +97,25 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         return response_obj
 
     register_tools_action_routes(flask_app_obj, tools_service_obj)
+    # Console reads are bounded per request; these caps bound concurrency too.
+    console_tail_semaphore_obj = threading.BoundedSemaphore(4)
+    console_download_semaphore_obj = threading.BoundedSemaphore(1)
+    console_pod_cache_dict = {"at_float": -1e9, "pod_list": []}
+    console_pod_lock_obj = threading.Lock()
+
+    def console_pod_list():
+        # Enabled release scope changes rarely; re-read it at most once a minute.
+        with console_pod_lock_obj:
+            if time.monotonic() - console_pod_cache_dict["at_float"] >= 60:
+                console_pod_cache_dict.update(at_float=time.monotonic(), pod_list=load_console_pod_list(provider_obj))
+            return console_pod_cache_dict["pod_list"]
+
+    def console_pod_id_str(pod_id_str):
+        if pod_id_str == "all":
+            return None
+        if not any(item_dict["pod_id_str"] == pod_id_str for item_dict in console_pod_list()):
+            abort(404)
+        return pod_id_str
 
     def context_dict(pod_id_str=None, *, positions_bool=False):
         allowed_set = {"view", "pod"} if positions_bool else ({"period", "cycle", "tab"} if pod_id_str is not None else {"period"})
@@ -563,6 +586,67 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             as_of_ts=clock_fn(), demo_bool=demo_bool, include_finance_bool=False)
         finalize_system_dict(overview_dict, workspace_dict)
         return render_template("_tools_status.html", overview_dict=overview_dict)
+
+    @flask_app_obj.get("/console")
+    def console():
+        if set(request.args) - {"pod"} or len(request.args.getlist("pod")) > 1:
+            abort(400)
+        pod_list = console_pod_list()
+        selected_pod_str = request.args.get("pod") or next(
+            (item_dict["pod_id_str"] for item_dict in pod_list if item_dict["mode_str"] == "live"), "all")
+        console_pod_id_str(selected_pod_str)
+        workspace_dict = (load_operations_workspace_dict(provider_obj, as_of_ts=clock_fn())
+            if operations_workspace_fn is None else operations_workspace_fn())
+        overview_dict = build_overview_dict(workspace_dict, None, provider_obj,
+            as_of_ts=clock_fn(), demo_bool=demo_bool, include_finance_bool=False)
+        overview_dict.update(refresh_url_str=url_for("console_status"), refresh_seconds_int=15)
+        finalize_system_dict(overview_dict, workspace_dict)
+        console_page_dict = build_console_page_dict(pod_list, selected_pod_str, url_for)
+        return render_template("overview.html", overview_dict=overview_dict, console_page_dict=console_page_dict)
+
+    @flask_app_obj.get("/console/status")
+    def console_status():
+        if request.args:
+            abort(400)
+        workspace_dict = (load_operations_workspace_dict(provider_obj, as_of_ts=clock_fn())
+            if operations_workspace_fn is None else operations_workspace_fn())
+        overview_dict = build_overview_dict(workspace_dict, None, provider_obj,
+            as_of_ts=clock_fn(), demo_bool=demo_bool, include_finance_bool=False)
+        finalize_system_dict(overview_dict, workspace_dict)
+        return render_template("_console_status.html", overview_dict=overview_dict)
+
+    @flask_app_obj.get("/console/<pod_id_str>/tail")
+    def console_tail(pod_id_str):
+        # Never touches the summary, SQLite or the shell: only one bounded file read.
+        if set(request.args) - {"cursor", "peek"} or any(len(request.args.getlist(key_str)) > 1 for key_str in request.args):
+            abort(400)
+        cursor_str, peek_str = request.args.get("cursor", ""), request.args.get("peek", "0")
+        if len(cursor_str) > 300 or peek_str not in {"0", "1"}:
+            abort(400)
+        selected_pod_id_str = console_pod_id_str(pod_id_str)
+        if not console_tail_semaphore_obj.acquire(blocking=False):
+            return jsonify(error="busy"), 429, {"Retry-After": "5"}
+        try:
+            tail_dict = read_console_tail_dict(resolve_console_log_path_str(provider_obj), selected_pod_id_str,
+                cursor_str or None, peek_bool=peek_str == "1")
+        finally:
+            console_tail_semaphore_obj.release()
+        return jsonify({**tail_dict, "pod_id_str": pod_id_str, "server_time_utc_str": datetime.now(UTC).isoformat()})
+
+    @flask_app_obj.get("/console/<pod_id_str>/download")
+    def console_download(pod_id_str):
+        if request.args:
+            abort(400)
+        selected_pod_id_str = console_pod_id_str(pod_id_str)
+        if not console_download_semaphore_obj.acquire(blocking=False):
+            return Response("Another download is running. Try again in a few seconds.", status=429, headers={"Retry-After": "5"})
+        try:
+            content_str = build_console_download_str(resolve_console_log_path_str(provider_obj), selected_pod_id_str)
+        finally:
+            console_download_semaphore_obj.release()
+        filename_str = "console-" + re.sub(r"[^A-Za-z0-9._-]", "_", pod_id_str) + ".log"
+        return Response(content_str, mimetype="text/plain; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename_str}"'})
 
     @flask_app_obj.get("/assets/<path:filename>")
     def assets(filename):

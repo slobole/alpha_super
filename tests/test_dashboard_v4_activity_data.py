@@ -87,6 +87,7 @@ def test_disabled_and_other_modes_are_filtered_before_identity_or_file_access(tm
         for mode_str, enabled_bool in [("paper", True), ("incubation", True), ("live", False)]]
     provider_obj = _provider_obj(tmp_path, *ignored_target_list)
     monkeypatch.setattr(Path, "open", lambda *argument_list, **argument_dict: pytest.fail("No scoped targets must not open logs"))
+    monkeypatch.setattr(activity_data, "open_shared_read_obj", lambda path_obj, _open_fn=lambda *argument_list, **argument_dict: pytest.fail("No scoped targets must not open logs"): _open_fn(Path(path_obj), "rb"))
     result_dict = _load_dict(provider_obj)
     assert result_dict["event_list"] == [] and result_dict["feed_available_bool"] is False
 
@@ -101,6 +102,7 @@ def test_disabled_and_other_modes_are_filtered_before_identity_or_file_access(tm
 def test_ambiguous_invalid_or_oversized_scope_fails_before_file_access(tmp_path, monkeypatch, target_list):
     provider_obj = _provider_obj(tmp_path, *target_list)
     monkeypatch.setattr(Path, "open", lambda *argument_list, **argument_dict: pytest.fail("Invalid scope must not open logs"))
+    monkeypatch.setattr(activity_data, "open_shared_read_obj", lambda path_obj, _open_fn=lambda *argument_list, **argument_dict: pytest.fail("Invalid scope must not open logs"): _open_fn(Path(path_obj), "rb"))
     result_dict = _load_dict(provider_obj)
     assert result_dict["warning_list"] == ["Activity scope could not be verified."]
     assert result_dict["event_list"] == [] and result_dict["feed_available_bool"] is False
@@ -273,12 +275,12 @@ def test_locked_optional_source_is_visible_without_exception_or_private_path(tmp
     provider_obj = _provider_obj(tmp_path)
     _write_records(Path(provider_obj.event_log_path_str), _record_dict())
     _write_records(tmp_path / "operator_journal.jsonl")
-    original_open_func = Path.open
-    def restricted_open(path_obj, *argument_list, **argument_dict):
-        if path_obj.name == "operator_journal.jsonl":
+    original_open_func = activity_data.open_shared_read_obj
+    def restricted_open(path_obj):
+        if Path(path_obj).name == "operator_journal.jsonl":
             raise PermissionError("locked C:/private/private-log.jsonl")
-        return original_open_func(path_obj, *argument_list, **argument_dict)
-    monkeypatch.setattr(Path, "open", restricted_open)
+        return original_open_func(path_obj)
+    monkeypatch.setattr(activity_data, "open_shared_read_obj", restricted_open)
     result_dict = _load_dict(provider_obj)
     assert len(result_dict["event_list"]) == 1 and result_dict["feed_available_bool"] is False
     assert result_dict["warning_list"] == ["An Activity source could not be read safely."]
@@ -322,6 +324,7 @@ def test_global_byte_budget_and_file_count_are_bounded(tmp_path, monkeypatch):
         opened_list.append(path_obj.name)
         return original_open_func(path_obj, *argument_list, **argument_dict)
     monkeypatch.setattr(Path, "open", counted_open)
+    monkeypatch.setattr(activity_data, "open_shared_read_obj", lambda path_obj, _open_fn=counted_open: _open_fn(Path(path_obj), "rb"))
     result_dict = _load_dict(provider_obj)
     assert len(opened_list) <= 3 and "live_events.jsonl.1" not in opened_list
     assert result_dict["feed_available_bool"] is True
@@ -412,11 +415,11 @@ def test_boundary_stops_older_rotations_only_after_requested_history_is_read(tmp
         path_obj = tmp_path / ("live_events.jsonl" + (f".{rotation_int}" if rotation_int else ""))
         _write_records(path_obj, _record_dict(f"saved_{rotation_int}", event_ts=BASE_TS - timedelta(days=rotation_int * 8)))
     older_calls_list = []
-    original_open_func = Path.open
-    def counted_open(path_obj, *argument_list, **argument_dict):
-        older_calls_list.append(path_obj.name)
-        return original_open_func(path_obj, *argument_list, **argument_dict)
-    monkeypatch.setattr(Path, "open", counted_open)
+    original_open_func = activity_data.open_shared_read_obj
+    def counted_open(path_obj):
+        older_calls_list.append(Path(path_obj).name)
+        return original_open_func(path_obj)
+    monkeypatch.setattr(activity_data, "open_shared_read_obj", counted_open)
     seven_dict = _load_dict(provider_obj)
     assert "live_events.jsonl.2" not in older_calls_list
     assert seven_dict["coverage_dict"]["complete_bool"] is True

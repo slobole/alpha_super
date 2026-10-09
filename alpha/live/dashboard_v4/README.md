@@ -107,9 +107,11 @@ availability check, or permission to trade. It changes no scheduler or order gat
   of whether the strategy traded; a missing prior EOD identifies the missing day.
 - Healthy monthly waits show `Waiting` and `No trade scheduled`. Current
   `Next` also considers the next EOD and decision window using the existing
-  exchange-calendar and V3 schedule helpers. Calendar forecasts are marked
-  `Scheduled`; decision times say `after` close and `when data is ready`, with
-  no readiness countdown. Missing timing is `Time unknown`. These projections
+  exchange-calendar and V3 schedule helpers. When a decision window is known it
+  outranks the routine EOD, so a monthly Pod shows its next trade on every day:
+  `Decide after 10-30 16:00:00 · Scheduled · trade 11-02 09:30:00`. The EOD
+  time stays in the cycle track. Calendar forecasts are marked `Scheduled`;
+  decision times say `after` close, with no readiness countdown. Missing timing is `Time unknown`. These projections
   do not prove scheduler liveness or alter the selected historical cycle.
 - Scheduler evidence is read from bounded tails of the configured event log
   and its per-Pod LIVE trace files, including fixed rotation names. Nothing
@@ -347,8 +349,8 @@ completion time, exact LIVE scope, canonical report SHA256 and heartbeat result.
 Only a matching fresh pair proves `Run completed`. Missing legacy receipts are
 neutral for the ping; malformed, mismatched or stale receipts are not accepted.
 Receipt failure leaves prior alert/ping behavior and exit codes unchanged.
-`Fail signal sent` means the failure heartbeat was delivered successfully.
-It does not mean the saved report was healthy. This dashboard cannot detect a
+`Fail signal sent` means the failure heartbeat was delivered successfully:
+the watchdog found a problem, so the row is amber (needs review), never green. This dashboard cannot detect a
 dead VPS while running on that VPS; the already-configured external dead-man
 service must detect missing pings. No external monitoring service is configured
 by this change.
@@ -378,6 +380,55 @@ raw reports, paths, account numbers, webhook addresses or exception messages.
 No export file is written on the server. The demo provides explicit synthetic
 service evidence and a fixed 78% disk warning; it never probes the host disk or
 falls back to real service sources.
+
+## Operator pass (2026-10-09)
+
+- **Calm refresh.** One failed or timed-out poll keeps the last saved status,
+  dimmed, with `Update failed · Retrying. Showing the last saved status.` The
+  page turns Unknown only when the saved status reaches its 120-second
+  lifetime or after three failed polls in a row. The shell polls through a
+  custom `v4poll` trigger from the existing one-second timer, so a hidden tab
+  sends no requests and polls once when it becomes visible again.
+- **Summary without waiting.** The V4 provider serves the last summary and runs
+  at most one background rebuild, waiting up to 2 s for it. After a rebuild it
+  rests for twice that rebuild's duration. The page still ages each summary
+  from its own timestamp. The shared `alpha/live/dashboard.py` is unchanged.
+- **Process.** The entry point sets `OPENBLAS_NUM_THREADS`, `OMP_NUM_THREADS`
+  and `MKL_NUM_THREADS` to 1 unless already set (measured on the workstation:
+  1,127 MB commit and 39 threads before, 162 MB and 9 after; resident memory
+  about 210 MB either way). Successful polls are dropped from the access log.
+- **Console** (`/console?pod=<id>`, rail entry, Pod and attention buttons).
+  Shows the operator lines each serve prints, from the shared operator log
+  (`live_operator.log`), filtered by the exact ` pod=<id>` token. `All pods`
+  hides only `norgate.sync.skipped`, which serve never prints. Tick summaries
+  and Python tracebacks exist only in the serve window and are not shown.
+  Every line is redacted on the server (accounts masked, secrets, webhooks and
+  URL credentials removed, user paths shortened). Reads are bounded: first load
+  scans at most 8 MB backwards for 500 lines, each poll reads at most 256 KB,
+  more than 1 MB behind jumps to the tail with a marker, at most four tail and
+  one download request run at once (otherwise 429). The log is opened with
+  shared delete access and closed after every request, so the writer's
+  rotation never fails. The browser keeps at most 1,000 rows, folds repeated
+  lines into `×N`, polls every 2 s while lines arrive, backs off to 15 s when
+  idle and stops while the tab is hidden. Its failures never touch the page's
+  operating status. Download returns the last 2 MB, filtered and redacted.
+- **Attention.** A scheduler error shows one redacted line of its reason. A
+  live scheduler that holds a Pod is an amber `Waiting for you` item. A manual
+  submit (`Review VPlan`) shows its planned trade time, turns red within
+  10 minutes and stays red once that time has passed; deadlines sort first.
+  When status becomes Unknown, deadlines and the open-item count are hidden. The LIVE header tab shows the open-item
+  count. Rows link to the Pod and stay usable at every width.
+- **Data wait.** Before its alert deadline, a not-yet-delivered session shows
+  only the Data step as `Now · Waiting for <date> data`; the rest of the saved
+  cycle stays visible and Next reads `Data when ready · alert <time> ET`. Past
+  the deadline, or for a failed sync, the cycle stays Unknown as before.
+- **Pod page.** One Next line (header); `Broker events`; in issue mode the money
+  panels are folded, not removed, and stay open across refreshes once opened.
+  The header shows `Auto-submit` or `You submit`.
+- **System health.** A sent fail signal and a holding scheduler are amber.
+  Rows the dashboard never checks are grouped last as `Not checked by the
+  dashboard`. Disabled PAPER/INCUBATION header tabs are hidden; the mobile bar
+  links Activity and System.
 
 ## Verification
 

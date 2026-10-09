@@ -260,7 +260,9 @@ def test_real_double_wrapped_trace_error_and_retry_are_scoped_redacted(tmp_path,
     assert result_dict["state_str"] == "error"
     assert result_dict["alive_bool"] is True
     assert result_dict["promised_wake_timestamp_str"] == (BASE_TS + timedelta(seconds=30)).isoformat()
-    assert all(secret_str not in str(result_dict) for secret_str in ("secretkey", "DU123456", "hunter2", "private"))
+    assert all(secret_str not in str(result_dict) for secret_str in ("secretkey", "DU123456", "hunter2"))
+    # Owner-approved (handoff 6.9): one redacted line of the error is shown.
+    assert result_dict["error_reason_str"] == "Authorization: [redacted] Account D···456 host=private password=[redacted]"
     assert _read_dict(path_obj, 91)["state_str"] == "late"
     assert _read_dict(path_obj, 331)["state_str"] == "stopped"
 
@@ -297,6 +299,7 @@ def test_unreadable_log_returns_no_exception_or_raw_path(tmp_path, monkeypatch):
     def denied_fn(*argument_list, **keyword_dict):
         raise PermissionError("password=do-not-show C:/private-account")
     monkeypatch.setattr(Path, "open", denied_fn)
+    monkeypatch.setattr(scheduler_status, "open_shared_read_obj", lambda path_obj, _open_fn=denied_fn: _open_fn(Path(path_obj), "rb"))
     result_dict = _read_dict(path_obj)
     assert result_dict["state_str"] == "unknown"
     assert "password" not in str(result_dict) and "private-account" not in str(result_dict)
@@ -307,6 +310,7 @@ def test_pod_path_traversal_is_rejected_before_file_access(tmp_path, monkeypatch
     def forbidden_fn(*argument_list, **keyword_dict):
         raise AssertionError("Invalid Pod must not open files")
     monkeypatch.setattr(Path, "open", forbidden_fn)
+    monkeypatch.setattr(scheduler_status, "open_shared_read_obj", lambda path_obj, _open_fn=forbidden_fn: _open_fn(Path(path_obj), "rb"))
     result_dict = scheduler_status.load_scheduler_status_dict(str(tmp_path / "events.jsonl"), pod_str, as_of_ts=BASE_TS)
     assert result_dict["state_str"] == "unknown"
 
@@ -315,6 +319,7 @@ def test_trace_root_cannot_escape_configured_event_log_directory(tmp_path, monke
     def forbidden_fn(*argument_list, **keyword_dict):
         raise AssertionError("Escaped source must not open files")
     monkeypatch.setattr(Path, "open", forbidden_fn)
+    monkeypatch.setattr(scheduler_status, "open_shared_read_obj", lambda path_obj, _open_fn=forbidden_fn: _open_fn(Path(path_obj), "rb"))
     assert _read_dict(tmp_path / "events.jsonl", trace_root_path_str=str(tmp_path.parent / "other"))["state_str"] == "unknown"
 
 
@@ -324,6 +329,7 @@ def test_missing_custom_source_does_not_fallback_to_real_default(tmp_path, monke
         path_obj.relative_to(tmp_path)
         return original_open_fn(path_obj, *argument_list, **keyword_dict)
     monkeypatch.setattr(Path, "open", contained_open_fn)
+    monkeypatch.setattr(scheduler_status, "open_shared_read_obj", lambda path_obj, _open_fn=contained_open_fn: _open_fn(Path(path_obj), "rb"))
     assert _read_dict(tmp_path / "events.jsonl")["state_str"] == "unknown"
 
 

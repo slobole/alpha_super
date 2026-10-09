@@ -33,18 +33,40 @@
   let scheduler_check_snapshot_obj = null;
   let positions_search_snapshot_obj = null;
   let allocation_focus_snapshot_obj = null;
+  let open_detail_snapshot_obj = null;
+  // One failed poll only degrades the page; saved status still expires on time.
+  const FAILURE_LIMIT_INT = 3;
+  const IN_FLIGHT_LIMIT_MS = 12000;
+  let failure_count_int = 0;
+  let request_in_flight_bool = false;
+  let last_poll_ms = Date.now();
   const clock_formatter_obj = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
   });
+
+  function show_refresh_banner(shell_obj, state_str, reason_str) {
+    const failure_obj = shell_obj.querySelector('.refresh-error');
+    if (failure_obj) failure_obj.hidden = false;
+    const state_obj = shell_obj.querySelector('[data-refresh-state]');
+    if (state_obj) state_obj.textContent = state_str;
+    const reason_obj = shell_obj.querySelector('[data-refresh-reason]');
+    if (reason_obj) reason_obj.textContent = reason_str;
+  }
+
+  function mark_degraded() {
+    // Keep the last saved observation, dimmed, until it expires or polls keep failing.
+    const shell_obj = document.getElementById('overview-shell');
+    if (!shell_obj || shell_obj.getAttribute('data-source-stale') === 'true') return;
+    shell_obj.setAttribute('data-refresh-degraded', 'true');
+    show_refresh_banner(shell_obj, 'Update failed', 'Retrying. Showing the last saved status.');
+  }
 
   function mark_unknown(reason_str = 'Update failed.') {
     const shell_obj = document.getElementById('overview-shell');
     if (!shell_obj) return;
     shell_obj.setAttribute('data-source-stale', 'true');
-    const failure_obj = shell_obj.querySelector('.refresh-error');
-    if (failure_obj) failure_obj.hidden = false;
-    const reason_obj = shell_obj.querySelector('[data-refresh-reason]');
-    if (reason_obj) reason_obj.textContent = reason_str;
+    shell_obj.removeAttribute('data-refresh-degraded');
+    show_refresh_banner(shell_obj, 'Unknown', reason_str);
     shell_obj.querySelectorAll('[data-observed-state]').forEach((mark_obj) => {
       const label_str = mark_obj.getAttribute('aria-label') || '';
       const step_str = label_str.includes(' · ') ? label_str.split(' · ')[0] + ' · ' : '';
@@ -85,10 +107,26 @@
     shell_obj.querySelectorAll('[data-verdict], [data-cycle-verdict]').forEach((verdict_obj) => {
       verdict_obj.textContent = 'Status unknown.';
     });
+    // Countdowns and open-item counts are current claims too.
+    shell_obj.querySelectorAll('.deadline, .mode-count').forEach((claim_obj) => {
+      claim_obj.hidden = true;
+    });
   }
 
   function check_expiry() {
     if (observed_shell_obj && Date.now() >= valid_until_ms) mark_unknown('Saved status is out of date.');
+  }
+
+  function maybe_poll(now_bool = false) {
+    // A custom trigger replaces HTMX "every": hidden tabs send no requests.
+    const shell_obj = document.getElementById('overview-shell');
+    if (!shell_obj || document.hidden) return;
+    if (request_in_flight_bool && Date.now() - request_start_ms < IN_FLIGHT_LIMIT_MS) return;
+    const interval_ms = Number(shell_obj.getAttribute('data-refresh-ms'));
+    if (!(interval_ms > 0) || (!now_bool && Date.now() - last_poll_ms < interval_ms)) return;
+    if (typeof shell_obj.dispatchEvent !== 'function' || typeof CustomEvent !== 'function') return;
+    last_poll_ms = Date.now();
+    shell_obj.dispatchEvent(new CustomEvent('v4poll'));
   }
 
   function update_clock() {
@@ -113,6 +151,7 @@
     clock_observed_ms = Date.now();
     if (source_obj !== shell_obj && valid_until_ms > Date.now()) {
       shell_obj.removeAttribute('data-source-stale');
+      shell_obj.removeAttribute('data-refresh-degraded');
       const failure_obj = shell_obj.querySelector('.refresh-error');
       if (failure_obj) failure_obj.hidden = true;
       shell_obj.querySelectorAll('[data-update-time]').forEach((label_obj) => {
@@ -252,13 +291,18 @@
         scheduler_check_snapshot_obj = null;
         positions_search_snapshot_obj = null;
         allocation_focus_snapshot_obj = null;
-        mark_unknown();
+        request_in_flight_bool = false;
+        failure_count_int += 1;
+        if (failure_count_int >= FAILURE_LIMIT_INT) mark_unknown('Update failed ' + failure_count_int + ' times in a row.');
+        else mark_degraded();
+        check_expiry();
       }
     });
   });
   document.addEventListener('htmx:beforeRequest', (event_obj) => {
     if (!overview_event(event_obj)) return;
     request_start_ms = Date.now();
+    request_in_flight_bool = true;
   });
   document.addEventListener('htmx:beforeSwap', (event_obj) => {
     if (!overview_event(event_obj) || event_obj.detail.shouldSwap === false || event_obj.detail.isError) return;
@@ -277,9 +321,15 @@
       start_int: input_obj.selectionStart, end_int: input_obj.selectionEnd} : null;
     allocation_focus_snapshot_obj = capture_allocation_focus(shell_obj);
     if (allocation_focus_snapshot_obj) focus_period_str = '';
+    // Sections the operator opened stay open across the atomic refresh.
+    open_detail_snapshot_obj = shell_obj ? {scope_str: shell_obj.getAttribute('data-selection-scope'),
+      key_list: Array.from(shell_obj.querySelectorAll('details[data-keep-open][open]'))
+        .map((detail_obj) => detail_obj.getAttribute('data-keep-open'))} : null;
   });
   document.addEventListener('htmx:afterSwap', (event_obj) => {
     if (!overview_event(event_obj)) return;
+    request_in_flight_bool = false;
+    failure_count_int = 0;
     observe_snapshot(Math.max(0, Date.now() - request_start_ms));
     const shell_obj = document.getElementById('overview-shell');
     const check_obj = shell_obj && shell_obj.querySelector('.scheduler-check');
@@ -288,6 +338,12 @@
         && shell_obj.getAttribute('data-selection-scope') === scheduler_check_snapshot_obj.scope_str
         && command_obj.textContent === scheduler_check_snapshot_obj.command_str) check_obj.setAttribute('open', '');
     scheduler_check_snapshot_obj = null;
+    if (open_detail_snapshot_obj && shell_obj && shell_obj.getAttribute('data-selection-scope') === open_detail_snapshot_obj.scope_str) {
+      shell_obj.querySelectorAll('details[data-keep-open]').forEach((detail_obj) => {
+        if (open_detail_snapshot_obj.key_list.includes(detail_obj.getAttribute('data-keep-open'))) detail_obj.setAttribute('open', '');
+      });
+    }
+    open_detail_snapshot_obj = null;
     const input_obj = shell_obj && shell_obj.querySelector('[data-positions-search]');
     if (input_obj && positions_search_snapshot_obj
         && shell_obj.getAttribute('data-selection-scope') === positions_search_snapshot_obj.scope_str) {
@@ -305,7 +361,10 @@
   document.addEventListener('htmx:afterRequest', (event_obj) => {
     // hx-swap=none still applies the header/rail out-of-band fragments. Only
     // a newly replaced stamp can renew freshness; errors cannot renew it.
-    if (overview_event(event_obj) && event_obj.detail.successful) {
+    if (!overview_event(event_obj)) return;
+    request_in_flight_bool = false;
+    if (event_obj.detail.successful) {
+      failure_count_int = 0;
       observe_snapshot(Math.max(0, Date.now() - request_start_ms));
     }
   });
@@ -334,8 +393,12 @@
   setInterval(() => {
     check_expiry();
     update_clock();
+    maybe_poll();
   }, 1000);
-  document.addEventListener('visibilitychange', check_expiry);
+  document.addEventListener('visibilitychange', () => {
+    check_expiry();
+    if (!document.hidden) maybe_poll(Date.now() - last_poll_ms >= 1000);
+  });
   window.addEventListener('pageshow', (event_obj) => {
     if (event_obj.persisted) mark_unknown('Refresh saved status.');
     else check_expiry();

@@ -42,8 +42,8 @@ def test_demo_renders_native_d_shell_and_seven_step_rows(fixture_tuple):
     assert 'aria-label="Portfolio return · All"' in html_str
     assert 'Calculated TWR · End-of-day cash flows' in html_str
     assert html_str.count('class="tl"') == 28
-    assert 'title="PAPER is not available in V4 yet"' in html_str
-    assert 'title="INCUBATION is not available in V4 yet"' in html_str
+    # Modes without V4 views are hidden, not shown as dead controls.
+    assert "PAPER is not available" not in html_str and "INCUBATION is not available" not in html_str
     assert "2026-09-08T" not in re.sub(r"<[^>]+>", "", html_str)
     assert '09:41:07 ET' in html_str
     assert 'hx-history="false"' in html_str and '"historyCacheSize":0' in html_str

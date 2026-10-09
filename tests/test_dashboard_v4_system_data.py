@@ -115,6 +115,7 @@ def test_invalid_scope_prevents_all_state_file_access(tmp_path, monkeypatch, cas
     def forbidden_call(*argument_list, **argument_dict):
         pytest.fail("State I/O before valid scope")
     monkeypatch.setattr(Path, "open", forbidden_call)
+    monkeypatch.setattr(system_data, "open_shared_read_obj", lambda path_obj, _open_fn=forbidden_call: _open_fn(Path(path_obj), "rb"))
     monkeypatch.setattr(Path, "stat", forbidden_call)
     monkeypatch.setattr(sqlite3, "connect", forbidden_call)
     result_dict = _load_dict(provider_obj, workspace_dict, performance_db_path_str="forbidden.sqlite")
@@ -321,12 +322,12 @@ def test_manifest_count_is_bounded_before_parsing(tmp_path, monkeypatch):
 def test_file_read_sizes_are_bounded_and_log_is_never_scanned(tmp_path, monkeypatch):
     provider_obj, workspace_dict, target_list = _fixture_tuple(tmp_path)
     _save_sources(tmp_path, provider_obj, target_list)
-    original_open_fn = Path.open
+    original_open_fn = system_data.open_shared_read_obj
     count_dict = {}
     class TrackedFile:
-        def __init__(self, path_obj, *argument_list, **argument_dict):
-            self.path_obj = path_obj
-            self.file_obj = original_open_fn(path_obj, *argument_list, **argument_dict)
+        def __init__(self, path_obj):
+            self.path_obj = Path(path_obj)
+            self.file_obj = original_open_fn(path_obj)
         def __enter__(self):
             return self
         def __exit__(self, *argument_list):
@@ -335,7 +336,7 @@ def test_file_read_sizes_are_bounded_and_log_is_never_scanned(tmp_path, monkeypa
             count_dict[self.path_obj.name] = amount_int
             assert 0 <= amount_int <= system_data.JSON_BYTE_LIMIT_INT + 1
             return self.file_obj.read(amount_int)
-    monkeypatch.setattr(Path, "open", lambda path_obj, *argument_list, **argument_dict: TrackedFile(path_obj, *argument_list, **argument_dict))
+    monkeypatch.setattr(system_data, "open_shared_read_obj", TrackedFile)
     _load_dict(provider_obj, workspace_dict)
     assert count_dict == {"live_events.jsonl": 1, "ops_report_latest.json": system_data.JSON_BYTE_LIMIT_INT + 1}
 
@@ -344,6 +345,8 @@ def test_stale_summary_identity_rejects_runtime_sources_before_io(tmp_path, monk
     provider_obj, workspace_dict, _target_list = _fixture_tuple(tmp_path)
     workspace_dict["summary_dict"]["pod_row_dict_list"][0]["user_id_str"] = "prior_owner"
     monkeypatch.setattr(Path, "open", lambda *argument_list, **argument_dict: pytest.fail("Old owner read runtime source"))
+    monkeypatch.setattr(system_data, "open_shared_read_obj", lambda path_obj, _open_fn=lambda *argument_list, **argument_dict: pytest.fail("Old owner read runtime source"): _open_fn(Path(path_obj), "rb"))
+    monkeypatch.setattr(system_data, "open_shared_read_obj", lambda *argument_list: pytest.fail("Old owner read runtime source"))
     assert _load_dict(provider_obj, workspace_dict)["release_list"] == []
 
 
@@ -385,7 +388,7 @@ def _save_alerts(tmp_path, *, pending_dict=None, **override_dict):
 
 
 @pytest.mark.parametrize("status_str,fail_signal_bool,state_str,label_str", [
-    ("sent", False, "ok", "Ping sent"), ("sent", True, "ok", "Fail signal sent"),
+    ("sent", False, "ok", "Ping sent"), ("sent", True, "warning", "Fail signal sent"),
     ("failed", False, "error", "Ping failed"), ("disabled", False, "skip", "Not configured")])
 def test_paired_watchdog_receipt_proves_completion_and_delivery_outcome(tmp_path, status_str, fail_signal_bool, state_str, label_str):
     provider_obj, workspace_dict, target_list = _fixture_tuple(tmp_path)

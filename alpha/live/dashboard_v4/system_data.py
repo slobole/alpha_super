@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 import yaml
 
 from alpha.live.dashboard_v3.operator_tools import strategy_display_name_str
+from alpha.live.dashboard_v4.console_data import open_shared_read_obj
 from alpha.live.dashboard_v4.scheduler_status import LATE_AFTER_SECONDS_INT
 from alpha.live.ibkr_performance import _shadow_freshness_tuple
 from alpha.live.ops_report import DEFAULT_STALE_AFTER_SECONDS_INT
@@ -144,7 +145,7 @@ def _event_log_dict(path_obj, as_of_ts):
     if path_obj is None:
         return result_dict
     try:
-        with path_obj.open("rb") as file_obj:
+        with open_shared_read_obj(path_obj) as file_obj:
             file_obj.read(1)
             stat_obj = path_obj.stat()
         timestamp_ts = datetime.fromtimestamp(stat_obj.st_mtime, timezone.utc)
@@ -203,7 +204,8 @@ def _database_dict(target_list, workspace_dict, as_of_ts):
 
 
 def _read_json_dict(path_obj):
-    with path_obj.open("rb") as file_obj:
+    # Writers replace these files atomically; never block that rename.
+    with open_shared_read_obj(path_obj) as file_obj:
         content_bytes = file_obj.read(JSON_BYTE_LIMIT_INT + 1)
     if len(content_bytes) > JSON_BYTE_LIMIT_INT:
         raise ValueError("Saved evidence too large")
@@ -359,9 +361,11 @@ def _deadman_dict(receipt_dict, as_of_ts):
     if status_str == "disabled":
         return _row_dict("Not configured", state_str="skip", checked_bool=False,
             expected_str="External watchdog monitor", detail_str="Saved watchdog run had no heartbeat URL.")
-    return _row_dict("Ping failed" if status_str == "failed" else "Fail signal sent" if receipt_dict["heartbeat_fail_signal_bool"] else "Ping sent",
-        state_str="error" if status_str == "failed" else "ok", last_timestamp_str=completed_ts.isoformat(),
-        expected_str="After watchdog completes")
+    # A sent fail signal means the watchdog reported a failure: never green.
+    fail_signal_bool = status_str != "failed" and receipt_dict["heartbeat_fail_signal_bool"]
+    return _row_dict("Ping failed" if status_str == "failed" else "Fail signal sent" if fail_signal_bool else "Ping sent",
+        state_str="error" if status_str == "failed" else "warning" if fail_signal_bool else "ok",
+        last_timestamp_str=completed_ts.isoformat(), expected_str="After watchdog completes")
 
 
 def _flex_dict(path_str, target_list, as_of_ts):

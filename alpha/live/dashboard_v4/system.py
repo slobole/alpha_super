@@ -98,11 +98,12 @@ def _scheduler_dict(status_dict, *, fresh_bool, as_of_ts):
         known_bool = False
     if state_str in {"error", "late", "stopped"}:
         tone_str = "late" if state_str == "late" else "fail"
-        label_str = {"error": "Error · check log", "late": "Wake overdue", "stopped": "Not responding · check service"}[state_str]
+        label_str = {"error": "Error · see Console", "late": "Wake overdue", "stopped": "Not responding · check service"}[state_str]
     elif known_bool:
-        tone_str = "skip" if state_str == "holding" else "done"
+        # A holding scheduler is alive but will not retry by itself: the operator must act.
+        tone_str = "late" if state_str == "holding" else "done"
         if state_str == "holding":
-            label_str = "Holding · waits for your review"
+            label_str = "Holding · waits for you"
         elif status_dict.get("waiting_for_data_bool") is True:
             label_str = "Waiting for data"
         else:
@@ -114,7 +115,7 @@ def _scheduler_dict(status_dict, *, fresh_bool, as_of_ts):
         tone_str, label_str = "unk", "Unknown · recent activity only"
     return {"state_str": tone_str, "label_str": label_str, "last_str": last_str,
         "wake_str": _wake_str(status_dict.get("promised_wake_timestamp_str"), as_of_ts),
-        "alive_bool": known_bool and state_str not in {"late", "stopped"}}
+        "alive_bool": known_bool and state_str not in {"late", "stopped"}, "holding_bool": known_bool and state_str == "holding"}
 
 
 def _aux_row_dict(source_dict, key_str, label_str, *, as_of_ts):
@@ -267,8 +268,9 @@ def build_system_page_dict(overview_dict, workspace_dict, source_dict, *, as_of_
             "eod_str": eod_str, "eod_state_str": eod_state_str})
     total_int = len(pod_list)
     alive_int = sum(item_dict["alive_bool"] for item_dict in scheduler_list)
+    # A held Pod needs the operator (Overview), but its scheduler itself is healthy.
     scheduler_row_dict = _row_dict("schedulers", "Schedulers · LIVE", _worst_str([
-        "done" if item_dict["state_str"] == "skip" and item_dict["alive_bool"] else item_dict["state_str"] for item_dict in scheduler_list]),
+        "done" if item_dict.get("holding_bool") and item_dict["alive_bool"] else item_dict["state_str"] for item_dict in scheduler_list]),
         f"{alive_int} of {total_int} alive" if total_int else "No enabled LIVE Pods verified",
         "—", "One per Pod · wakes when promised")
     seen_list = [item_dict["last_str"] for item_dict in scheduler_list if item_dict["last_str"] != "—"]
@@ -340,6 +342,11 @@ def build_system_page_dict(overview_dict, workspace_dict, source_dict, *, as_of_
     group_list = [{"label_str": "Runs all the time", "row_list": continuous_list},
         {"label_str": "Runs on a schedule", "row_list": scheduled_list},
         {"label_str": "Data and space", "row_list": [market_row_dict, fred_row_dict, event_row_dict, database_row_dict, disk_row_dict]}]
+    # Rows this page never checks sit together at the end, out of the way.
+    unchecked_list = [row_dict for group_dict in group_list for row_dict in group_dict["row_list"] if not row_dict["checked_bool"]]
+    group_list = [{**group_dict, "row_list": [row_dict for row_dict in group_dict["row_list"] if row_dict["checked_bool"]]}
+        for group_dict in group_list] + ([{"label_str": "Not checked by the dashboard", "row_list": unchecked_list,
+            "muted_bool": True}] if unchecked_list else [])
     existing_state_str = (overview_dict.get("system_dict") or {}).get("state_str", "unk")
     state_str = _worst_str([row_dict["state_str"] for group_dict in group_list for row_dict in group_dict["row_list"] if row_dict["checked_bool"]]
         + eod_state_list + ([existing_state_str] if existing_state_str in STATE_RANK_DICT else ["unk"]))
