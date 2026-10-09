@@ -1,0 +1,1 @@
+{% if money_placeholder_bool %}<div class="asof" id="overview-money-asof" hx-preserve="true"></div>{% else %}<div class="asof" id="overview-money-asof" data-selection-key="money-asof"{% if money_oob_bool %} hx-swap-oob="outerHTML"{% endif %}>{% if 'Close ' in overview_dict.money_asof_str %}{{ icon('calendar') }}{% endif %}{{ overview_dict.money_asof_str }}</div>{% endif %}

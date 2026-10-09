@@ -40,7 +40,14 @@ def test_copy_regions_are_unique_and_stable_across_refresh(route_str):
     assert initial_obj.scope_str and initial_obj.scope_str == refreshed_obj.scope_str
     assert initial_obj.key_list and all(initial_obj.key_list)
     assert len(initial_obj.key_list) == len(set(initial_obj.key_list))
-    assert initial_obj.key_list == refreshed_obj.key_list
+    # Money regions stay in the page across a frame refresh (hx-preserve) and
+    # come only from their own money route; every other region is re-sent.
+    money_set = set()
+    if path_str == "/" or path_str.startswith("/pods/"):
+        money_str = "/overview/money" if path_str == "/" else path_str + "/money"
+        money_set = set(_markup_obj(client_obj, money_str).key_list)
+    assert money_set <= set(initial_obj.key_list)
+    assert [key_str for key_str in initial_obj.key_list if key_str not in money_set] == refreshed_obj.key_list
 
 
 def test_different_pods_cycles_tabs_and_periods_cannot_share_selection_scope():

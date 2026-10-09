@@ -40,6 +40,10 @@
   let failure_count_int = 0;
   let request_in_flight_bool = false;
   let last_poll_ms = Date.now();
+  // Money panels are dated facts (last close): they refresh on their own, slowly.
+  const MONEY_REFRESH_MS = 300000;
+  let last_money_ms = Date.now();
+  let money_open_key_list = [];
   const clock_formatter_obj = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
   });
@@ -127,6 +131,20 @@
     if (typeof shell_obj.dispatchEvent !== 'function' || typeof CustomEvent !== 'function') return;
     last_poll_ms = Date.now();
     shell_obj.dispatchEvent(new CustomEvent('v4poll'));
+  }
+
+  function refresh_money(now_bool = false) {
+    if (document.hidden || typeof document.querySelector !== 'function') return;
+    if (!now_bool && Date.now() - last_money_ms < MONEY_REFRESH_MS) return;
+    const money_obj = document.querySelector('[data-money-panel][hx-get]');
+    if (!money_obj || typeof money_obj.dispatchEvent !== 'function' || typeof CustomEvent !== 'function') return;
+    last_money_ms = Date.now();
+    money_obj.dispatchEvent(new CustomEvent('v4money'));
+  }
+
+  function money_event(event_obj) {
+    const target_obj = event_obj.detail && (event_obj.detail.target || event_obj.detail.elt);
+    return Boolean(target_obj && target_obj.closest && target_obj.closest('[data-money-panel]'));
   }
 
   function update_clock() {
@@ -231,6 +249,8 @@
   }
 
   function overview_event(event_obj) {
+    // A money panel's own request never counts as an operating-status refresh.
+    if (money_event(event_obj)) return false;
     const target_obj = event_obj.detail && (event_obj.detail.target || event_obj.detail.elt);
     return target_obj && (target_obj.id === 'overview-shell' || target_obj.closest('#overview-shell'));
   }
@@ -372,6 +392,26 @@
     if (selection_snapshot_obj && selection_snapshot_obj.shell_obj.isConnected
         && !unchanged_selection_bool(window.getSelection(), selection_snapshot_obj)) selection_snapshot_obj = null;
   });
+  document.addEventListener('htmx:beforeSwap', (event_obj) => {
+    if (!money_event(event_obj) || event_obj.detail.isError) return;
+    const target_obj = event_obj.detail.target;
+    money_open_key_list = Array.from(target_obj.querySelectorAll('details[data-keep-open][open]'))
+      .map((detail_obj) => detail_obj.getAttribute('data-keep-open'));
+  });
+  document.addEventListener('htmx:afterSettle', (event_obj) => {
+    if (money_event(event_obj)) {
+      // A refreshed money block keeps the sections the operator had opened.
+      document.querySelectorAll('[data-money-panel] details[data-keep-open]').forEach((detail_obj) => {
+        if (money_open_key_list.includes(detail_obj.getAttribute('data-keep-open'))) detail_obj.setAttribute('open', '');
+      });
+      money_open_key_list = [];
+      return;
+    }
+    // A placeholder that found no panel to keep (first load, or the Pod changed
+    // between normal and issue layout) loads its money at once.
+    if (overview_event(event_obj) && typeof document.querySelector === 'function'
+        && document.querySelector('[data-money-placeholder]')) refresh_money(true);
+  });
   document.addEventListener('htmx:afterSettle', (event_obj) => {
     if (!overview_event(event_obj) || !focus_period_str) return;
     const period_str = focus_period_str;
@@ -394,10 +434,14 @@
     check_expiry();
     update_clock();
     maybe_poll();
+    refresh_money();
   }, 1000);
   document.addEventListener('visibilitychange', () => {
     check_expiry();
-    if (!document.hidden) maybe_poll(Date.now() - last_poll_ms >= 1000);
+    if (!document.hidden) {
+      maybe_poll(Date.now() - last_poll_ms >= 1000);
+      refresh_money();
+    }
   });
   window.addEventListener('pageshow', (event_obj) => {
     if (event_obj.persisted) mark_unknown('Refresh saved status.');

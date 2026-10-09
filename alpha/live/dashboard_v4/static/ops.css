@@ -586,3 +586,8 @@ a:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
 .pod-money-fold > summary { cursor: pointer; color: var(--ink-2); font-size: 13px; padding: 8px 0; }
 .pod-money-fold[open] > summary { margin-bottom: 12px; }
 .mode-count { display: inline-block; min-width: 16px; margin-left: 6px; padding: 0 4px; border-radius: 8px; background: var(--red); color: #fff; font-size: 11px; line-height: 16px; text-align: center; }
+/* The self-refreshing money block keeps the page's own vertical rhythm. */
+.pod-money { display: flex; flex-direction: column; gap: inherit; }
+.pod-money:empty { display: none; }
+.pod-money-fold > * + * { margin-top: 18px; }
+#overview-money-asof:empty, #overview-money-panels:empty { display: none; }

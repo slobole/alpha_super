@@ -117,7 +117,9 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             abort(404)
         return pod_id_str
 
-    def context_dict(pod_id_str=None, *, positions_bool=False):
+    def context_dict(pod_id_str=None, *, positions_bool=False, money_bool=True):
+        # Frame refreshes pass money_bool=False: money panels change about once a
+        # day, stay in the page (hx-preserve) and refresh on their own cadence.
         allowed_set = {"view", "pod"} if positions_bool else ({"period", "cycle", "tab"} if pod_id_str is not None else {"period"})
         if set(request.args) - allowed_set or any(len(request.args.getlist(key_str)) > 1 for key_str in allowed_set):
             abort(400)
@@ -144,11 +146,12 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         overview_dict = build_overview_dict(
             workspace_dict, snapshot_obj, provider_obj,
             as_of_ts=clock_fn(), period_str=period_str, demo_bool=demo_bool,
-            include_finance_bool=pod_id_str is None and not positions_bool,
+            include_finance_bool=money_bool and pod_id_str is None and not positions_bool,
         )
         overview_dict.update(
             refresh_url_str=url_for("refresh", period=period_str),
-            refresh_seconds_int=15,
+            refresh_seconds_int=15, money_bool=money_bool,
+            money_url_str=url_for("overview_money", period=period_str),
             period_option_list=[{
                 "label_str": option_str, "url_str": url_for("index", period=option_str),
                 "selected_bool": option_str == period_str,
@@ -253,7 +256,8 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
                     if "reconcile_read_failure_dict" in row_dict:
                         selected_row_dict["reconcile_read_failure_dict"] = row_dict["reconcile_read_failure_dict"]
         pod_finance_dict = build_pod_finance_dict(workspace_dict, snapshot_obj, provider_obj,
-            pod_id_str=pod_id_str, as_of_ts=clock_fn(), period_str=period_str, performance_db_path_str=database_path_str)
+            pod_id_str=pod_id_str, as_of_ts=clock_fn(), period_str=period_str,
+            performance_db_path_str=database_path_str) if money_bool else {}
         render_ts = clock_fn()
         source_ts = parse_timestamp_ts((workspace_dict.get("summary_dict") or {}).get("as_of_timestamp_str"))
         selected_ts = parse_timestamp_ts((source_dict.get("pod_row_dict") or {}).get("as_of_timestamp_str"))
@@ -295,6 +299,8 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             period_str=period_str, period_option_list=[{"label_str": option_str, "url_str": pod_url_str(period=option_str), "selected_bool": option_str == period_str} for option_str in PERIOD_TUPLE])
         overview_dict["refresh_url_str"] = url_for("pod_refresh", pod_id_str=pod_id_str,
             period=period_str, cycle=cycle_str, tab=tab_str)
+        overview_dict["money_bool"] = money_bool
+        pod_page_dict["money_url_str"] = url_for("pod_money", pod_id_str=pod_id_str, period=period_str)
         return {"overview_dict": overview_dict, "pod_page_dict": pod_page_dict}
 
     @flask_app_obj.get("/")
@@ -304,7 +310,11 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
 
     @flask_app_obj.get("/overview/refresh")
     def refresh():
-        return render_template("_overview.html", **context_dict())
+        return render_template("_overview.html", **context_dict(money_bool=False))
+
+    @flask_app_obj.get("/overview/money")
+    def overview_money():
+        return render_template("_overview_money.html", **context_dict())
 
     @flask_app_obj.get("/pods/<pod_id_str>")
     def pod(pod_id_str):
@@ -313,7 +323,11 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
 
     @flask_app_obj.get("/pods/<pod_id_str>/refresh")
     def pod_refresh(pod_id_str):
-        return render_template("_overview.html", **context_dict(pod_id_str))
+        return render_template("_overview.html", **context_dict(pod_id_str, money_bool=False))
+
+    @flask_app_obj.get("/pods/<pod_id_str>/money")
+    def pod_money(pod_id_str):
+        return render_template("_pod_money.html", **context_dict(pod_id_str))
 
     @flask_app_obj.get("/positions")
     def positions():

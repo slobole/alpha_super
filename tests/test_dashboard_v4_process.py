@@ -48,6 +48,8 @@ def test_entry_point_keeps_an_operator_thread_setting():
     ("GET /performance/status HTTP/1.1", "200", False),
     ("GET /tools/status HTTP/1.1", "304", False),
     ("GET /console/pod_a/tail?cursor=v1 HTTP/1.1", "200", False),
+    ("GET /overview/money?period=All HTTP/1.1", "200", False),
+    ("GET /pods/pod_a/money?period=All HTTP/1.1", "200", False),
     ("GET /overview/refresh HTTP/1.1", "500", True),
     ("GET /console/pod_a/tail HTTP/1.1", "429", True),
     ("GET / HTTP/1.1", "200", True),

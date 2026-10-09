@@ -93,8 +93,8 @@ def test_status_refresh_does_not_replace_financial_charts(chart_app_obj):
     assert "data-chart-day" not in html_str
 
 
-@pytest.mark.parametrize("path_str", ["/overview/refresh", "/pods/demo_1_0/refresh"])
-def test_full_page_refresh_keeps_chart_selection_contract(chart_app_obj, path_str):
+@pytest.mark.parametrize("path_str", ["/overview/money", "/pods/demo_1_0/money"])
+def test_money_refresh_keeps_chart_selection_contract(chart_app_obj, path_str):
     response_obj = chart_app_obj.test_client().get(path_str)
     assert response_obj.status_code == 200
     parser_obj = ChartParser()

@@ -252,7 +252,7 @@ def test_pod_tabs_and_refresh_are_real_read_only_routes(pod_fixture_tuple, tab_s
     html_str = response_obj.get_data(as_text=True)
     assert response_obj.status_code == 200
     assert 'aria-label="Seven cycle steps"' in html_str and html_str.count('class="step ') == 7
-    assert html_str.count('hx-get="') == 1
+    assert html_str.count('hx-get="') == 2 and f'hx-get="/pods/{pod_id_str}/money?period=All"' in html_str
     assert 'href="/pods/' in html_str
     assert pod_fixture_tuple[3]["pod_row_dict"]["account_route_str"] not in html_str
     assert '09:30:02' in html_str

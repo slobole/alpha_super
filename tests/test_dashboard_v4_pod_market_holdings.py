@@ -146,7 +146,7 @@ def test_demo_and_remote_snapshot_scopes_never_access_local_state(broker_fixture
 def test_broker_source_and_actual_observed_time_visible_on_full_and_refresh_pages(broker_fixture_tuple):
     workspace_dict, snapshot_obj, provider_obj, pod_id_str = broker_fixture_tuple[:4]
     app_obj = create_app(provider_obj, workspace_snapshot_fn=lambda: (workspace_dict, snapshot_obj), now_fn=lambda: DEMO_NOW_TS)
-    for path_str in ("/pods/" + pod_id_str, "/pods/" + pod_id_str + "/refresh"):
+    for path_str in ("/pods/" + pod_id_str, "/pods/" + pod_id_str + "/money"):
         response_obj = app_obj.test_client().get(path_str)
         assert response_obj.status_code == 200
         panel_str = response_obj.get_data(as_text=True).split('<section class="panel pod-holdings"', 1)[1].split("</section>", 1)[0]

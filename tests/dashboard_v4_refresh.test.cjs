@@ -148,7 +148,11 @@ function environment_obj(valid_ms = 120000, initial_latency_ms = 0, clock_timest
     activeElement: null,
     getElementById: () => current_obj.shell_obj,
     querySelectorAll: (selector_str) => current_obj.selector_dict[selector_str] || [],
-    addEventListener: (name_str, handler_fn) => { handler_dict[name_str] = handler_fn; },
+    querySelector: (selector_str) => {
+      const value_obj = current_obj.selector_dict[selector_str];
+      return Array.isArray(value_obj) ? value_obj[0] || null : value_obj || null;
+    },
+    addEventListener: (name_str, handler_fn) => { (handler_dict[name_str] = handler_dict[name_str] || []).push(handler_fn); },
     createRange: () => {
       let root_obj, end_obj, end_int;
       return {selectNodeContents: (node_obj) => { root_obj = node_obj; },
@@ -183,7 +187,7 @@ function environment_obj(valid_ms = 120000, initial_latency_ms = 0, clock_timest
     fire: (name_str, extra_dict = {}) => {
       const event_obj = {detail: {target: current_obj.shell_obj}, defaultPrevented: false,
         preventDefault() { this.defaultPrevented = true; }, ...extra_dict};
-      handler_dict[name_str](event_obj);
+      (handler_dict[name_str] || []).forEach((handler_fn) => handler_fn(event_obj));
       return event_obj;
     },
     select: (selection_obj) => { window_obj.getSelection = () => selection_obj; },
@@ -1078,4 +1082,56 @@ test('unknown status also hides deadlines and the open-item count', () => {
   env_obj.advance(1000); env_obj.timer();
   assert.equal(deadline_obj.hidden, true);
   assert.equal(count_obj.hidden, true);
+});
+
+
+function money_obj(env_obj, placeholder_bool = false) {
+  const result_obj = element_obj();
+  result_obj.setAttribute('data-money-panel', '');
+  result_obj.setAttribute('hx-get', '/overview/money?period=All');
+  result_obj.parentElement = env_obj.current_obj.shell_obj;
+  const parent_closest_fn = result_obj.closest;
+  result_obj.closest = (selector_str) => (selector_str === '[data-money-panel]' ? result_obj : parent_closest_fn(selector_str));
+  result_obj.event_list = [];
+  result_obj.dispatchEvent = (event_obj) => { result_obj.event_list.push(event_obj.type); return true; };
+  env_obj.current_obj.selector_dict['[data-money-panel][hx-get]'] = [result_obj];
+  if (placeholder_bool) env_obj.current_obj.selector_dict['[data-money-placeholder]'] = [result_obj];
+  return result_obj;
+}
+
+test('money panels refresh every five minutes, never while hidden', () => {
+  const env_obj = environment_obj(600000);
+  const panel_obj = money_obj(env_obj);
+  env_obj.advance(299000); env_obj.timer();
+  assert.deepEqual(panel_obj.event_list, []);
+  env_obj.advance(1000); env_obj.timer();
+  assert.deepEqual(panel_obj.event_list, ['v4money']);
+  env_obj.hide(true);
+  env_obj.advance(300000); env_obj.timer();
+  assert.deepEqual(panel_obj.event_list, ['v4money']);
+});
+
+test('a failed money request never degrades operating status', () => {
+  const env_obj = environment_obj();
+  const panel_obj = money_obj(env_obj);
+  for (const event_str of ['htmx:responseError', 'htmx:timeout', 'htmx:sendError']) {
+    env_obj.fire(event_str, {detail: {target: panel_obj}});
+  }
+  assert.equal(env_obj.current_obj.shell_obj.getAttribute('data-refresh-degraded'), null);
+  assert.equal(env_obj.current_obj.selector_dict['[data-pod-now]'].textContent, 'Current');
+  env_obj.fire('htmx:beforeRequest', {detail: {target: panel_obj}});
+  const shell_obj = env_obj.current_obj.shell_obj;
+  shell_obj.setAttribute('data-refresh-ms', '15000');
+  shell_obj.poll_list = [];
+  shell_obj.dispatchEvent = (event_obj) => { shell_obj.poll_list.push(event_obj.type); return true; };
+  env_obj.advance(15000); env_obj.timer();
+  assert.deepEqual(shell_obj.poll_list, ['v4poll']);  // A money request is not a status request in flight.
+});
+
+test('a placeholder left after a frame refresh loads its money at once', () => {
+  const env_obj = environment_obj();
+  env_obj.replace();
+  const panel_obj = money_obj(env_obj, true);
+  env_obj.fire('htmx:afterSettle');
+  assert.deepEqual(panel_obj.event_list, ['v4money']);
 });

@@ -1,0 +1,26 @@
+{% if money_placeholder_bool %}<div class="cols c-6-6 finance-panels" id="overview-money-panels" hx-preserve="true"></div>
+{% else %}<div class="cols c-6-6 finance-panels" id="overview-money-panels"{% if money_oob_bool %} hx-swap-oob="outerHTML"{% endif %}>
+          <section class="panel"><div class="panel-h"><span class="panel-t">Portfolio return</span><nav class="seg" aria-label="Portfolio return period">
+            {% for option_dict in overview_dict.period_option_list %}
+            <a href="{{ option_dict.url_str }}" class="{{ 'on' if option_dict.selected_bool else '' }}" data-period="{{ option_dict.label_str }}"{% if option_dict.selected_bool %} aria-current="true"{% endif %}>{{ option_dict.label_str }}</a>
+            {% endfor %}
+          </nav></div>
+          <div class="panel-b">
+            {% set chart_dict = overview_dict.chart_dict %}
+            {% set chart_label_str = 'Portfolio return · ' + overview_dict.period_str %}{% include '_value_chart.html' %}
+          </div>{% if chart_dict.source_str %}<div class="finance-source" title="{{ chart_dict.detail_str }}">{{ chart_dict.source_str }}</div>{% endif %}</section>
+          <section class="panel"><div class="panel-h"><span class="panel-t">Allocation</span></div>
+            {% set allocation_dict = overview_dict.allocation_dict %}
+            {% if allocation_dict.available_bool or allocation_dict.row_list %}
+            <div class="alloc">
+              {% if allocation_dict.available_bool %}{% include '_donut.html' %}
+              {% else %}<div class="empty-state allocation-empty">{{ allocation_dict.empty_str }}</div>{% endif %}
+              <table class="tbl dense"><thead><tr><th scope="col"><span class="sr-only">Pod</span></th><th class="num" scope="col">{{ allocation_dict.invested_heading_str }}</th><th class="num" scope="col">Cash</th></tr></thead><tbody>
+                {% for row_dict in allocation_dict.row_list %}<tr><td><i class="dotk" style="background: {{ row_dict.color_str }}"></i>{{ row_dict.name_str }}</td><td class="num">{{ row_dict.invested_str }}</td><td class="num">{{ row_dict.cash_str }}</td></tr>{% endfor %}
+                <tr class="tot"><td><b>Total</b></td><td class="num">{{ allocation_dict.total_invested_str }}</td><td class="num">{{ allocation_dict.total_cash_str }}</td></tr>
+              </tbody></table>
+            </div>
+            {% else %}<div class="empty-state allocation-empty">{{ allocation_dict.empty_str }}</div>{% endif %}
+          </section>
+        </div>
+{% endif %}
