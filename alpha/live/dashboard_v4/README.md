@@ -430,6 +430,30 @@ falls back to real service sources.
   dashboard`. Disabled PAPER/INCUBATION header tabs are hidden; the mobile bar
   links Activity and System.
 
+## Operator pass, round 2 (2026-10-09)
+
+- **Panels with their own cadence.** One generic rule: an element with
+  `data-own-refresh-ms` refreshes itself (`hx-trigger="v4own"`, explicit
+  `hx-target="this"`) from the existing one-second timer, counted from when it
+  first appeared, never while the tab is hidden. Its requests never count as
+  status refreshes, and an opened fold stays open across them.
+- **Money panels** (Overview tiles, as-of, return chart and allocation; the Pod
+  money block) are dated facts from the last close. Frame refreshes send
+  `hx-preserve` placeholders and build no finance; the panels refresh every
+  5 minutes through `/overview/money` and `/pods/<id>/money`. A placeholder that
+  finds no panel to keep (first load, or a Pod switching between normal and
+  issue layout) loads at once. Demo: Overview refresh 84 KB -> 20 KB.
+- **Activity.** The 15 s poll renews only header status (`/activity/status`);
+  the timeline refreshes itself every 60 s through `/activity/body`, so the log
+  scan and cycle reads run four times less often. `?pod=<id>` opens Activity
+  filtered to that Pod (checked before any log scan) and the Pod page links to
+  it. "Load older" names the next window ("Load 14 days").
+- **Wording.** Countdowns and ages read as durations ("closes in 6 h 18 min",
+  "in 42 min", "under 1 min"). When "All" positions include positions closed
+  today, the Positions verdict names both counts. The Tools page says that
+  production only copies commands, and badges the five commands that can send
+  orders.
+
 ## Verification
 
 ```powershell

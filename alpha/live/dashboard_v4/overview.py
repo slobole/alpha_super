@@ -9,6 +9,7 @@ from alpha.live.dashboard_v3.health import build_health_rollup
 from alpha.live.dashboard_v3.operator_tools import strategy_display_name_str
 from alpha.live.dashboard_v3.schedule import _operator_action_required_bool
 from alpha.live.dashboard_v4.cycle import build_cycle_view_dict
+from alpha.live.dashboard_v4.durations import human_duration_str
 from alpha.live.dashboard_v4.finance import build_financial_overview_dict
 from alpha.live.dashboard_v4.market import build_market_view_dict
 from alpha.live.dashboard_v4.next_operation import build_next_operation_dict
@@ -32,23 +33,8 @@ def _state_str(value_str):
     return STATE_CLASS_DICT.get(value_str, value_str if value_str in STATE_RANK_DICT else "unk")
 
 
-def _duration_str(seconds_float):
-    seconds_int = max(0, int(seconds_float))
-    hours_int, remaining_int = divmod(seconds_int, 3600)
-    minutes_int, seconds_int = divmod(remaining_int, 60)
-    return f"{hours_int:02}:{minutes_int:02}:{seconds_int:02}"
-
-
-def _human_duration_str(seconds_float):
-    minutes_int = max(0, int(seconds_float)) // 60
-    if minutes_int < 1:
-        return "under 1 min"
-    if minutes_int < 60:
-        return f"{minutes_int} min"
-    hours_int, minutes_int = divmod(minutes_int, 60)
-    if hours_int < 24:
-        return f"{hours_int} h {minutes_int:02} min"
-    return f"{hours_int // 24} d {hours_int % 24} h"
+# Countdowns and ages read as durations ("in 6 h 25 min", "8 min"), not clocks.
+_duration_str = _human_duration_str = human_duration_str
 
 
 def _deadline_dict(row_dict, as_of_ts):

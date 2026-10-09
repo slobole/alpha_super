@@ -13,6 +13,8 @@ from alpha.live.dashboard_v3.client_operations import SOURCE_MAX_AGE_SECONDS_INT
 from alpha.live.ops_report import parse_timestamp_ts
 
 
+# ACTIVE commands that can send broker orders carry that qualifier on their badge.
+ORDER_TOOL_SET = frozenset({"tick", "run_once", "serve", "submit_vplan", "manual_order"})
 EXECUTABLE_ACTION_SET = frozenset({"tick", "submit_vplan", "post_execution_reconcile",
     "eod_snapshot", "compare_reference", "manual_order"})
 
@@ -283,7 +285,7 @@ def build_tools_page_dict(workspace_dict, provider_obj, *, selected_pod_str="",
         complete_bool = all(not parameter_dict["required_bool"] or parameter_dict["value_str"]
             for parameter_dict in parameter_list)
         row_dict = {"key_str": key_str, "label_str": "Saved watchdog report" if family_str == "saved" else key_str,
-            "class_str": class_str, "effect_str": effect_str,
+            "class_str": class_str, "effect_str": effect_str, "orders_bool": key_str in ORDER_TOOL_SET,
             "scope_str": "Installation · all configured releases" if family_str == "norgate" else
                 "Installation · all LIVE Pods" if scope_str == "system" else "Selected LIVE Pod",
             "command_str": powershell_command_str(command_argument_list) if argument_list and complete_bool else "",

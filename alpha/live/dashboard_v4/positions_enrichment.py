@@ -142,6 +142,7 @@ def enrich_positions_dict(result_dict, source_by_pod_dict, *, pod_str, as_of_ts)
         if not selected_holder_list:
             continue
         selected_row_list.append({"symbol_str": symbol_str, "name_str": "", "pod_list": selected_holder_list,
+            "open_bool": any(holder_dict["share_float"] != 0 for holder_dict in selected_holder_list),
             "share_str": _quantity_str(sum(holder_dict["share_float"] for holder_dict in selected_holder_list)),
             "offset_bool": any(holder_dict["share_float"] > 0 for holder_dict in selected_holder_list)
                 and any(holder_dict["share_float"] < 0 for holder_dict in selected_holder_list),
