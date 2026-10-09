@@ -9,6 +9,12 @@ Usage:
   .\scripts\setup_live_ops_watchdog_task.ps1 -Mode live       # scope to live only
   .\scripts\setup_live_ops_watchdog_task.ps1 -IntervalMinutes 10
   .\scripts\setup_live_ops_watchdog_task.ps1 -Unregister      # remove
+  .\scripts\setup_live_ops_watchdog_task.ps1 -Mode live -DailyHeartbeat -ReleasesRoot C:\alpha\daily_releases
+
+DailyHeartbeat uses a separate default task name, report and notification state.
+Use EventLogPath and DashboardConfig to match the daily serves' saved evidence.
+HeartbeatUrl '' explicitly disables the external heartbeat; otherwise Python
+loads the applicable heartbeat environment variable from config.env.
 
 Scope the task to -Mode live when incubation/paper rehearsal pods would
 otherwise keep the dead-man switch permanently red (rehearsal pods build plans
@@ -21,6 +27,14 @@ param(
     [int]$IntervalMinutes = 5,
     [ValidateSet("", "live", "paper", "incubation")]
     [string]$Mode = "",
+    [switch]$DailyHeartbeat,
+    [string]$ReleasesRoot = "",
+    [string]$OutputPath = "",
+    [string]$NotificationStatePath = "",
+    [AllowEmptyString()][string]$HeartbeatUrl,
+    [string]$EventLogPath = "",
+    [string]$DashboardConfig = "",
+    [switch]$Json,
     [switch]$Unregister
 )
 
@@ -29,6 +43,10 @@ $ErrorActionPreference = "Stop"
 function Write-Step {
     param([string]$LevelStr, [string]$MessageStr)
     Write-Host "[$LevelStr] $MessageStr"
+}
+
+if ($DailyHeartbeat -and -not $PSBoundParameters.ContainsKey("TaskName")) {
+    $TaskName = "AlphaDailyOpsWatchdog"
 }
 
 if ($Unregister) {
@@ -46,6 +64,27 @@ if (-not (Test-Path -LiteralPath $wrapper_path_str)) {
 
 $wrapper_argument_str = "-NoProfile -ExecutionPolicy Bypass -File `"$wrapper_path_str`""
 if ($Mode) { $wrapper_argument_str += " -Mode $Mode" }
+if ($DailyHeartbeat -or $ReleasesRoot -or $OutputPath -or $NotificationStatePath -or
+        $PSBoundParameters.ContainsKey("HeartbeatUrl") -or $EventLogPath -or $DashboardConfig -or $Json) {
+    # Task Scheduler accepts one command-line string. Encode a literal PS call
+    # so spaces, apostrophes, trailing backslashes and an empty URL round-trip
+    # through powershell.exe without being interpreted as command syntax.
+    $wrapper_command_str = "& '" + $wrapper_path_str.Replace("'", "''") + "'"
+    foreach ($parameter_name_str in @("Mode", "ReleasesRoot", "OutputPath", "NotificationStatePath", "EventLogPath", "DashboardConfig")) {
+        $parameter_value_str = Get-Variable -Name $parameter_name_str -ValueOnly
+        if ($parameter_value_str) {
+            $wrapper_command_str += " -$parameter_name_str '" + $parameter_value_str.Replace("'", "''") + "'"
+        }
+    }
+    if ($DailyHeartbeat) { $wrapper_command_str += " -DailyHeartbeat" }
+    if ($PSBoundParameters.ContainsKey("HeartbeatUrl")) {
+        $wrapper_command_str += " -HeartbeatUrl '" + $HeartbeatUrl.Replace("'", "''") + "'"
+    }
+    if ($Json) { $wrapper_command_str += " -Json" }
+    $wrapper_command_str += '; exit $LASTEXITCODE'
+    $encoded_command_str = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($wrapper_command_str))
+    $wrapper_argument_str = "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded_command_str"
+}
 $action_obj = New-ScheduledTaskAction -Execute "powershell.exe" `
     -Argument $wrapper_argument_str `
     -WorkingDirectory $repo_root_path_str

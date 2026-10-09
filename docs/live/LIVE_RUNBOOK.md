@@ -698,14 +698,35 @@ NDX/TAA serves. A disabled daily release still has to parse successfully within
 the daily root.
 
 For a daily-root deployment, use its own scheduled task, report and notification
-state paths. Verify its command before scheduling it (replace the example paths):
+state paths. Set `ALPHA_DAILY_HEARTBEAT_URL` in `config.env` to a separate external
+heartbeat check. Daily monitoring never falls back to the NDX/TAA
+`ALPHA_INSPECTOR_HEARTBEAT_URL`. An explicit `--heartbeat-url=` (or PowerShell
+`-HeartbeatUrl ''`) disables the heartbeat even when the environment URL is set.
+Daily mode rejects an environment or explicit URL matching the configured
+`ALPHA_INSPECTOR_HEARTBEAT_URL` after trimming whitespace and trailing slashes,
+reports a configuration failure, and sends neither success nor `/fail` to it.
+Verify its command before scheduling it (replace the example paths, including
+the event log used by the daily serves and the dashboard DB mapping file):
 
 ```powershell
-uv run python scripts/live_ops_watchdog.py --mode live --daily-heartbeat --releases-root C:\alpha\daily_releases --output-path C:\alpha\daily_watchdog\ops_report_latest.json --notification-state-path C:\alpha\daily_watchdog\notification_state.json --json
+.\scripts\run_live_ops_watchdog.ps1 -Mode live -DailyHeartbeat -ReleasesRoot 'C:\alpha\daily_releases' -OutputPath 'C:\alpha\daily_watchdog\ops_report_latest.json' -NotificationStatePath 'C:\alpha\daily_watchdog\notification_state.json' -EventLogPath 'C:\alpha\daily_logs\events.jsonl' -DashboardConfig 'C:\alpha\daily_dashboard.yaml' -Json
+```
+
+After the approved deployment's manual check succeeds, register the same scope:
+
+```powershell
+.\scripts\setup_live_ops_watchdog_task.ps1 -TaskName 'AlphaDailyOpsWatchdog' -Mode live -DailyHeartbeat -ReleasesRoot 'C:\alpha\daily_releases' -OutputPath 'C:\alpha\daily_watchdog\ops_report_latest.json' -NotificationStatePath 'C:\alpha\daily_watchdog\notification_state.json' -EventLogPath 'C:\alpha\daily_logs\events.jsonl' -DashboardConfig 'C:\alpha\daily_dashboard.yaml' -Json
 ```
 
 The existing NDX/TAA watchdog keeps its current root and state paths. Do not
-point two watchdog tasks at the same report or notification state file.
+point two watchdog tasks at the same report, notification state file, or external
+heartbeat check. `-DailyHeartbeat` defaults to task name `AlphaDailyOpsWatchdog`
+and report/state files under `alpha/live/logs/daily_watchdog/`; explicit paths
+above make the deployed scope reviewable. Mode-only setup retains
+`AlphaLiveOpsWatchdog` and its existing defaults. To remove only the daily task,
+use `setup_live_ops_watchdog_task.ps1 -DailyHeartbeat -Unregister` (include the
+same `-TaskName` when a custom name was used). These commands are operator
+instructions, not authorization to register a task or deploy.
 
 Prepare new YAML files outside every active release root. Make an offline staging
 copy of the complete root that the serves will read, add the proposed files there,

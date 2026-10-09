@@ -7,7 +7,15 @@ script loads it itself so there is exactly one parser.
 
 [CmdletBinding()]
 param(
-    [string]$Mode = ""
+    [string]$Mode = "",
+    [switch]$DailyHeartbeat,
+    [string]$ReleasesRoot = "",
+    [string]$OutputPath = "",
+    [string]$NotificationStatePath = "",
+    [AllowEmptyString()][string]$HeartbeatUrl,
+    [string]$EventLogPath = "",
+    [string]$DashboardConfig = "",
+    [switch]$Json
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,6 +43,22 @@ else {
 # Omitting -Mode keeps the all-modes default.
 $py_arg_list = @()
 if ($Mode) { $py_arg_list += @("--mode", $Mode) }
+if ($DailyHeartbeat) {
+    $py_arg_list += "--daily-heartbeat"
+    if (-not $OutputPath) { $OutputPath = "alpha/live/logs/daily_watchdog/ops_report_latest.json" }
+    if (-not $NotificationStatePath) { $NotificationStatePath = "alpha/live/logs/daily_watchdog/notification_state.json" }
+}
+if ($ReleasesRoot) { $py_arg_list += @("--releases-root", $ReleasesRoot) }
+if ($OutputPath) { $py_arg_list += @("--output-path", $OutputPath) }
+if ($NotificationStatePath) { $py_arg_list += @("--notification-state-path", $NotificationStatePath) }
+if ($PSBoundParameters.ContainsKey("HeartbeatUrl")) {
+    # An explicit empty override disables the heartbeat. The equals form also
+    # survives Windows PowerShell 5.1 native argument handling of empty strings.
+    $py_arg_list += "--heartbeat-url=$HeartbeatUrl"
+}
+if ($EventLogPath) { $py_arg_list += @("--event-log-path", $EventLogPath) }
+if ($DashboardConfig) { $py_arg_list += @("--dashboard-config", $DashboardConfig) }
+if ($Json) { $py_arg_list += "--json" }
 
 & $uv_exe_path_str run python scripts\live_ops_watchdog.py @py_arg_list
 exit $LASTEXITCODE

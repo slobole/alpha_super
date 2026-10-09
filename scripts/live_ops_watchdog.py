@@ -53,6 +53,8 @@ from scripts.norgate_config_env import load_config_env_file
 WATCHDOG_REPORT_PATH_STR = "alpha/live/logs/ops_report_latest.json"
 WATCHDOG_NOTIFICATION_STATE_PATH_STR = "alpha/live/logs/watchdog_notification_state.json"
 HEARTBEAT_URL_ENV_VAR_NAME_STR = "ALPHA_INSPECTOR_HEARTBEAT_URL"
+DAILY_HEARTBEAT_URL_ENV_VAR_NAME_STR = "ALPHA_DAILY_HEARTBEAT_URL"
+DAILY_RECEIPT_FIELD_TUPLE = ("daily_watchdog_error_list", "daily_watchdog_failure_alert_status_str")
 FATAL_EXIT_CODE_INT = 2
 RUN_RECEIPT_SCHEMA_STR = "live_ops_watchdog_run.v1"
 CAPSULE_RECEIPT_FIELD_TUPLE = ("capsule_notification_attempt_count_int",
@@ -133,6 +135,8 @@ def _completed_run_receipt_dict(report_dict, fired_list, receipt_context_dict, *
         "notification_configured_bool": configured_bool, "notification_pending_live_count_int": pending_live_int}
     receipt_dict.update({field_str: receipt_context_dict[field_str] for field_str in CAPSULE_RECEIPT_FIELD_TUPLE
         if field_str in receipt_context_dict})
+    receipt_dict.update({field_str: receipt_context_dict[field_str] for field_str in DAILY_RECEIPT_FIELD_TUPLE
+        if field_str in receipt_context_dict})
     return receipt_dict
 
 
@@ -170,11 +174,22 @@ def _build_summary_and_report_tuple(
         dashboard_app_kwargs_dict["releases_root_path_str"] = parsed_args_obj.releases_root_path_str
     if parsed_args_obj.dashboard_config_path_str:
         dashboard_app_kwargs_dict["config_path_str"] = parsed_args_obj.dashboard_config_path_str
+    if parsed_args_obj.daily_heartbeat_bool:
+        dashboard_app_kwargs_dict["event_log_path_str"] = parsed_args_obj.event_log_path_str
     dashboard_app_obj = dashboard_module.DashboardApp(**dashboard_app_kwargs_dict)
     summary_dict = dashboard_module.build_dashboard_summary_dict(
         dashboard_app_obj,
         as_of_ts=as_of_ts,
     )
+    if parsed_args_obj.daily_heartbeat_bool:
+        from alpha.live.daily_reconcile import DAILY_STRATEGY_IMPORT_TUPLE
+        # The daily task owns only daily pods in its requested mode. The embedded
+        # Inspector report covers every pod and must not reach its notifier.
+        summary_dict = {**summary_dict, "pod_row_dict_list": [
+            row_dict for row_dict in summary_dict.get("pod_row_dict_list") or []
+            if row_dict.get("strategy_import_str") in DAILY_STRATEGY_IMPORT_TUPLE
+            and (parsed_args_obj.mode_str is None or row_dict.get("mode_str") == parsed_args_obj.mode_str)]}
+        summary_dict.pop("inspector_report_dict", None)
     report_dict = ops_report_module.build_ops_report_dict(
         summary_dict,
         mode_str=parsed_args_obj.mode_str,
@@ -183,6 +198,71 @@ def _build_summary_and_report_tuple(
         vps_id_str=parsed_args_obj.vps_id_str,
     )
     return summary_dict, report_dict
+
+
+def _record_daily_failure(report_dict, receipt_context_dict, reason_code_str, error_type_str):
+    error_dict = {"reason_code_str": reason_code_str, "error_type_str": error_type_str}
+    receipt_context_dict.setdefault("daily_watchdog_error_list", []).append(error_dict)
+    report_dict["daily_watchdog_error_list"] = receipt_context_dict["daily_watchdog_error_list"]
+    report_dict["overall_severity_str"] = "red"
+    report_dict["overall_reason_str"] = "Daily watchdog failed; inspect daily_watchdog_error_list."
+    # No raw exceptions: URLs and credentials can appear in transport errors.
+    print(f"CRITICAL DAILY watchdog: {reason_code_str} ({error_type_str})", file=sys.stderr)
+
+
+def _finish_daily_heartbeat_tuple(parsed_args_obj, as_of_ts, report_dict, receipt_context_dict):
+    heartbeat_url_str = (parsed_args_obj.heartbeat_url_str if parsed_args_obj.heartbeat_url_str is not None
+        else os.getenv(DAILY_HEARTBEAT_URL_ENV_VAR_NAME_STR, ""))
+    heartbeat_status_str, heartbeat_fail_signal_bool = "disabled", False
+    inspector_url_str = os.getenv(HEARTBEAT_URL_ENV_VAR_NAME_STR, "").strip().split("?", 1)[0].split("#", 1)[0].rstrip("/")
+    daily_url_str = heartbeat_url_str.strip().split("?", 1)[0].split("#", 1)[0].rstrip("/")
+    if inspector_url_str and (daily_url_str == inspector_url_str or daily_url_str.startswith(inspector_url_str + "/")):
+        # Even a misconfigured daily URL must never mark the legacy check alive
+        # or failed. Withhold both requests and expose the configuration error.
+        _record_daily_failure(report_dict, receipt_context_dict,
+            "daily_watchdog_heartbeat_scope_conflict", "ConfigurationError")
+        heartbeat_url_str, heartbeat_status_str = "", "failed"
+    if heartbeat_url_str:
+        target_url_str = heartbeat_target_url_str(heartbeat_url_str, report_dict["overall_severity_str"])
+        heartbeat_fail_signal_bool = target_url_str != heartbeat_url_str
+        payload_dict = ops_report_module.build_heartbeat_payload_dict(
+            generated_at_ts=as_of_ts, vps_id_str=parsed_args_obj.vps_id_str)
+        error_type_str = "DeliveryFailed"
+        try:
+            delivered_bool = ops_report_module.post_heartbeat_bool(target_url_str, payload_dict,
+                timeout_seconds_float=parsed_args_obj.heartbeat_timeout_seconds_float)
+        except Exception as error_obj:
+            delivered_bool, error_type_str = False, type(error_obj).__name__
+        heartbeat_status_str = "sent" if delivered_bool else "failed"
+        if not delivered_bool:
+            _record_daily_failure(report_dict, receipt_context_dict,
+                "daily_watchdog_heartbeat_failed", error_type_str)
+            if not heartbeat_fail_signal_bool:
+                # Best effort: if transport recovers, record failure rather than
+                # liveness. If still unreachable, the missing ping is the alarm.
+                heartbeat_fail_signal_bool = True
+                try:
+                    ops_report_module.post_heartbeat_bool(heartbeat_target_url_str(heartbeat_url_str, "red"),
+                        payload_dict, timeout_seconds_float=parsed_args_obj.heartbeat_timeout_seconds_float)
+                except Exception as error_obj:
+                    print(f"CRITICAL DAILY watchdog: failure ping failed ({type(error_obj).__name__})", file=sys.stderr)
+    if receipt_context_dict.get("daily_watchdog_error_list"):
+        webhook_url_str = notifications_module.discord_webhook_url_from_env_str()
+        alert_status_str = "disabled"
+        if webhook_url_str:
+            detail_str = "; ".join(f"{error_dict['reason_code_str']} ({error_dict['error_type_str']})"
+                for error_dict in receipt_context_dict["daily_watchdog_error_list"])
+            payload_dict = {"content": ("CRITICAL DAILY watchdog failure. Inspect the daily report and task log.\n"
+                + detail_str)[:1900], "allowed_mentions": {"parse": []}}
+            try:
+                alert_status_str = "sent" if notifications_module.post_discord_webhook_bool(
+                    webhook_url_str, payload_dict) else "failed"
+            except Exception:
+                alert_status_str = "failed"
+        receipt_context_dict["daily_watchdog_failure_alert_status_str"] = alert_status_str
+        report_dict["daily_watchdog_failure_alert_status_str"] = alert_status_str
+        write_report_atomic(report_dict, parsed_args_obj.output_path_str)
+    return heartbeat_status_str, heartbeat_fail_signal_bool
 
 
 def _run_capsule_notifications_tuple(summary_dict, mode_str, webhook_url_str, suppressed_session_key_set=None):
@@ -308,15 +388,29 @@ def _run_report_pipeline_tuple(
             daily_heartbeat_alert_list = daily_watchdog_module.daily_heartbeat_alert_list(
                 parsed_args_obj.releases_root_path_str or dashboard_module.DEFAULT_RELEASES_ROOT_PATH_STR,
                 parsed_args_obj.dashboard_config_path_str or dashboard_module.DEFAULT_CONFIG_PATH_STR,
+                parsed_args_obj.event_log_path_str if parsed_args_obj.daily_heartbeat_bool else
                 dashboard_module.DEFAULT_EVENT_LOG_PATH_STR, as_of_ts, parsed_args_obj.mode_str)
             if daily_heartbeat_alert_list:
                 daily_watchdog_module.deliver_daily_heartbeat_alerts(daily_heartbeat_alert_list,
-                    daily_state_path_str, webhook_url_str, notifications_module.post_discord_webhook_bool)
-            suppressed_session_key_set = daily_watchdog_module.load_delivered_key_set(daily_state_path_str)
-        except Exception:
+                    daily_state_path_str, webhook_url_str, notifications_module.post_discord_webhook_bool,
+                    **({"raise_on_failure_bool": True} if parsed_args_obj.daily_heartbeat_bool else {}))
+            if not parsed_args_obj.daily_heartbeat_bool:
+                suppressed_session_key_set = daily_watchdog_module.load_delivered_key_set(daily_state_path_str)
+        except Exception as error_obj:
+            if parsed_args_obj.daily_heartbeat_bool:
+                _record_daily_failure(report_dict, receipt_context_dict,
+                    "daily_watchdog_check_failed", type(error_obj).__name__)
             # A broken daily monitor cannot suppress the existing Inspector alerts,
             # run receipt or external dead-man heartbeat.
             pass
+        if parsed_args_obj.daily_heartbeat_bool:
+            # A failed delivery may follow successful deliveries for other pods.
+            # Retain their durable suppression even when the scan/delivery failed.
+            try:
+                suppressed_session_key_set = daily_watchdog_module.load_delivered_key_set(daily_state_path_str)
+            except Exception as error_obj:
+                _record_daily_failure(report_dict, receipt_context_dict,
+                    "daily_watchdog_check_failed", type(error_obj).__name__)
     capsule_result_dict, invalid_scope_row_list = _run_capsule_notifications_tuple(
         summary_dict, parsed_args_obj.mode_str, webhook_url_str, suppressed_session_key_set)
     if capsule_result_dict:
@@ -358,6 +452,8 @@ def main(argv_list: list[str] | None = None) -> int:
     parser_obj.add_argument("--vps-id", dest="vps_id_str", default=None)
     parser_obj.add_argument("--releases-root", dest="releases_root_path_str", default=None)
     parser_obj.add_argument("--daily-heartbeat", dest="daily_heartbeat_bool", action="store_true")
+    parser_obj.add_argument("--event-log-path", dest="event_log_path_str",
+        default="alpha/live/logs/live_events.jsonl")
     parser_obj.add_argument(
         "--mode",
         dest="mode_str",
@@ -373,7 +469,7 @@ def main(argv_list: list[str] | None = None) -> int:
     parser_obj.add_argument(
         "--output-path",
         dest="output_path_str",
-        default=WATCHDOG_REPORT_PATH_STR,
+        default=None,
     )
     parser_obj.add_argument("--heartbeat-url", dest="heartbeat_url_str", default=None)
     parser_obj.add_argument(
@@ -385,7 +481,7 @@ def main(argv_list: list[str] | None = None) -> int:
     parser_obj.add_argument(
         "--notification-state-path",
         dest="notification_state_path_str",
-        default=WATCHDOG_NOTIFICATION_STATE_PATH_STR,
+        default=None,
     )
     parser_obj.add_argument(
         "--dashboard-config",
@@ -395,6 +491,12 @@ def main(argv_list: list[str] | None = None) -> int:
     parser_obj.add_argument("--as-of-ts", dest="as_of_timestamp_str", default=None)
     parser_obj.add_argument("--json", dest="json_output_bool", action="store_true")
     parsed_args_obj = parser_obj.parse_args(argv_list)
+    if parsed_args_obj.output_path_str is None:
+        parsed_args_obj.output_path_str = ("alpha/live/logs/daily_watchdog/ops_report_latest.json"
+            if parsed_args_obj.daily_heartbeat_bool else WATCHDOG_REPORT_PATH_STR)
+    if parsed_args_obj.notification_state_path_str is None:
+        parsed_args_obj.notification_state_path_str = ("alpha/live/logs/daily_watchdog/notification_state.json"
+            if parsed_args_obj.daily_heartbeat_bool else WATCHDOG_NOTIFICATION_STATE_PATH_STR)
 
     as_of_ts = _resolve_as_of_ts(parsed_args_obj.as_of_timestamp_str)
     load_config_env_file(override_existing_bool=True)
@@ -421,25 +523,37 @@ def main(argv_list: list[str] | None = None) -> int:
         return FATAL_EXIT_CODE_INT
 
     overall_severity_str = str(report_dict.get("overall_severity_str") or "gray")
-    heartbeat_url_str = parsed_args_obj.heartbeat_url_str or os.getenv(
-        HEARTBEAT_URL_ENV_VAR_NAME_STR,
-        "",
-    )
-    heartbeat_fail_signal_bool = False
-    if not heartbeat_url_str:
-        heartbeat_status_str = "disabled"
+    if parsed_args_obj.daily_heartbeat_bool:
+        try:
+            heartbeat_status_str, heartbeat_fail_signal_bool = _finish_daily_heartbeat_tuple(
+                parsed_args_obj, as_of_ts, report_dict, receipt_context_dict)
+        except Exception as error_obj:
+            error_str = f"Daily watchdog finalization failed ({type(error_obj).__name__})."
+            print(error_str, file=sys.stderr)
+            _print_result({"status_str": "error", "reason_code_str": "watchdog_fatal_error",
+                "error_str": error_str}, json_output_bool=parsed_args_obj.json_output_bool)
+            return FATAL_EXIT_CODE_INT
+        overall_severity_str = str(report_dict.get("overall_severity_str") or "gray")
     else:
-        target_url_str = heartbeat_target_url_str(heartbeat_url_str, overall_severity_str)
-        heartbeat_fail_signal_bool = target_url_str != heartbeat_url_str
-        delivered_bool = ops_report_module.post_heartbeat_bool(
-            target_url_str,
-            ops_report_module.build_heartbeat_payload_dict(
-                generated_at_ts=as_of_ts,
-                vps_id_str=parsed_args_obj.vps_id_str,
-            ),
-            timeout_seconds_float=parsed_args_obj.heartbeat_timeout_seconds_float,
+        heartbeat_url_str = parsed_args_obj.heartbeat_url_str or os.getenv(
+            HEARTBEAT_URL_ENV_VAR_NAME_STR,
+            "",
         )
-        heartbeat_status_str = "sent" if delivered_bool else "failed"
+        heartbeat_fail_signal_bool = False
+        if not heartbeat_url_str:
+            heartbeat_status_str = "disabled"
+        else:
+            target_url_str = heartbeat_target_url_str(heartbeat_url_str, overall_severity_str)
+            heartbeat_fail_signal_bool = target_url_str != heartbeat_url_str
+            delivered_bool = ops_report_module.post_heartbeat_bool(
+                target_url_str,
+                ops_report_module.build_heartbeat_payload_dict(
+                    generated_at_ts=as_of_ts,
+                    vps_id_str=parsed_args_obj.vps_id_str,
+                ),
+                timeout_seconds_float=parsed_args_obj.heartbeat_timeout_seconds_float,
+            )
+            heartbeat_status_str = "sent" if delivered_bool else "failed"
 
     run_receipt_status_str = "saved"
     try:
@@ -459,6 +573,8 @@ def main(argv_list: list[str] | None = None) -> int:
             "report_output_path_str": parsed_args_obj.output_path_str,
             "notification_fired_count_int": len(fired_list),
             **{field_str: receipt_context_dict[field_str] for field_str in CAPSULE_RECEIPT_FIELD_TUPLE
+                if field_str in receipt_context_dict},
+            **{field_str: receipt_context_dict[field_str] for field_str in DAILY_RECEIPT_FIELD_TUPLE
                 if field_str in receipt_context_dict},
             "heartbeat_status_str": heartbeat_status_str,
             "heartbeat_fail_signal_bool": heartbeat_fail_signal_bool,

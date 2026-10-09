@@ -10,6 +10,14 @@ from alpha.live.daily_reconcile import DAILY_TERMINAL_STATUS_SET, is_daily_recon
 from alpha.live.release_manifest import load_release_list
 
 
+class DailyHeartbeatDeliveryError(RuntimeError):
+    """An explicit daily-mode HTTP failure remains retryable."""
+
+    def __init__(self, failed_count_int):
+        self.failed_count_int = failed_count_int
+        super().__init__(f"{failed_count_int} daily heartbeat alert delivery attempt(s) failed.")
+
+
 def _last_error_str(event_log_path_str, pod_id_str, decision_plan_id_int=None):
     log_path_obj = Path(event_log_path_str)
     for candidate_path_obj in reversed(dashboard._event_log_path_obj_list(log_path_obj)):
@@ -54,7 +62,7 @@ def daily_heartbeat_alert_list(releases_root_path_str, dashboard_config_path_str
     config_obj = dashboard.load_dashboard_config(dashboard_config_path_str)
     alert_list = []
     for release_obj in load_release_list(releases_root_path_str):
-        if (not is_daily_reconcile_release_bool(release_obj)
+        if (not release_obj.enabled_bool or not is_daily_reconcile_release_bool(release_obj)
                 or mode_str not in (None, "all", release_obj.mode_str)):
             continue
         calendar_id_str = release_obj.session_calendar_id_str
@@ -98,9 +106,8 @@ def daily_heartbeat_alert_list(releases_root_path_str, dashboard_config_path_str
                     == candidate_label_ts.date()), None)
             if ((matching_row_dict is None or matching_row_dict["status_str"] in {"blocked", "expired", "superseded"})
                     and candidate_label_ts.date().isoformat() not in existing_halt_session_set):
-                last_error_str = (load_error_str or "Release disabled." if not release_obj.enabled_bool else
-                    load_error_str or _last_error_str(event_log_path_str, release_obj.pod_id_str,
-                        None if matching_row_dict is None else matching_row_dict["decision_plan_id_int"]))
+                last_error_str = load_error_str or _last_error_str(event_log_path_str, release_obj.pod_id_str,
+                    None if matching_row_dict is None else matching_row_dict["decision_plan_id_int"])
                 alert_list.append({"mode_str": release_obj.mode_str, "pod_id_str": release_obj.pod_id_str,
                     "session_str": candidate_label_ts.date().isoformat(), "kind_str": "decision_incomplete",
                     "last_error_str": last_error_str})
@@ -134,8 +141,9 @@ def load_delivered_key_set(state_path_str):
             "SELECT alert_key_str FROM daily_watchdog_alert WHERE delivered_timestamp_str IS NOT NULL")}
 
 
-def deliver_daily_heartbeat_alerts(alert_list, state_path_str, webhook_url_str, webhook_poster_fn):
-    """Claim one pod/session in a watchdog-owned DB; daily pod DBs stay read-only."""
+def deliver_daily_heartbeat_alerts(alert_list, state_path_str, webhook_url_str, webhook_poster_fn,
+        *, raise_on_failure_bool=False):
+    """Claim one pod/session; opt-in failures raise after other delivery attempts."""
     if not alert_list or not webhook_url_str:
         return []
     state_path_obj = Path(state_path_str)
@@ -145,6 +153,7 @@ def deliver_daily_heartbeat_alerts(alert_list, state_path_str, webhook_url_str, 
             alert_key_str TEXT PRIMARY KEY, delivery_claim_str TEXT,
             delivery_claimed_timestamp_str TEXT, delivered_timestamp_str TEXT)""")
     delivered_list = []
+    failed_count_int = 0
     for alert_dict in alert_list:
         key_str = "|".join((alert_dict["mode_str"], alert_dict["pod_id_str"], alert_dict["session_str"]))
         claim_str = uuid4().hex
@@ -174,4 +183,8 @@ def deliver_daily_heartbeat_alerts(alert_list, state_path_str, webhook_url_str, 
                 (datetime.now(timezone.utc).isoformat() if delivered_bool else None, key_str, claim_str))
         if delivered_bool:
             delivered_list.append(alert_dict)
+        else:
+            failed_count_int += 1
+    if failed_count_int and raise_on_failure_bool:
+        raise DailyHeartbeatDeliveryError(failed_count_int)
     return delivered_list
