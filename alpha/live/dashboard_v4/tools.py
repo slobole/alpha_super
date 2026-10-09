@@ -6,6 +6,7 @@ opens state for writing, reads environment secrets, or accepts shell text.
 
 from datetime import UTC, datetime
 from pathlib import Path
+import re
 import sqlite3
 from urllib.parse import quote
 
@@ -43,9 +44,19 @@ TOOL_CATALOG_TUPLE = (
 )
 
 
+# PowerShell ends a single-quoted string at ASCII ' and at the typographic
+# quotes U+2018-U+201B; doubling any of them keeps it literal data.
+POWERSHELL_QUOTE_RE = re.compile("['\u2018\u2019\u201a\u201b]")
+
+
+def powershell_literal_str(value_obj):
+    """One single-quoted literal: quotes, dollars and backticks stay data."""
+    return "'" + POWERSHELL_QUOTE_RE.sub(lambda match_obj: match_obj.group(0) * 2, str(value_obj)) + "'"
+
+
 def powershell_command_str(argument_list):
     """Quote each literal argument: apostrophes, dollars and backticks stay data."""
-    return "& " + " ".join("'" + str(argument_str).replace("'", "''") + "'" for argument_str in argument_list)
+    return "& " + " ".join(powershell_literal_str(argument_str) for argument_str in argument_list)
 
 
 def _scope_rows_tuple(workspace_dict):

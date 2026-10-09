@@ -175,6 +175,7 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
                 "detail_str": "Cycle evidence cannot be read." if database_failed_bool else (required_dict.get("reason_str") or required_dict.get("detail_str") or "") if action_required_bool else cycle_dict["now_detail_str"],
                 "age_str": age_str,
                 "kind_str": "database" if database_failed_bool else "action" if action_required_bool else "cycle",
+                "db_status_str": row_dict.get("db_status_str") or "",
                 "step_str": next((step_dict["label_str"] for step_dict in cycle_dict["step_dict_list"]
                     if step_dict["state_str"] in {"Failed", "Late"}), ""),
                 "inspect_str": required_dict.get("inspect_command_name_str") or "",

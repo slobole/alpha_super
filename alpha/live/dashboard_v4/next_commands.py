@@ -7,14 +7,14 @@ copies one into the VPS terminal. No fitting command means no suggestion.
 
 import re
 
-from alpha.live.dashboard_v4.tools import build_tools_page_dict
+from alpha.live.dashboard_v4.tools import build_tools_page_dict, powershell_literal_str
 
 
 LIMIT_INT = 3
 CLASS_RANK_DICT = {"READ": 0, "INSPECT": 1, "ACTIVE": 2}
 POD_ID_RE = re.compile(r"[A-Za-z0-9._-]{1,200}")
 STEP_KEY_DICT = {
-    "Data": ("doctor_norgate_client",), "Decide": ("show_decision_plan",), "Plan": ("show_vplan",),
+    "Data": ("status", "doctor_norgate_client"), "Decide": ("show_decision_plan",), "Plan": ("show_vplan",),
     "Submit": ("show_vplan", "execution_report"), "Fill": ("show_vplan", "execution_report"),
     "Reconcile": ("execution_report", "post_execution_reconcile"), "EOD": ("status", "eod_snapshot"),
 }
@@ -30,13 +30,16 @@ ACTION_KEY_DICT = {
 
 
 def serve_running_command_str(pod_id_str):
-    """READ: list this Pod's running scheduler (one line = running, none = stopped, two = duplicate)."""
+    """READ: list this Pod's running scheduler (one line = running, none = stopped, two = duplicate).
+
+    Private bytes (never trimmed like the working set) exclude the small venv launcher.
+    """
     if not isinstance(pod_id_str, str) or not POD_ID_RE.fullmatch(pod_id_str):
         return ""
     return ("Get-CimInstance Win32_Process -Filter \"Name LIKE 'python%.exe'\" | Where-Object { "
-        "[int64]$_.WorkingSetSize -gt 20MB -and $_.CommandLine -like '*alpha.live.scheduler_service*' "
+        "[int64]$_.PrivatePageCount -gt 20MB -and $_.CommandLine -like '*alpha.live.scheduler_service*' "
         "-and $_.CommandLine -match '(?:^|\\s)serve(?:\\s|$)' "
-        "-and $_.CommandLine -match '--pod-id\\s+\"?" + re.escape(pod_id_str) + "\"?(?:\\s|$)' } "
+        "-and $_.CommandLine -match '(?:^|\\s)--pod-id\\s+\"?" + re.escape(pod_id_str) + "\"?(?:\\s|$)' } "
         "| Select-Object ProcessId, CreationDate")
 
 
@@ -48,13 +51,16 @@ def next_command_key_list(attention_dict):
     elif kind_str == "hold":
         key_tuple = HOLD_KEY_DICT.get(attention_dict.get("reason_code_str") or "", ("status", "show_vplan"))
     elif kind_str == "database":
-        key_tuple = ("status",)
+        # runner commands open (and so create) the state DB: never offer them for a missing one.
+        key_tuple = ("db_path_check",) if attention_dict.get("db_status_str") == "missing" else ("status",)
     elif kind_str in {"action", "cycle"}:
         key_tuple = ((attention_dict.get("inspect_str") or "",)
             + ACTION_KEY_DICT.get(attention_dict.get("next_action_str") or "", ())
             + STEP_KEY_DICT.get(attention_dict.get("step_str") or "", ()))
     else:
         return []
+    if attention_dict.get("scheduler_bool") and kind_str != "scheduler":
+        key_tuple = ("serve_running", "next_due") + key_tuple
     return list(dict.fromkeys(key_str for key_str in key_tuple if key_str))
 
 
@@ -76,6 +82,14 @@ def attach_next_command_list(attention_list, workspace_dict, provider_obj, *, de
                     for row_dict in group_dict["row_list"]}
             row_by_key_dict = row_cache_dict[pod_id_str]
             for key_str in key_list:
+                if key_str == "db_path_check":
+                    status_list = (row_by_key_dict.get("status") or {}).get("argument_list") or []
+                    db_path_str = status_list[status_list.index("--db-path") + 1] if "--db-path" in status_list[:-1] else ""
+                    if db_path_str:
+                        command_list.append({"key_str": key_str, "class_str": "READ", "orders_bool": False,
+                            "command_str": "Test-Path -LiteralPath " + powershell_literal_str(db_path_str),
+                            "effect_str": "Show whether the configured state DB file exists. Creates nothing."})
+                    continue
                 if key_str == "serve_running":
                     command_str = serve_running_command_str(pod_id_str) if row_by_key_dict else ""
                     if command_str:
