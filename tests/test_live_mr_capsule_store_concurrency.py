@@ -70,14 +70,14 @@ def _status_pair(db_path_str: str, decision_obj: DecisionPlan, vplan_obj: VPlan)
     return decision_row[0], vplan_status_str, json.loads(decision_row[1])
 
 
-def test_daily_targets_persist_without_altering_the_existing_decision_table(tmp_path):
-    """Daily targets are metadata; shared table shape and legacy inserts stay unchanged."""
+def test_daily_targets_use_only_the_permitted_additive_column(tmp_path):
+    """Only the owner-permitted target column is added; legacy inserts stay unchanged."""
     db_path_str = str(tmp_path / "pre_capsule.sqlite3")
     LiveStateStore(db_path_str)
     upgraded_store_obj = LiveStateStore(db_path_str)
     with sqlite3.connect(db_path_str) as connection_obj:
         column_list = [row for row in connection_obj.execute("PRAGMA table_info(decision_plan)") if row[1] == "target_share_json_str"]
-    assert column_list == []
+    assert len(column_list) == 1 and column_list[0][2:6] == ("TEXT", 1, "'{}'", 0)
     _register_capsule_release(upgraded_store_obj)
     capsule_obj = upgraded_store_obj.insert_decision_plan(_capsule_decision(target_share_map_dict={"BIL": 400}))
     dv2_obj = upgraded_store_obj.insert_decision_plan(replace(
@@ -159,10 +159,15 @@ def test_daily_close_undoes_holdings_and_vplan_if_decision_write_fails(ready_cyc
 
 
 
-def test_two_workers_can_open_the_same_baseline_database_without_a_new_shared_migration(tmp_path, monkeypatch):
-    """Overlapping startup reads need no target-share/revision schema mutation."""
+def test_two_workers_serialize_only_the_permitted_target_column_addition(tmp_path, monkeypatch):
+    """Both workers may observe the missing permitted column; only one adds it."""
     db_path_str = str(tmp_path / "simultaneous_upgrade.sqlite3")
     LiveStateStore(db_path_str)
+    with sqlite3.connect(db_path_str) as connection_obj:
+        connection_obj.execute("ALTER TABLE decision_plan DROP COLUMN target_share_json_str")
+    from scripts.review.preflight_legacy_fill_duplicates import inspect_duplicate_fills
+    from pathlib import Path
+    assert inspect_duplicate_fills(Path(db_path_str))["status_str"] == "no_duplicate_tuples"
     schema_barrier_obj = threading.Barrier(2)
     second_worker_event_obj = threading.Event()
     counter_lock_obj = threading.Lock()
@@ -175,6 +180,9 @@ def test_two_workers_can_open_the_same_baseline_database_without_a_new_shared_mi
 
         def fetchall(self):
             return self.row_list
+
+        def __iter__(self):
+            return iter(self.row_list)
 
     class UpgradeConnection(sqlite3.Connection):
         def execute(self, statement_str, *argument_tuple):

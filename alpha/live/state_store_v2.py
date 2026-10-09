@@ -62,6 +62,7 @@ class LiveStateStore(CoreLiveStateStore):
                     status_str TEXT NOT NULL,
                     created_timestamp_str TEXT NOT NULL,
                     updated_timestamp_str TEXT NOT NULL,
+                    target_share_json_str TEXT NOT NULL DEFAULT '{}',
                     UNIQUE(pod_id_str, signal_timestamp_str, execution_policy_str)
                 );
 
@@ -522,6 +523,15 @@ class LiveStateStore(CoreLiveStateStore):
                     """
                 )
 
+            if "target_share_json_str" not in decision_plan_column_name_list:
+                # Only the owner-permitted additive column needs serialization.
+                # Recheck after acquiring the lock for concurrent startup workers.
+                if not connection_obj.in_transaction:
+                    connection_obj.execute("BEGIN IMMEDIATE")
+                if "target_share_json_str" not in {
+                        row_obj["name"] for row_obj in connection_obj.execute("PRAGMA table_info(decision_plan)")}:
+                    connection_obj.execute("ALTER TABLE decision_plan ADD COLUMN target_share_json_str TEXT NOT NULL DEFAULT '{}'")
+
             from alpha.live.daily_reconcile import ensure_daily_reconcile_schema
             from alpha.live.mr_capsule_notifications import ensure_execution_alert_schema
             ensure_daily_reconcile_schema(connection_obj)
@@ -693,16 +703,33 @@ class LiveStateStore(CoreLiveStateStore):
                 (status_str, timestamp_str, decision_plan_id_int))
             return True
 
-    def get_pending_daily_decision_plan_list(self) -> list[DecisionPlan]:
-        from alpha.live.daily_reconcile import is_daily_reconcile_release_bool
+    def get_pending_daily_decision_plan_id_list(self, *, pod_id_str: str | None = None,
+            env_mode_str: str | None = None) -> list[int]:
+        from alpha.live.daily_reconcile import CORE5_STRATEGY_IMPORT_STR, MR_CAPSULE_STRATEGY_IMPORT_TUPLE
 
+        strategy_tuple = (*MR_CAPSULE_STRATEGY_IMPORT_TUPLE, CORE5_STRATEGY_IMPORT_STR)
+        strategy_placeholders_str = ",".join("?" for _strategy_str in strategy_tuple)
         with self._connect() as connection_obj:
-            decision_id_list = [int(row_obj[0]) for row_obj in connection_obj.execute(
-                "SELECT decision_plan_id_int FROM decision_plan WHERE status_str NOT IN "
-                "('completed','completed_with_exceptions','superseded') ORDER BY target_execution_timestamp_str, decision_plan_id_int").fetchall()]
-        decision_list = [self.get_decision_plan_by_id(decision_id_int) for decision_id_int in decision_id_list]
-        return [decision_obj for decision_obj in decision_list
-            if is_daily_reconcile_release_bool(self.get_release_by_id(decision_obj.release_id_str))]
+            # Identify daily releases from scalar columns before touching any
+            # decision row. A pod-scoped NDX/TAA pass stops at this guard.
+            release_id_list = [row_obj[0] for row_obj in connection_obj.execute(
+                f"SELECT release_id_str FROM live_release WHERE strategy_import_str IN ({strategy_placeholders_str}) "
+                "AND (? IS NULL OR pod_id_str=?) AND (? IS NULL OR mode_str=?)",
+                (*strategy_tuple, pod_id_str, pod_id_str, env_mode_str, env_mode_str)).fetchall()]
+            if not release_id_list:
+                return []
+            release_placeholders_str = ",".join("?" for _release_id_str in release_id_list)
+            return [int(row_obj[0]) for row_obj in connection_obj.execute(
+                f"SELECT decision_plan_id_int FROM decision_plan WHERE release_id_str IN ({release_placeholders_str}) "
+                "AND (? IS NULL OR pod_id_str=?) AND status_str NOT IN "
+                "('completed','completed_with_exceptions','superseded') "
+                "ORDER BY target_execution_timestamp_str, decision_plan_id_int",
+                (*release_id_list, pod_id_str, pod_id_str)).fetchall()]
+
+    def get_pending_daily_decision_plan_list(self, *, pod_id_str: str | None = None,
+            env_mode_str: str | None = None) -> list[DecisionPlan]:
+        return [self.get_decision_plan_by_id(decision_id_int) for decision_id_int in
+            self.get_pending_daily_decision_plan_id_list(pod_id_str=pod_id_str, env_mode_str=env_mode_str)]
 
     def complete_daily_cycle(self, decision_plan_id_int: int, vplan_id_int: int | None,
             broker_snapshot_obj: BrokerSnapshot, status_str: str, exception_list: list[dict], as_of_ts) -> bool:
@@ -794,8 +821,11 @@ class LiveStateStore(CoreLiveStateStore):
             return True
 
     def insert_decision_plan(self, decision_plan_obj: DecisionPlan) -> DecisionPlan:
-        if (decision_plan_obj.target_share_map_dict
-                or "daily_target_share_map_dict" in decision_plan_obj.snapshot_metadata_dict):
+        daily_target_bool = bool(decision_plan_obj.target_share_map_dict or (
+            isinstance(decision_plan_obj.snapshot_metadata_dict, dict) and (
+                "daily_target_share_map_dict" in decision_plan_obj.snapshot_metadata_dict
+                or "daily_target_strategy_import_str" in decision_plan_obj.snapshot_metadata_dict)))
+        if daily_target_bool:
             from alpha.live.daily_reconcile import is_daily_reconcile_release_bool
 
             release_obj = self.get_release_by_id(decision_plan_obj.release_id_str)
@@ -803,12 +833,10 @@ class LiveStateStore(CoreLiveStateStore):
                     or (decision_plan_obj.pod_id_str, decision_plan_obj.user_id_str, decision_plan_obj.account_route_str) !=
                     (release_obj.pod_id_str, release_obj.user_id_str, release_obj.account_route_str)):
                 raise ValueError("Explicit daily share targets require the matching CORE5/capsule release.")
-            # The target and decision commit in the same baseline INSERT. Shared
-            # production tables and the ordinary NDX/TAA payload stay unchanged.
-            decision_plan_obj = DecisionPlan(**{**decision_plan_obj.__dict__,
-                "snapshot_metadata_dict": {**decision_plan_obj.snapshot_metadata_dict,
-                    "daily_target_share_map_dict": dict(decision_plan_obj.target_share_map_dict),
-                    "daily_target_strategy_import_str": release_obj.strategy_import_str}})
+            metadata_dict = dict(decision_plan_obj.snapshot_metadata_dict)
+            metadata_dict.pop("daily_target_share_map_dict", None)
+            metadata_dict["daily_target_strategy_import_str"] = release_obj.strategy_import_str
+            decision_plan_obj = DecisionPlan(**{**decision_plan_obj.__dict__, "snapshot_metadata_dict": metadata_dict})
         created_timestamp_str = _serialize_timestamp_str(_utc_now_ts())
         with self._connect() as connection_obj:
             cursor_obj = connection_obj.execute(
@@ -866,6 +894,11 @@ class LiveStateStore(CoreLiveStateStore):
                 ),
             )
             decision_plan_id_int = int(cursor_obj.lastrowid)
+            if daily_target_bool:
+                # Same transaction as the baseline INSERT: a failed target write
+                # rolls the entire decision back. Legacy INSERT SQL is unchanged.
+                connection_obj.execute("UPDATE decision_plan SET target_share_json_str=? WHERE decision_plan_id_int=?",
+                    (json.dumps(decision_plan_obj.target_share_map_dict, sort_keys=True), decision_plan_id_int))
         return DecisionPlan(
             **{
                 **decision_plan_obj.__dict__,
@@ -965,8 +998,11 @@ class LiveStateStore(CoreLiveStateStore):
         return expirable_decision_plan_list
 
     def insert_vplan(self, vplan_obj: VPlan) -> VPlan:
-        from alpha.live.mr_capsule_adapter import MR_CAPSULE_CONTRACT_STR
-        from alpha.live.core5_adapter import CORE5_CONTRACT_STR
+        from alpha.live.mr_capsule_adapter import MR_CAPSULE_CONTRACT_STR, MR_CAPSULE_STRATEGY_IMPORT_TUPLE
+        from alpha.live.core5_adapter import CORE5_CONTRACT_STR, CORE5_STRATEGY_IMPORT_STR
+
+        daily_import_tuple = (*MR_CAPSULE_STRATEGY_IMPORT_TUPLE, CORE5_STRATEGY_IMPORT_STR)
+        daily_placeholder_str = ",".join("?" for _ in daily_import_tuple)
 
         created_timestamp_str = _serialize_timestamp_str(_utc_now_ts())
         live_reference_source_map_dict = (
@@ -990,8 +1026,9 @@ class LiveStateStore(CoreLiveStateStore):
             }
         with self._connect() as connection_obj:
             decision_row_obj = connection_obj.execute(
-                "SELECT snapshot_metadata_json_str FROM decision_plan WHERE decision_plan_id_int = ?",
-                (int(vplan_obj.decision_plan_id_int),),
+                "SELECT d.snapshot_metadata_json_str FROM decision_plan d JOIN live_release r ON r.release_id_str=d.release_id_str "
+                f"WHERE d.decision_plan_id_int=? AND r.strategy_import_str IN ({daily_placeholder_str})",
+                (int(vplan_obj.decision_plan_id_int), *daily_import_tuple),
             ).fetchone()
             capsule_bool = decision_row_obj is not None and json.loads(
                 decision_row_obj["snapshot_metadata_json_str"]
@@ -1168,14 +1205,18 @@ class LiveStateStore(CoreLiveStateStore):
         return self._row_to_vplan(row_obj)
 
     def claim_vplan_for_submission(self, vplan_id_int: int) -> bool:
-        from alpha.live.mr_capsule_adapter import MR_CAPSULE_CONTRACT_STR
-        from alpha.live.core5_adapter import CORE5_CONTRACT_STR
+        from alpha.live.mr_capsule_adapter import MR_CAPSULE_CONTRACT_STR, MR_CAPSULE_STRATEGY_IMPORT_TUPLE
+        from alpha.live.core5_adapter import CORE5_CONTRACT_STR, CORE5_STRATEGY_IMPORT_STR
+
+        daily_import_tuple = (*MR_CAPSULE_STRATEGY_IMPORT_TUPLE, CORE5_STRATEGY_IMPORT_STR)
+        daily_placeholder_str = ",".join("?" for _ in daily_import_tuple)
 
         with self._connect() as connection_obj:
             decision_row_obj = connection_obj.execute(
                 "SELECT d.snapshot_metadata_json_str FROM decision_plan d JOIN vplan v "
-                "ON d.decision_plan_id_int = v.decision_plan_id_int WHERE v.vplan_id_int = ?",
-                (int(vplan_id_int),),
+                "ON d.decision_plan_id_int = v.decision_plan_id_int JOIN live_release r ON r.release_id_str=d.release_id_str "
+                f"WHERE v.vplan_id_int=? AND r.strategy_import_str IN ({daily_placeholder_str})",
+                (int(vplan_id_int), *daily_import_tuple),
             ).fetchone()
             capsule_bool = decision_row_obj is not None and json.loads(
                 decision_row_obj["snapshot_metadata_json_str"]
@@ -1261,7 +1302,19 @@ class LiveStateStore(CoreLiveStateStore):
                 ),
             )
 
-    def get_submitted_vplan_list(self) -> list[VPlan]:
+    def get_submitted_vplan_list(self, *, exclude_daily_reconcile_bool: bool = False) -> list[VPlan]:
+        if exclude_daily_reconcile_bool:
+            from alpha.live.daily_reconcile import CORE5_STRATEGY_IMPORT_STR, MR_CAPSULE_STRATEGY_IMPORT_TUPLE
+
+            strategy_tuple = (*MR_CAPSULE_STRATEGY_IMPORT_TUPLE, CORE5_STRATEGY_IMPORT_STR)
+            placeholders_str = ",".join("?" for _strategy_str in strategy_tuple)
+            with self._connect() as connection_obj:
+                row_list = connection_obj.execute(
+                    "SELECT v.* FROM vplan v LEFT JOIN live_release r ON r.release_id_str=v.release_id_str "
+                    "WHERE v.status_str IN ('submitted','submitting') "
+                    f"AND (r.strategy_import_str IS NULL OR r.strategy_import_str NOT IN ({placeholders_str})) "
+                    "ORDER BY v.submission_timestamp_str ASC", strategy_tuple).fetchall()
+            return [self._row_to_vplan(row_obj) for row_obj in row_list]
         with self._connect() as connection_obj:
             row_list = connection_obj.execute(
                 """
@@ -2259,17 +2312,24 @@ class LiveStateStore(CoreLiveStateStore):
             status_str=row_obj["status_str"],
             decision_plan_id_int=int(row_obj["decision_plan_id_int"]),
         )
-        if "daily_target_share_map_dict" not in decision_plan_obj.snapshot_metadata_dict:
+        metadata_dict = decision_plan_obj.snapshot_metadata_dict
+        if not isinstance(metadata_dict, dict):
             return decision_plan_obj
         from alpha.live.daily_reconcile import CORE5_STRATEGY_IMPORT_STR, MR_CAPSULE_STRATEGY_IMPORT_TUPLE
 
-        # The insert freezes this marker from the verified release, not caller
-        # metadata. Historical reads must not depend on later release edits.
-        if decision_plan_obj.snapshot_metadata_dict.get("daily_target_strategy_import_str") not in (
-                *MR_CAPSULE_STRATEGY_IMPORT_TUPLE, CORE5_STRATEGY_IMPORT_STR):
-            raise ValueError("Saved daily share targets require a verified CORE5/capsule strategy marker.")
-        return DecisionPlan(**{**decision_plan_obj.__dict__, "target_share_map_dict":
-            decision_plan_obj.snapshot_metadata_dict["daily_target_share_map_dict"]})
+        # New inserts freeze verified release identity. Older column-backed
+        # capsule decisions already saved their strategy import in snapshot metadata.
+        strategy_import_str = metadata_dict.get("daily_target_strategy_import_str", metadata_dict.get("strategy_import_str"))
+        if strategy_import_str not in (*MR_CAPSULE_STRATEGY_IMPORT_TUPLE, CORE5_STRATEGY_IMPORT_STR):
+            return decision_plan_obj
+        target_share_dict = json.loads(row_obj["target_share_json_str"]) if "target_share_json_str" in row_obj.keys() else {}
+        # c8d4997 stored daily targets in metadata. Keep that immutable history
+        # readable after the additive column defaults to an empty object.
+        if not target_share_dict and "daily_target_share_map_dict" in metadata_dict:
+            target_share_dict = metadata_dict["daily_target_share_map_dict"]
+        if not target_share_dict:
+            return decision_plan_obj
+        return DecisionPlan(**{**decision_plan_obj.__dict__, "target_share_map_dict": target_share_dict})
 
     def _row_to_vplan(self, row_obj: sqlite3.Row) -> VPlan:
         with self._connect() as connection_obj:

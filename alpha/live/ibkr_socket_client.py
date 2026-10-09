@@ -1043,7 +1043,8 @@ class IBKRSocketClient:
                                 "submission_key_str": broker_order_request_obj.submission_key_str,
                                 "order_request_key_str": broker_order_request_obj.order_request_key_str,
                                 "limit_price_float": broker_order_request_obj.limit_price_float,
-                                "submission_deadline_timestamp_str": broker_order_request_obj.submission_deadline_timestamp_str,
+                                **({"submission_deadline_timestamp_str": broker_order_request_obj.submission_deadline_timestamp_str}
+                                    if broker_order_request_obj.submission_deadline_timestamp_str is not None else {}),
                             },
                         }
                     )
@@ -1661,7 +1662,7 @@ class IBKRSocketClient:
                             "snapshot_source_str": snapshot_source_str,
                         },
                     }
-                )
+                ) if capsule_evidence_bool else broker_order_event_obj
                 for broker_order_event_obj in self._build_broker_order_event_list(
                     trade_obj=trade_obj,
                     account_route_str=account_route_str,
@@ -1702,7 +1703,7 @@ class IBKRSocketClient:
                             "open_order_observed_bool": bool(candidate_broker_order_id_set & open_broker_order_id_set),
                         },
                     }
-                )
+                ) if capsule_evidence_bool else broker_order_record_obj
             )
             broker_order_event_list.extend(candidate_broker_order_event_list)
             relevant_broker_order_id_set.update(candidate_broker_order_id_set)

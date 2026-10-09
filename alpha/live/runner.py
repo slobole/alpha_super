@@ -820,7 +820,8 @@ def _trace_payload_error_dict(payload_name_str: str, exception_obj: Exception) -
     }
 
 
-def _decision_plan_trace_payload_dict(decision_plan_obj: DecisionPlan) -> dict[str, object]:
+def _decision_plan_trace_payload_dict(decision_plan_obj: DecisionPlan,
+        release_obj: LiveRelease | None = None) -> dict[str, object]:
     try:
         return {
             "decision_plan_status_str": decision_plan_obj.status_str,
@@ -832,7 +833,8 @@ def _decision_plan_trace_payload_dict(decision_plan_obj: DecisionPlan) -> dict[s
             "decision_base_position_map": dict(decision_plan_obj.decision_base_position_map),
             "entry_target_weight_map_dict": dict(decision_plan_obj.entry_target_weight_map_dict),
             "full_target_weight_map_dict": dict(decision_plan_obj.full_target_weight_map_dict),
-            "target_share_map_dict": dict(decision_plan_obj.target_share_map_dict),
+            **({"target_share_map_dict": dict(decision_plan_obj.target_share_map_dict)}
+                if release_obj is not None and is_daily_reconcile_release_bool(release_obj) else {}),
             "target_weight_map": dict(decision_plan_obj.target_weight_map),
             "exit_asset_list": sorted(decision_plan_obj.exit_asset_set),
             "entry_priority_list": list(decision_plan_obj.entry_priority_list),
@@ -1703,10 +1705,6 @@ def is_vplan_execution_exception_parked(
 ) -> bool:
     if vplan_obj.vplan_id_int is None:
         return False
-    release_obj = state_store_obj.get_release_by_id(vplan_obj.release_id_str)
-    if is_daily_reconcile_release_bool(release_obj):
-        # Daily sessions keep polling and finish from actual holdings after close.
-        return False
     if not state_store_obj.has_post_execution_reconciliation_snapshot(int(vplan_obj.vplan_id_int)):
         return False
     latest_broker_snapshot_obj = state_store_obj.get_latest_broker_snapshot_for_account(
@@ -2568,7 +2566,7 @@ def expire_stale_decision_plans(
             as_of_ts=as_of_ts,
             status_str="BLOCK",
             reason_code_str="submission_window_expired",
-            payload_dict=_decision_plan_trace_payload_dict(decision_plan_obj),
+            payload_dict=_decision_plan_trace_payload_dict(decision_plan_obj, release_obj),
             trace_enabled_bool=trace_enabled_bool,
             trace_log_root_path_str=trace_log_root_path_str,
         )
@@ -2719,17 +2717,18 @@ def build_decision_plans(
                 as_of_ts=as_of_ts,
                 status_str="SKIP",
                 reason_code_str="active_decision_plan_exists",
-                payload_dict=_decision_plan_trace_payload_dict(decision_plan_obj),
+                payload_dict=_decision_plan_trace_payload_dict(decision_plan_obj, release_obj),
                 trace_enabled_bool=trace_enabled_bool,
                 trace_log_root_path_str=trace_log_root_path_str,
             )
             continue
 
         inserted_decision_plan_obj = state_store_obj.insert_decision_plan(decision_plan_obj)
-        for warning_str in inserted_decision_plan_obj.snapshot_metadata_dict.get("core5_warning_code_list", []):
-            log_event("decision_plan_warning", _build_decision_plan_log_payload_dict(
-                release_obj, inserted_decision_plan_obj, as_of_ts,
-                {"severity_str": "warning", "reason_code_str": warning_str}), log_path_str=log_path_str)
+        if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
+            for warning_str in inserted_decision_plan_obj.snapshot_metadata_dict.get("core5_warning_code_list", []):
+                log_event("decision_plan_warning", _build_decision_plan_log_payload_dict(
+                    release_obj, inserted_decision_plan_obj, as_of_ts,
+                    {"severity_str": "warning", "reason_code_str": warning_str}), log_path_str=log_path_str)
         created_decision_plan_count_int += 1
         log_event(
             "build_decision_plan_created",
@@ -2748,7 +2747,7 @@ def build_decision_plans(
             as_of_ts=as_of_ts,
             status_str="PASS",
             reason_code_str="snapshot_ready",
-            payload_dict=_decision_plan_trace_payload_dict(inserted_decision_plan_obj),
+            payload_dict=_decision_plan_trace_payload_dict(inserted_decision_plan_obj, release_obj),
             trace_enabled_bool=trace_enabled_bool,
             trace_log_root_path_str=trace_log_root_path_str,
         )
@@ -2848,7 +2847,7 @@ def build_vplans(
                 status_str="BLOCK",
                 reason_code_str=provenance_block_reason_str,
                 payload_dict={
-                    **_decision_plan_trace_payload_dict(decision_plan_obj),
+                    **_decision_plan_trace_payload_dict(decision_plan_obj, release_obj),
                     "expected_data_profile_str": release_obj.data_profile_str,
                 },
                 trace_enabled_bool=trace_enabled_bool,
@@ -2897,7 +2896,7 @@ def build_vplans(
                 as_of_ts=as_of_ts,
                 status_str="BLOCK",
                 reason_code_str="submission_window_expired",
-                payload_dict=_decision_plan_trace_payload_dict(decision_plan_obj),
+                payload_dict=_decision_plan_trace_payload_dict(decision_plan_obj, release_obj),
                 trace_enabled_bool=trace_enabled_bool,
                 trace_log_root_path_str=trace_log_root_path_str,
             )
@@ -2913,7 +2912,7 @@ def build_vplans(
                 as_of_ts=as_of_ts,
                 status_str="BLOCK",
                 reason_code_str="broker_not_ready",
-                payload_dict=_decision_plan_trace_payload_dict(decision_plan_obj),
+                payload_dict=_decision_plan_trace_payload_dict(decision_plan_obj, release_obj),
                 trace_enabled_bool=trace_enabled_bool,
                 trace_log_root_path_str=trace_log_root_path_str,
             )
@@ -2933,7 +2932,7 @@ def build_vplans(
                 status_str="BLOCK",
                 reason_code_str="account_not_visible",
                 payload_dict={
-                    **_decision_plan_trace_payload_dict(decision_plan_obj),
+                    **_decision_plan_trace_payload_dict(decision_plan_obj, release_obj),
                     "visible_account_route_list": sorted(visible_account_route_set),
                 },
                 trace_enabled_bool=trace_enabled_bool,
@@ -2954,7 +2953,7 @@ def build_vplans(
                 status_str="BLOCK",
                 reason_code_str="session_mode_mismatch",
                 payload_dict={
-                    **_decision_plan_trace_payload_dict(decision_plan_obj),
+                    **_decision_plan_trace_payload_dict(decision_plan_obj, release_obj),
                     "broker_session_mode_str": session_mode_str,
                     "release_mode_str": release_obj.mode_str,
                 },
@@ -3779,7 +3778,7 @@ def eod_snapshot(
         # pod state while a submitted execution has not been reconciled.
         # Reconcile owns fill/position truth; EOD is only the clean close-state
         # sample after execution has settled.
-        if _pod_has_unresolved_execution_bool(state_store_obj, release_obj.pod_id_str):
+        if _pod_has_unresolved_execution_bool(state_store_obj, release_obj.pod_id_str, release_obj=release_obj):
             skipped_snapshot_count_int += 1
             reason_counter_obj["unresolved_execution"] += 1
             _emit_live_trace_event(
@@ -4044,19 +4043,25 @@ def _persist_daily_execution_report(state_store_obj, broker_adapter_obj, release
 
 
 def _reconcile_daily_cycles(state_store_obj, broker_adapter_resolver_obj, as_of_ts, env_mode_str,
-        pod_id_str, log_path_str, trace_enabled_bool, trace_log_root_path_str):
+        pod_id_str, log_path_str, trace_enabled_bool, trace_log_root_path_str, decision_plan_id_list=None):
     from alpha.live.daily_reporting import claim_post_close_report_attempt, finish_post_close_report_attempt
 
     completed_count_int = 0
-    for decision_plan_obj in state_store_obj.get_pending_daily_decision_plan_list():
-        if pod_id_str is not None and decision_plan_obj.pod_id_str != pod_id_str:
-            continue
-        release_obj = state_store_obj.get_release_by_id(decision_plan_obj.release_id_str)
-        if release_obj.mode_str != env_mode_str or as_of_ts < decision_plan_obj.target_execution_timestamp_ts:
-            continue
-        assert_authorized_release(release_obj)
-        vplan_obj = state_store_obj.get_latest_vplan_for_decision(decision_plan_obj.decision_plan_id_int)
+    if decision_plan_id_list is None:
+        decision_plan_id_list = state_store_obj.get_pending_daily_decision_plan_id_list(
+            pod_id_str=pod_id_str, env_mode_str=env_mode_str)
+    for decision_plan_id_int in decision_plan_id_list:
+        decision_plan_obj = None
+        release_obj = None
         try:
+            decision_plan_obj = state_store_obj.get_decision_plan_by_id(decision_plan_id_int)
+            release_obj = state_store_obj.get_release_by_id(decision_plan_obj.release_id_str)
+            if not is_daily_reconcile_release_bool(release_obj):
+                continue
+            if release_obj.mode_str != env_mode_str or as_of_ts < decision_plan_obj.target_execution_timestamp_ts:
+                continue
+            assert_authorized_release(release_obj)
+            vplan_obj = state_store_obj.get_latest_vplan_for_decision(decision_plan_id_int)
             broker_adapter_obj = broker_adapter_resolver_obj.get_adapter(release_obj)
             collect_report_bool = False
             if vplan_obj is not None:
@@ -4145,6 +4150,11 @@ def _reconcile_daily_cycles(state_store_obj, broker_adapter_resolver_obj, as_of_
                 reason_code_str=daily_result_obj.status_str, payload_dict=payload_dict,
                 trace_enabled_bool=trace_enabled_bool, trace_log_root_path_str=trace_log_root_path_str)
         except Exception as exception_obj:
+            if decision_plan_obj is None or release_obj is None:
+                log_event("daily_cycle_load_failed", {"decision_plan_id_int": decision_plan_id_int,
+                    "pod_id_str": pod_id_str, "mode_str": env_mode_str, "severity_str": "error",
+                    "error_str": str(exception_obj)}, log_path_str=log_path_str)
+                continue
             # The daily-only helper checks the exchange close + one hour and
             # deduplicates by cycle before enqueueing any CRITICAL notification.
             from alpha.live.daily_notifications import enqueue_daily_cycle_overdue
@@ -4203,11 +4213,14 @@ def post_execution_reconcile(
         as_of_ts=as_of_ts,
         adapter_factory_func=adapter_factory_func,
     )
-    completed_vplan_count_int = _reconcile_daily_cycles(state_store_obj, broker_adapter_resolver_obj, as_of_ts,
-        env_mode_str, pod_id_str, log_path_str, trace_enabled_bool, trace_log_root_path_str)
-    submitted_vplan_list = [vplan_obj for vplan_obj in state_store_obj.get_submitted_vplan_list()
-        if (pod_id_str is None or vplan_obj.pod_id_str == pod_id_str)
-        and not is_daily_reconcile_release_bool(state_store_obj.get_release_by_id(vplan_obj.release_id_str))]
+    daily_decision_id_list = state_store_obj.get_pending_daily_decision_plan_id_list(
+        pod_id_str=pod_id_str, env_mode_str=env_mode_str)
+    if daily_decision_id_list:
+        completed_vplan_count_int = _reconcile_daily_cycles(state_store_obj, broker_adapter_resolver_obj, as_of_ts,
+            env_mode_str, pod_id_str, log_path_str, trace_enabled_bool, trace_log_root_path_str,
+            decision_plan_id_list=daily_decision_id_list)
+    submitted_vplan_list = [vplan_obj for vplan_obj in state_store_obj.get_submitted_vplan_list(exclude_daily_reconcile_bool=True)
+        if pod_id_str is None or vplan_obj.pod_id_str == pod_id_str]
     assert_authorized_vplans("post_execution_reconcile", submitted_vplan_list)
     for vplan_obj in submitted_vplan_list:
         if pod_id_str is not None and vplan_obj.pod_id_str != pod_id_str:
@@ -4687,11 +4700,13 @@ def show_decision_plan_summary(
     decision_plan_id_int: int | None = None,
     pod_id_str: str | None = None,
 ) -> dict[str, object]:
-    _load_release_list_and_sync(
+    release_list = _load_release_list_and_sync(
         releases_root_path_str,
         state_store_obj,
         pod_id_str=pod_id_str,
     )
+    daily_release_id_set = {release_obj.release_id_str for release_obj in release_list
+        if is_daily_reconcile_release_bool(release_obj)}
     if decision_plan_id_int is not None:
         decision_plan_obj_list = [state_store_obj.get_decision_plan_by_id(decision_plan_id_int)]
     elif pod_id_str is not None:
@@ -4737,7 +4752,8 @@ def show_decision_plan_summary(
                 decision_plan_obj.full_target_weight_map_dict
             ),
             "target_weight_map_dict": _sorted_float_map_dict(decision_plan_obj.target_weight_map),
-            "target_share_map_dict": _sorted_float_map_dict(decision_plan_obj.target_share_map_dict),
+            **({"target_share_map_dict": _sorted_float_map_dict(decision_plan_obj.target_share_map_dict)}
+                if decision_plan_obj.release_id_str in daily_release_id_set else {}),
             "exit_asset_list": sorted(str(asset_str) for asset_str in decision_plan_obj.exit_asset_set),
             "entry_priority_list": [str(asset_str) for asset_str in decision_plan_obj.entry_priority_list],
             "decision_base_position_map_dict": _sorted_float_map_dict(
@@ -5018,10 +5034,13 @@ def _market_date_str_from_timestamp_str(
 def _pod_has_unresolved_execution_bool(
     state_store_obj: LiveStateStore,
     pod_id_str: str,
+    *,
+    release_obj: LiveRelease | None = None,
 ) -> bool:
-    latest_plan_obj = state_store_obj.get_latest_decision_plan_for_pod(pod_id_str)
-    if latest_plan_obj is not None and is_daily_reconcile_release_bool(state_store_obj.get_release_by_id(latest_plan_obj.release_id_str)):
-        return latest_plan_obj.status_str not in DAILY_TERMINAL_STATUS_SET
+    if release_obj is not None and is_daily_reconcile_release_bool(release_obj):
+        latest_plan_obj = state_store_obj.get_latest_decision_plan_for_pod(pod_id_str)
+        if latest_plan_obj is not None:
+            return latest_plan_obj.status_str not in DAILY_TERMINAL_STATUS_SET
     latest_vplan_obj = state_store_obj.get_latest_vplan_for_pod(pod_id_str)
     return latest_vplan_obj is not None and latest_vplan_obj.status_str in ("submitted", "submitting")
 

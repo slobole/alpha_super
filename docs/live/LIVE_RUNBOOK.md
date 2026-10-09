@@ -103,6 +103,43 @@ they do not authorize a production update or broker action.
    backup passed `quick_check`. Only then proceed with the approved code update,
    validation and restart. Keep the backups until deployment verification ends.
 
+### Check Databases Previously Opened By `4624236` Before Runtime Initialization
+
+For any dev, paper or test database previously touched by `4624236`, run this
+check on a **verified, stable offline backup copy** before opening the source
+database with the restored code. Keep its writers stopped as described above.
+Even `status`, `next_due` or other inspection commands can construct
+`LiveStateStore` and initialize indexes; do not use them as this preflight.
+
+The restored `54b417f` fill key is
+`(vplan_id_int, broker_order_id_str, fill_timestamp_str, fill_amount_float, fill_price_float)`.
+The experimental execution-ID schema could retain multiple rows for one such
+tuple. Creating the restored unique index then fails. Check every affected copy:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/review/preflight_legacy_fill_duplicates.py --db C:\offline_backups\pod_core5.sqlite3 C:\offline_backups\pod_capsule.sqlite3
+if ($LASTEXITCODE -ne 0) { throw 'Fill compatibility is not clear; do not initialize these databases.' }
+```
+
+The utility uses raw SQLite in read-only immutable mode, never `LiveStateStore`,
+and prints JSON containing the table/index schema, duplicate counts and up to
+20 duplicate groups with their first/last fill row IDs. It does not migrate,
+checkpoint, deduplicate or repair anything. Adjacent `-wal`, `-shm` or `-journal`
+files, or a file change during inspection, make the input unsafe and fail the
+check. **Never delete sidecars to make the check pass**; make a verified offline
+backup through SQLite's backup API instead.
+
+- Exit **0**: every supplied copy has `status_str="no_duplicate_tuples"`.
+- Exit **1**: at least one has `status_str="duplicates_found"`; keep runtime
+  initialization stopped and preserve both executions for owner review.
+- Exit **2**: inspection is incomplete, unsupported or unsafe; keep initialization
+  stopped and resolve the reported input error.
+
+Exit zero proves only that the restored tuple key has no duplicates. It does not
+reverse the experimental schema, establish broker reconciliation, or authorize
+deployment or rollback. No automatic deletion or merging of fill evidence is
+part of this procedure.
+
 ### Short Rollback Procedure
 
 Keep all database users and automatic restarts stopped. Preserve the failed
@@ -642,6 +679,61 @@ alpha/live/releases/<user_id>/*.yaml
 ```
 
 In the current deployment model, this path should normally contain releases for one client identity only. The folder name is identity and audit context, not a signal to run multiple unrelated clients from one process.
+
+### Validate Staged Releases Before Copying Them Into The Active Root
+
+Each `serve` parses **every `*.yaml` under its configured release root**, including
+disabled releases, before applying `--pod-id`. An invalid new CORE5/capsule YAML
+can therefore stop an existing NDX/TAA serve that reads the same root. Keeping a
+new release disabled does not protect the other serves from a parsing error.
+
+Prepare new YAML files outside every active release root. Make an offline staging
+copy of the complete root that the serves will read, add the proposed files there,
+and remove replaced versions only from that staging copy. From the approved
+checkout, use its installed Python environment and actual release validators:
+
+```powershell
+@'
+import sys
+from pathlib import Path
+from alpha.live.release_manifest import (
+    load_release_list, validate_release_manifest, validate_enabled_deployment_for_mode,
+)
+
+staged_root_path_obj = Path(sys.argv[1]).resolve()
+if not staged_root_path_obj.is_dir() or not any(staged_root_path_obj.rglob("*.yaml")):
+    raise SystemExit("Staging root is missing or contains no YAML releases; stop.")
+release_list = load_release_list(str(staged_root_path_obj))
+for release_obj in release_list:
+    validate_release_manifest(release_obj)
+    print(f"PASS: {release_obj.source_path_str}")
+for mode_str in sorted({release_obj.mode_str for release_obj in release_list}):
+    validate_enabled_deployment_for_mode(release_list, mode_str)
+print(f"PASS: complete staged root ({len(release_list)} releases)")
+'@ | .\.venv\Scripts\python.exe - C:\staging\alpha_releases
+if ($LASTEXITCODE -ne 0) { throw 'Release validation failed; do not copy staged YAMLs.' }
+```
+
+This command reads YAML and runs the branch's validation functions. It opens no
+pod database, contacts no broker, and does not sync data or enable a release.
+The complete-root check catches duplicate enabled release/pod IDs and daily-pod
+account conflicts within that staged root. Enabled CORE5 LIVE releases also
+require their current account-bound qualification record. Require the final
+`PASS: complete staged root` and exit code zero before copying the reviewed new
+YAMLs into the active root. Revalidate after every staged change. This check is
+configuration validation; enablement and deployment still require approval.
+
+Each CORE5 or MR capsule pod must have its **own dedicated IBKR account/subaccount**
+and full-account budget (`execution.pod_budget_fraction_float: 1.0`). Do not share that account
+with NDX, TAA, another daily pod, or another independently managed strategy.
+Inventory all running serves, scheduled tasks and broker clients, including
+separate release roots: assign a **globally unique broker client ID to each
+concurrent process connecting to the same TWS/IB Gateway session**. Check both
+YAML `broker.client_id_int` (or flat `broker_client_id_int`) and command-line
+`--broker-client-id` overrides.
+Cross-serve client-ID uniqueness is an operator requirement; the release
+validator does not enforce it. Separate `--pod-id` values do not isolate broker
+connections that reuse the same client ID.
 
 Read a release file like an operating card:
 

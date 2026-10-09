@@ -266,7 +266,7 @@ def test_old_decision_database_restarts_without_altering_existing_intents(tmp_pa
     state_store_obj = LiveStateStore(db_path_str)
     decision_plan_obj = state_store_obj.insert_decision_plan(replace(decision_plan_obj, target_share_map_dict={}))
     with sqlite3.connect(db_path_str) as connection_obj:
-        assert "target_share_json_str" not in {row_tuple[1] for row_tuple in connection_obj.execute("PRAGMA table_info(decision_plan)")}
+        assert "target_share_json_str" in {row_tuple[1] for row_tuple in connection_obj.execute("PRAGMA table_info(decision_plan)")}
     migrated_store_obj = LiveStateStore(db_path_str)
     restored_plan_obj = migrated_store_obj.get_decision_plan_by_id(decision_plan_obj.decision_plan_id_int)
     assert restored_plan_obj.target_share_map_dict == {}
@@ -282,7 +282,7 @@ def test_operator_decision_display_and_trace_show_explicit_parking_target(tmp_pa
     state_store_obj = LiveStateStore(str(tmp_path / "display.sqlite3"))
     state_store_obj.upsert_release(release_obj)
     decision_plan_obj = state_store_obj.insert_decision_plan(decision_plan_obj)
-    monkeypatch.setattr(runner, "_load_release_list_and_sync", lambda *argument_tuple, **keyword_dict: [])
+    monkeypatch.setattr(runner, "_load_release_list_and_sync", lambda *argument_tuple, **keyword_dict: [release_obj])
     detail_dict = runner.show_decision_plan_summary(
         state_store_obj, decision_plan_obj.signal_timestamp_ts, str(tmp_path),
         decision_plan_id_int=decision_plan_obj.decision_plan_id_int,
@@ -291,4 +291,4 @@ def test_operator_decision_display_and_trace_show_explicit_parking_target(tmp_pa
     display_str = runner._render_decision_plan_detail_str(detail_dict)
     assert "BIL | shares=400" in display_str
     assert "- Targets: none" not in display_str
-    assert runner._decision_plan_trace_payload_dict(decision_plan_obj)["target_share_map_dict"] == {"BIL": 400.0}
+    assert runner._decision_plan_trace_payload_dict(decision_plan_obj, release_obj)["target_share_map_dict"] == {"BIL": 400.0}

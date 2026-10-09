@@ -256,6 +256,9 @@ def _snapshot_client_obj(monkeypatch, open_trade_list, completed_trade_list):
         def reqOpenOrders(self):
             return open_trade_list
 
+        def reqAllOpenOrders(self):
+            return open_trade_list
+
         def reqCompletedOrders(self, apiOnly):
             assert apiOnly is False
             return completed_trade_list
@@ -275,14 +278,14 @@ def _snapshot_client_obj(monkeypatch, open_trade_list, completed_trade_list):
 
 
 @pytest.mark.parametrize("source_str", ["open_order", "completed_order"])
-def test_public_order_refresh_preserves_record_and_event_source(monkeypatch, source_str):
+def test_capsule_order_refresh_preserves_record_and_event_source(monkeypatch, source_str):
     trade_obj = _snapshot_trade_obj(1)
     socket_client_obj = _snapshot_client_obj(
         monkeypatch, [trade_obj] if source_str == "open_order" else [],
         [trade_obj] if source_str == "completed_order" else [],
     )
     record_list, event_list, fill_list = socket_client_obj.get_recent_order_state_snapshot(
-        "SIM_pod", datetime(2024, 1, 3, 14, 0, tzinfo=UTC), submission_key_str="batch",
+        "SIM_pod", datetime(2024, 1, 3, 14, 0, tzinfo=UTC), submission_key_str="batch", capsule_evidence_bool=True,
     )
 
     assert len(record_list) == len(event_list) == 1
@@ -300,12 +303,12 @@ def test_public_order_refresh_preserves_record_and_event_source(monkeypatch, sou
 
 
 @pytest.mark.parametrize("log_bool", [False, True])
-def test_public_order_refresh_duplicate_open_evidence_survives_completed_precedence(monkeypatch, log_bool):
+def test_capsule_order_refresh_duplicate_open_evidence_survives_completed_precedence(monkeypatch, log_bool):
     open_trade_list = [_snapshot_trade_obj(1, status_str="Submitted", log_bool=log_bool)]
     completed_trade_list = [_snapshot_trade_obj(1, log_bool=log_bool)]
     socket_client_obj = _snapshot_client_obj(monkeypatch, open_trade_list, completed_trade_list)
     record_list, event_list, _ = socket_client_obj.get_recent_order_state_snapshot(
-        "SIM_pod", datetime(2024, 1, 3, 14, 0, tzinfo=UTC), submission_key_str="batch",
+        "SIM_pod", datetime(2024, 1, 3, 14, 0, tzinfo=UTC), submission_key_str="batch", capsule_evidence_bool=True,
     )
 
     assert len(record_list) == 1
@@ -318,7 +321,7 @@ def test_public_order_refresh_duplicate_open_evidence_survives_completed_precede
 
     open_trade_list.clear()
     later_record_list, _, _ = socket_client_obj.get_recent_order_state_snapshot(
-        "SIM_pod", datetime(2024, 1, 3, 14, 0, tzinfo=UTC), submission_key_str="batch",
+        "SIM_pod", datetime(2024, 1, 3, 14, 0, tzinfo=UTC), submission_key_str="batch", capsule_evidence_bool=True,
     )
     assert later_record_list[0].raw_payload_dict["open_order_observed_bool"] is False
     assert later_record_list[0].raw_payload_dict["snapshot_source_str"] == "completed_order"
