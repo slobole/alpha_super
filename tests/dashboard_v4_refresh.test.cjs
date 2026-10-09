@@ -171,13 +171,15 @@ function environment_obj(valid_ms = 120000, initial_latency_ms = 0, clock_timest
       return {nextNode: () => node_list[node_int++] || null};
     },
   };
-  const window_obj = {addEventListener: document_obj.addEventListener};
+  const window_obj = {addEventListener: document_obj.addEventListener, setTimeout: () => 0};
+  const clipboard_list = [];
   vm.runInNewContext(source_str, {
     document: document_obj,
     window: window_obj,
     Date: {now: () => wall_ms, parse: Date.parse}, performance: {now: () => initial_latency_ms},
     NodeFilter: {SHOW_TEXT: 4},
     CustomEvent: class { constructor(type_str) { this.type = type_str; } },
+    navigator: {clipboard: {writeText: (text_str) => { clipboard_list.push(text_str); return Promise.resolve(); }}},
     setInterval: (handler_fn) => { timer_fn = handler_fn; },
   });
   return {
@@ -192,6 +194,7 @@ function environment_obj(valid_ms = 120000, initial_latency_ms = 0, clock_timest
     },
     select: (selection_obj) => { window_obj.getSelection = () => selection_obj; },
     hide: (hidden_bool) => { document_obj.hidden = hidden_bool; },
+    clipboard_list,
     focus: (element_obj) => { document_obj.activeElement = element_obj; },
     replace: (remaining_ms = 120000, next_clock_str) => {
       current_obj.shell_obj.isConnected = false;
@@ -1152,4 +1155,20 @@ test('a failed own-panel refresh marks the panel itself as behind', () => {
   assert.equal(panel_obj.getAttribute('data-own-failed'), 'true');
   assert.equal(status_obj.textContent, '· Update failed · last 09:41:07 ET');
   assert.equal(env_obj.current_obj.shell_obj.getAttribute('data-refresh-degraded'), null);
+});
+
+test('a Do-next chip copies its exact command and says so', async () => {
+  const env_obj = environment_obj();
+  const chip_obj = element_obj('show_vplan');
+  chip_obj.setAttribute('data-copy-command', "& 'uv' 'run' 'python' '-m' 'alpha.live.runner' 'show_vplan'");
+  chip_obj.closest = (selector_str) => (selector_str === '[data-copy-command]' ? chip_obj : null);
+  env_obj.fire('click', {target: chip_obj});
+  await Promise.resolve(); await Promise.resolve();
+  assert.deepEqual(env_obj.clipboard_list, ["& 'uv' 'run' 'python' '-m' 'alpha.live.runner' 'show_vplan'"]);
+  assert.equal(chip_obj.getAttribute('data-copied'), 'true');
+  // Clicks elsewhere copy nothing.
+  const other_obj = element_obj('x');
+  other_obj.closest = () => null;
+  env_obj.fire('click', {target: other_obj});
+  assert.equal(env_obj.clipboard_list.length, 1);
 });

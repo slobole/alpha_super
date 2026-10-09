@@ -23,6 +23,7 @@ from alpha.live.dashboard_v4.activity_data import load_activity_source_dict
 from alpha.live.dashboard_v4.activity_cycles import build_activity_cycles_dict
 from alpha.live.dashboard_v4.console import build_console_page_dict, load_console_pod_list, resolve_console_log_path_str
 from alpha.live.dashboard_v4.console_data import build_console_download_str, read_console_tail_dict
+from alpha.live.dashboard_v4.next_commands import attach_next_command_list
 from alpha.live.dashboard_v4.system import build_system_page_dict, system_scope_matches_bool
 from alpha.live.dashboard_v4.system_data import load_system_source_dict
 from alpha.live.dashboard_v4.tools import build_tools_page_dict, resolve_tools_target_obj
@@ -217,6 +218,8 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             return {"overview_dict": overview_dict, "positions_page_dict": positions_page_dict}
         if pod_id_str is None:
             finalize_system_dict(overview_dict, workspace_dict)
+            attach_next_command_list(overview_dict["attention_list"], workspace_dict, provider_obj,
+                demo_bool=demo_bool, as_of_ts=clock_fn())
             return {"overview_dict": overview_dict}
         if not any(item_dict["pod_id_str"] == pod_id_str for item_dict in overview_dict["pod_list"]):
             abort(404)
@@ -286,6 +289,9 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         finalize_system_dict(overview_dict, workspace_dict)
         pod_page_dict = build_pod_page_dict(overview_dict, source_dict, pod_finance_dict,
             pod_id_str=pod_id_str, as_of_ts=clock_fn(), tab_str=tab_str)
+        if pod_page_dict["attention_dict"] and not pod_page_dict["historical_bool"]:
+            attach_next_command_list([pod_page_dict["attention_dict"]], workspace_dict, provider_obj,
+                demo_bool=demo_bool, as_of_ts=clock_fn())
         selected_cycle_str = (source_dict.get("selected_cycle_dict") or {}).get("cycle_key_str") or cycle_str
         def pod_url_str(**options_dict):
             return url_for("pod", pod_id_str=pod_id_str, period=options_dict.get("period", period_str),

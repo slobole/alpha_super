@@ -174,6 +174,11 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
                 "title_str": "State DB unavailable." if database_failed_bool else (required_dict.get("label_str") or cycle_dict["now_str"]) if action_required_bool else cycle_dict["now_str"],
                 "detail_str": "Cycle evidence cannot be read." if database_failed_bool else (required_dict.get("reason_str") or required_dict.get("detail_str") or "") if action_required_bool else cycle_dict["now_detail_str"],
                 "age_str": age_str,
+                "kind_str": "database" if database_failed_bool else "action" if action_required_bool else "cycle",
+                "step_str": next((step_dict["label_str"] for step_dict in cycle_dict["step_dict_list"]
+                    if step_dict["state_str"] in {"Failed", "Late"}), ""),
+                "inspect_str": required_dict.get("inspect_command_name_str") or "",
+                "next_action_str": row_dict.get("next_action_str") or "",
             })
             if action_required_bool and not database_failed_bool:
                 attention_list[-1].update(_deadline_dict(row_dict, as_of_ts))
@@ -197,7 +202,7 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
                     scheduler_attention_dict["state_str"] = "fail"
                 attention_list.remove(existing_dict)
             last_seen_ts = parse_timestamp_ts(scheduler_dict.get("last_seen_timestamp_str"))
-            scheduler_attention_dict.update(pod_id_str=pod_id_str, pod_name_str=name_str,
+            scheduler_attention_dict.update(pod_id_str=pod_id_str, pod_name_str=name_str, kind_str="scheduler",
                 age_str=_duration_str((as_of_ts - last_seen_ts).total_seconds()) if last_seen_ts else "—",
                 check_command_str=scheduler_dict.get("check_command_str") or "")
             attention_list.append(scheduler_attention_dict)
@@ -213,7 +218,8 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
                 existing_dict["scheduler_note_str"] = scheduler_note_str(scheduler_dict)
             elif hold_dict:
                 last_seen_ts = parse_timestamp_ts(scheduler_dict.get("last_seen_timestamp_str"))
-                hold_dict.update(pod_id_str=pod_id_str, pod_name_str=name_str,
+                hold_dict.update(pod_id_str=pod_id_str, pod_name_str=name_str, kind_str="hold",
+                    reason_code_str=scheduler_dict.get("reason_code_str") or "",
                     age_str=_duration_str((as_of_ts - last_seen_ts).total_seconds()) if last_seen_ts and last_seen_ts <= as_of_ts else "—")
                 attention_list.append(hold_dict)
                 pod_list[-1].update(state_str="late", pill_str="Needs review", now_str=hold_dict["title_str"],

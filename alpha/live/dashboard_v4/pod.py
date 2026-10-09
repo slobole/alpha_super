@@ -281,7 +281,8 @@ def build_pod_page_dict(overview_dict, source_dict, finance_dict, *, pod_id_str,
         # The worse problem leads; a hold stays visible as the scheduler note.
         if issue_bool and (not attention_dict or STATE_RANK_DICT[cycle_state_str] < STATE_RANK_DICT.get(attention_dict.get("state_str"), 9)):
             replaced_dict = attention_dict
-            attention_dict = {"state_str": cycle_state_str, "title_str": issue_title_str, "detail_str": issue_detail_str}
+            attention_dict = {"state_str": cycle_state_str, "title_str": issue_title_str, "detail_str": issue_detail_str,
+                "pod_id_str": pod_id_str, "kind_str": "cycle", "step_str": failed_step_dict.get("label_str", "")}
             if scheduler_attention_dict:
                 attention_dict.update(console_bool=True, check_command_str=replaced_dict.get("check_command_str") or "",
                     scheduler_note_str=scheduler_attention_dict["title_str"] + ". " + scheduler_attention_dict["detail_str"])

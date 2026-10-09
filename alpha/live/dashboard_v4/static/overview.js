@@ -318,6 +318,44 @@
     if (match_list.length === 1) match_list[0].focus({preventScroll: true});
   }
 
+  function copy_by_selection_bool(text_str) {
+    // Older copy path; often allowed where the Clipboard API is denied.
+    try {
+      const area_obj = document.createElement('textarea');
+      area_obj.value = text_str;
+      area_obj.setAttribute('readonly', '');
+      area_obj.style.position = 'fixed';
+      area_obj.style.opacity = '0';
+      document.body.append(area_obj);
+      area_obj.select();
+      const copied_bool = document.execCommand('copy');
+      area_obj.remove();
+      return copied_bool;
+    } catch (error_obj) {
+      return false;
+    }
+  }
+
+  function copy_text(text_str) {
+    // Clipboard API, then the selection copy, then show the command to copy by hand.
+    const api_promise = navigator.clipboard && navigator.clipboard.writeText
+      ? navigator.clipboard.writeText(text_str) : Promise.reject(new Error('no clipboard'));
+    return api_promise.then(() => 'true', () => {
+      if (copy_by_selection_bool(text_str)) return 'true';
+      if (typeof window.prompt === 'function') window.prompt('Copy this command (Ctrl+C), then close:', text_str);
+      return 'shown';
+    });
+  }
+
+  document.addEventListener('click', (event_obj) => {
+    const button_obj = event_obj.target && event_obj.target.closest && event_obj.target.closest('[data-copy-command]');
+    if (!button_obj) return;
+    copy_text(button_obj.getAttribute('data-copy-command')).then((state_str) => {
+      button_obj.setAttribute('data-copied', state_str);
+      window.setTimeout(() => button_obj.removeAttribute('data-copied'), 1600);
+    });
+  });
+
   document.addEventListener('input', (event_obj) => {
     if (event_obj.target && event_obj.target.getAttribute('data-positions-search') !== null) {
       filter_positions(document.getElementById('overview-shell'));

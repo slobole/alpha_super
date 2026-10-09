@@ -18,7 +18,8 @@
 
 {% if pod_page_dict.attention_dict %}<section class="issue" aria-label="Pod needs attention"><div><h3>{{ mark(pod_page_dict.attention_dict.state_str) }}<span data-pod-now>{{ pod_page_dict.attention_dict.title_str }}</span></h3><p data-now-detail>{{ pod_page_dict.attention_dict.detail_str }}{% if pod_page_dict.attention_dict.deadline_str %} <span class="deadline{{ ' is-urgent' if pod_page_dict.attention_dict.deadline_urgent_bool else '' }}">{{ pod_page_dict.attention_dict.deadline_str }}</span>{% endif %}</p>
 {% if pod_page_dict.attention_dict.scheduler_note_str %}<p data-status-detail>{{ pod_page_dict.attention_dict.scheduler_note_str }}</p>{% endif %}
-{% if pod_page_dict.attention_dict.check_command_str %}<details class="scheduler-check"><summary>Check scheduler</summary><p>Check the existing process before starting another.</p><code data-selection-key="scheduler-check">{{ pod_page_dict.attention_dict.check_command_str }}</code><p>Copy into the VPS terminal. This check may update local release metadata.</p></details>{% endif %}
+{% set command_owner_dict = pod_page_dict.attention_dict %}{% if command_owner_dict.next_command_list %}<p class="issue-commands">{% include '_next_commands.html' %}</p>{% endif %}
+{% if pod_page_dict.attention_dict.check_command_str and not pod_page_dict.attention_dict.next_command_list %}<details class="scheduler-check"><summary>Check scheduler</summary><p>Check the existing process before starting another.</p><code data-selection-key="scheduler-check">{{ pod_page_dict.attention_dict.check_command_str }}</code><p>Copy into the VPS terminal. This check may update local release metadata.</p></details>{% endif %}
 </div></section>{% endif %}
 
 <section class="panel" aria-label="Selected cycle">

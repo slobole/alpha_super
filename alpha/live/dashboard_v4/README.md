@@ -454,6 +454,20 @@ falls back to real service sources.
   production only copies commands, and badges the five commands that can send
   orders.
 
+## Do next commands (2026-10-09)
+
+Each attention item on the Overview, and the issue box on the current Pod page,
+offers up to three copy-only commands that fit the problem
+(`next_commands.py`). They come from the Tools catalog for the same Pod, so the
+paths, IDs and PowerShell quoting are identical to the Tools page; nothing runs
+from the dashboard. Order is always READ, then INSPECT, then ACTIVE; commands
+that can send orders are marked. If the Pod scope cannot be verified, or no
+command fits, nothing is suggested. `submit_vplan` appears only with a verified
+ready plan ID. A scheduler problem first offers `serve_running`, a READ process
+check for that exact Pod (one line = running, none = stopped, two = duplicate).
+A historical cycle never gets suggestions for the latest cycle. Copy tries the
+Clipboard API, then a selection copy, then shows the command to copy by hand.
+
 ## Verification
 
 ```powershell
