@@ -65,11 +65,16 @@ alpha/live/releases/<client_id>/*.yaml
 ## Wired Templates
 
 CORE5 uses a disabled `live` template with a dedicated USD margin account,
-full account budget `1.0`, and disabled submission. Enabling requires an
-account-bound, time-valid qualification record; each submission also checks
-current margin and incremental DBC short availability. For local forward tests,
-use `incubation` and a `SIM_` route; `paper` requires its own paper account.
+full account budget `1.0`, and disabled submission. Enabling it in `live`
+requires `params.margin_account_confirmed_bool: true` (the DBC short needs a
+margin account); each submission also checks current margin and incremental
+DBC short availability. For local forward tests, use `incubation` and a `SIM_`
+route; `paper` requires its own paper account.
 See [CORE5 wiring and deployment prerequisites](../CORE5_WIRING_20261005.md).
+
+The MR capsule templates (`pod_mr_*`) ship as disabled `paper` releases. `live`
+is allowed (owner decision 2026-10-10) with the same rule: an enabled `paper` or
+`live` capsule release requires `params.margin_account_confirmed_bool: true`.
 
 | Template | Wired strategy | Data profile |
 |---|---|---|

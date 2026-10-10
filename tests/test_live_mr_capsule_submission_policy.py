@@ -105,18 +105,38 @@ def test_capsule_checks_all_client_open_orders_before_funding(capsule_case, monk
     assert not broker_adapter_obj.submitted_order_request_list
 
 
+class _ReachedBrokerResolution(Exception):
+    pass
+
+
+def _run_live_operation(operation_str, state_store_obj, broker_adapter_obj, runner_kwarg_dict):
+    if operation_str == "submit":
+        runner_module.submit_ready_vplans(state_store_obj, broker_adapter_obj, SUBMIT_TIMESTAMP_TS, "live", False, **runner_kwarg_dict)
+    elif operation_str == "reconcile":
+        runner_module.post_execution_reconcile(state_store_obj, broker_adapter_obj, RECONCILE_TIMESTAMP_TS, "live", **runner_kwarg_dict)
+    else:
+        runner_module.build_vplans(state_store_obj, broker_adapter_obj, SUBMIT_TIMESTAMP_TS, "live", **runner_kwarg_dict)
+
+
 @pytest.mark.parametrize("operation_str", ["submit", "reconcile", "build"])
-def test_persisted_capsule_live_refused_before_any_broker_resolution(capsule_case, monkeypatch, operation_str):
+def test_persisted_capsule_live_with_margin_attestation_reaches_broker_resolution(capsule_case, monkeypatch, operation_str):
+    # LIVE is allowed (owner decision 2026-10-10): no mode lock before the broker step.
     state_store_obj, broker_adapter_obj, release_obj, vplan_obj, runner_kwarg_dict, _ = capsule_case
     state_store_obj.upsert_release(replace(release_obj, mode_str="live", account_route_str="U_TEST"))
-    monkeypatch.setattr(runner_module, "_coerce_broker_adapter_resolver_obj", lambda **_: pytest.fail("LIVE lock happened after broker resolution"))
-    with pytest.raises(ValueError, match="MR capsule LIVE trading is locked"):
-        if operation_str == "submit":
-            runner_module.submit_ready_vplans(state_store_obj, broker_adapter_obj, SUBMIT_TIMESTAMP_TS, "live", False, **runner_kwarg_dict)
-        elif operation_str == "reconcile":
-            runner_module.post_execution_reconcile(state_store_obj, broker_adapter_obj, RECONCILE_TIMESTAMP_TS, "live", **runner_kwarg_dict)
-        else:
-            runner_module.build_vplans(state_store_obj, broker_adapter_obj, SUBMIT_TIMESTAMP_TS, "live", **runner_kwarg_dict)
+    def reached_fn(**_):
+        raise _ReachedBrokerResolution()
+    monkeypatch.setattr(runner_module, "_coerce_broker_adapter_resolver_obj", reached_fn)
+    with pytest.raises(_ReachedBrokerResolution):
+        _run_live_operation(operation_str, state_store_obj, broker_adapter_obj, runner_kwarg_dict)
+
+
+@pytest.mark.parametrize("operation_str", ["submit", "build"])
+def test_persisted_capsule_live_without_margin_attestation_refused_before_broker_resolution(capsule_case, monkeypatch, operation_str):
+    state_store_obj, broker_adapter_obj, release_obj, vplan_obj, runner_kwarg_dict, _ = capsule_case
+    state_store_obj.upsert_release(replace(release_obj, mode_str="live", account_route_str="U_TEST", params_dict={}))
+    monkeypatch.setattr(runner_module, "_coerce_broker_adapter_resolver_obj", lambda **_: pytest.fail("Release check happened after broker resolution"))
+    with pytest.raises(ValueError, match="explicitly confirmed margin account"):
+        _run_live_operation(operation_str, state_store_obj, broker_adapter_obj, runner_kwarg_dict)
 
 
 def test_capsule_daily_reconcile_runs_even_when_fill_reporting_is_unavailable(capsule_case, monkeypatch):

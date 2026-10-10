@@ -417,8 +417,7 @@ def test_distinct_cycles_for_same_pod_are_both_delivered_once(tmp_path):
 
 
 def test_watchdog_live_pending_count_tracks_durable_retry_then_success(monkeypatch, tmp_path, capsys):
-    # Historical LIVE alerts can remain in a DB although new capsule LIVE
-    # releases are locked. Monitoring must still deliver those saved events.
+    # Saved LIVE capsule alerts are delivered and counted like paper ones.
     db_path_obj = _create_alert_db(tmp_path, account_route_str="U_ONE", mode_str="live")
     summary_dict = _capsule_summary_dict(db_path_obj, account_route_str="U_ONE", mode_str="live")
     for delivered_bool, expected_pending_int in [(False, 1), (True, 0)]:

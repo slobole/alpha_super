@@ -45,8 +45,8 @@ class CapsuleHoldingMismatchError(ValueError):
 def validate_mr_capsule_release(release_obj: LiveRelease) -> None:
     if release_obj.strategy_import_str not in MR_CAPSULE_STRATEGY_IMPORT_TUPLE:
         raise ValueError("Unsupported MR capsule strategy identity.")
-    if release_obj.mode_str == "live":
-        raise ValueError("MR capsule LIVE trading is locked pending explicit owner approval; use paper or incubation.")
+    # LIVE is allowed (owner decision 2026-10-10). An enabled paper or LIVE
+    # release still needs its margin-account attestation below.
     hpi_bool = "hpi_vote" in release_obj.strategy_import_str
     required_field_dict = {
         "data_profile_str": MR_CAPSULE_PROFILE_TUPLE[int(hpi_bool)],

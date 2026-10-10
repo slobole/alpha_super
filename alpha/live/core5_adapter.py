@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import datetime
 
 import pandas as pd
 import exchange_calendars as exchange_calendar_module
@@ -33,36 +33,19 @@ def validate_core5_release(release_obj: LiveRelease, *, require_live_qualificati
     for field_str, expected_value_obj in required_field_dict.items():
         if getattr(release_obj, field_str) != expected_value_obj:
             raise ValueError(f"CORE5 requires {field_str}={expected_value_obj!r}.")
-    if set(release_obj.params_dict) - {"capital_base_float", "core5_live_qualification_dict"}:
+    if set(release_obj.params_dict) - {"capital_base_float", "margin_account_confirmed_bool", "core5_live_qualification_dict"}:
         raise ValueError("CORE5 uses the approved default strategy parameters; overrides require separate parity qualification.")
     if require_live_qualification_bool and release_obj.mode_str == "live" and release_obj.enabled_bool:
-        # Operator evidence is a deployment prerequisite, not current borrow or
-        # funding proof. runner also requires fresh core5_broker account-wide,
-        # USD cash, margin previews and incremental shortability before submit.
-        qualification_dict = release_obj.params_dict.get("core5_live_qualification_dict")
-        if not isinstance(qualification_dict, dict):
-            raise ValueError("CORE5 LIVE requires an account-bound qualification record.")
-        for field_str in ("release_id_str", "account_route_str"):
-            if qualification_dict.get(field_str) != getattr(release_obj, field_str):
-                raise ValueError(f"CORE5 LIVE qualification {field_str} does not match this release.")
-        for field_str in (
-            "margin_account_confirmed_bool", "dbc_borrow_and_recall_policy_confirmed_bool",
-            "forward_execution_qualified_bool", "operator_approved_bool",
-        ):
-            if qualification_dict.get(field_str) is not True:
-                raise ValueError(f"CORE5 LIVE qualification requires {field_str}=true.")
-        if not isinstance(qualification_dict.get("evidence_reference_str"), str) or not qualification_dict["evidence_reference_str"].strip():
-            raise ValueError("CORE5 LIVE qualification requires an evidence reference.")
-        try:
-            approved_timestamp_ts = datetime.fromisoformat(qualification_dict["approved_at_str"])
-            expiry_timestamp_ts = datetime.fromisoformat(qualification_dict["expires_at_str"])
-        except (KeyError, TypeError, ValueError) as exception_obj:
-            raise ValueError("CORE5 LIVE qualification requires valid approval/expiry timestamps.") from exception_obj
-        if (
-            approved_timestamp_ts.tzinfo is None or expiry_timestamp_ts.tzinfo is None
-            or not approved_timestamp_ts <= datetime.now(UTC) < expiry_timestamp_ts
-        ):
-            raise ValueError("CORE5 LIVE qualification is future-dated, expired or lacks a timezone.")
+        # Owner decision 2026-10-10: no qualification record or expiry gate for
+        # LIVE. The DBC short still needs a margin account, attested like the
+        # capsule's (params.margin_account_confirmed_bool); a legacy
+        # core5_live_qualification_dict may carry the same flag. runner still
+        # requires fresh account-wide cash, margin previews and shortability
+        # before every submit.
+        legacy_record_obj = release_obj.params_dict.get("core5_live_qualification_dict")
+        legacy_margin_bool = isinstance(legacy_record_obj, dict) and legacy_record_obj.get("margin_account_confirmed_bool") is True
+        if release_obj.params_dict.get("margin_account_confirmed_bool") is not True and not legacy_margin_bool:
+            raise ValueError("CORE5 LIVE requires margin_account_confirmed_bool: true (the DBC short needs a margin account).")
 
 
 def is_core5_decision_bool(decision_plan_obj: DecisionPlan | None) -> bool:

@@ -1,5 +1,5 @@
 # Disabled deployment template. This is not a deployed release.
-# Dedicated USD margin account only; fill qualification from real evidence before enabling.
+# Dedicated USD margin account only; set margin_account_confirmed_bool: true once confirmed.
 identity:
   release_id: your_user.core5.daily_moo.v1
   user_id: your_user
@@ -17,16 +17,7 @@ strategy:
   strategy_import_str: strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5
   data_profile_str: norgate_eod_core5
   params:
-    core5_live_qualification_dict:
-      release_id_str: your_user.core5.daily_moo.v1
-      account_route_str: YOUR_CORE5_ACCOUNT
-      evidence_reference_str: ""
-      approved_at_str: ""
-      expires_at_str: ""
-      margin_account_confirmed_bool: false
-      dbc_borrow_and_recall_policy_confirmed_bool: false
-      forward_execution_qualified_bool: false
-      operator_approved_bool: false
+    margin_account_confirmed_bool: false # The DBC short needs a margin account.
 market:
   session_calendar_id_str: XNYS
 schedule:

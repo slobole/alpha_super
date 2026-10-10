@@ -855,8 +855,8 @@ This command reads YAML and runs the branch's validation functions. It opens no
 pod database, contacts no broker, and does not sync data or enable a release.
 It refuses a root that mixes daily (CORE5/MR capsule) releases with any other.
 The complete-root check catches duplicate enabled release/pod IDs and daily-pod
-account conflicts within that staged root. Enabled CORE5 LIVE releases also
-require their current account-bound qualification record. Require the final
+account conflicts within that staged root. Enabled CORE5 and MR capsule LIVE
+releases also require `params.margin_account_confirmed_bool: true`. Require the final
 `PASS: complete staged root` and exit code zero before copying the reviewed new
 YAMLs into the active root. Revalidate after every staged change. This check is
 configuration validation; enablement and deployment still require approval.

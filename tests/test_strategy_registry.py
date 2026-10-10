@@ -89,7 +89,7 @@ def test_release_manifest_allowlist_matches_the_registry():
     assert set(release_manifest.SUPPORTED_STRATEGY_IMPORT_TUPLE) == set(WIRED_IMPORT_TUPLE)
 
 
-def test_core5_is_wired_but_live_activation_requires_qualification():
+def test_core5_is_wired_and_live_activation_requires_margin_attestation():
     assert strategy_registry.tier_for(
         release_manifest.CORE5_STRATEGY_IMPORT_STR
     ) is MaturityTier.WIRED
@@ -98,10 +98,14 @@ def test_core5_is_wired_but_live_activation_requires_qualification():
         "pod_taa_adaptive_macro_core5_daily_moo.yaml.example"
     ))
     release_manifest.validate_release_manifest(release_obj)
-    with pytest.raises(ValueError, match="qualification"):
-        release_manifest.validate_release_manifest(replace(
-            release_obj, mode_str="live", account_route_str="U1234567", enabled_bool=True
-        ))
+    live_release_obj = replace(
+        release_obj, mode_str="live", account_route_str="U1234567", enabled_bool=True
+    )
+    with pytest.raises(ValueError, match="margin_account_confirmed_bool"):
+        release_manifest.validate_release_manifest(live_release_obj)
+    release_manifest.validate_release_manifest(replace(
+        live_release_obj, params_dict={"margin_account_confirmed_bool": True}
+    ))
 
 
 @pytest.mark.parametrize("strategy_import_str", PM_READY_IMPORT_TUPLE)

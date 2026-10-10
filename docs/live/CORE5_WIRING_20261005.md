@@ -99,19 +99,14 @@ was replaced only after implementing the following checks:
 ## Deployment record and physical prerequisites
 
 Use the [disabled template](release_templates/pod_taa_adaptive_macro_core5_daily_moo.yaml.example).
-An enabled live release requires `params.core5_live_qualification_dict` containing:
+An enabled live release requires `params.margin_account_confirmed_bool: true`
+(owner decision 2026-10-10 removed the earlier qualification record with its
+expiry and forward-execution fields; a legacy `core5_live_qualification_dict`
+with `margin_account_confirmed_bool: true` is still accepted). The flag is
+rechecked before submission; withdrawing it does not prevent loading the release
+or reconciling orders that were already sent.
 
-- The exact `release_id_str` and `account_route_str` being enabled.
-- `evidence_reference_str` pointing to the operator-reviewed evidence record.
-- Timezone-aware `approved_at_str` and `expires_at_str`; approval must be active
-  before new decisions/submissions. Qualification is rechecked before submission.
-  Expired/revoked qualification does not prevent loading the release or reconciling
-  orders that were already sent.
-- Explicit true values for `margin_account_confirmed_bool`,
-  `dbc_borrow_and_recall_policy_confirmed_bool`, `forward_execution_qualified_bool`
-  and `operator_approved_bool`. Strings and numeric substitutes are rejected.
-
-These are operator attestations, not automatically verified evidence contents.
+This is an operator attestation, not automatically verified evidence content.
 Do not populate them from the synthetic tests. The evidence should cover the
 intended account/route, natural forward cycles, DBC entry/cover/reversal and
 reject/reconnect behavior, observed costs, actual borrow-rate/recall procedures

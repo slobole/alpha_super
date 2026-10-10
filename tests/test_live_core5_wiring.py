@@ -32,26 +32,11 @@ def core5_price_df():
 
 @pytest.fixture
 def qualified_release_obj():
-    release_obj = replace(core5_helper.release_obj.__wrapped__(),
-        mode_str="live", account_route_str="U_CORE5_TEST", broker_port_int=7496)
-    qualification_dict = {
-        "release_id_str": release_obj.release_id_str,
-        "account_route_str": release_obj.account_route_str,
-        "evidence_reference_str": "synthetic-test-only:no-real-account-qualified",
-        "approved_at_str": "2026-01-01T00:00:00+00:00",
-        "expires_at_str": "2099-01-01T00:00:00+00:00",
-        "margin_account_confirmed_bool": True,
-        "dbc_borrow_and_recall_policy_confirmed_bool": True,
-        "forward_execution_qualified_bool": True,
-        "operator_approved_bool": True,
-    }
-    return replace(release_obj, params_dict={"core5_live_qualification_dict": qualification_dict})
-
-
-def _changed_qualification(release_obj, **change_dict):
-    qualification_dict = dict(release_obj.params_dict["core5_live_qualification_dict"])
-    qualification_dict.update(change_dict)
-    return replace(release_obj, params_dict={"core5_live_qualification_dict": qualification_dict})
+    # Enabled LIVE needs only the margin-account attestation (owner decision
+    # 2026-10-10); the old qualification record and its expiry are gone.
+    return replace(core5_helper.release_obj.__wrapped__(),
+        mode_str="live", account_route_str="U_CORE5_TEST", broker_port_int=7496,
+        params_dict={"margin_account_confirmed_bool": True})
 
 
 def _release_for_mode(release_obj, mode_str):
@@ -71,10 +56,9 @@ def _write_release_yaml(tmp_path, release_obj):
     return release_dir_path
 
 
-def _unqualified_release(release_obj, qualification_state_str):
-    return _changed_qualification(release_obj, **(
-        {"approved_at_str": "2000-01-01T00:00:00+00:00", "expires_at_str": "2001-01-01T00:00:00+00:00"}
-        if qualification_state_str == "expired" else {"operator_approved_bool": False}))
+def _unattested_release(release_obj, attestation_state_str):
+    return replace(release_obj, params_dict={} if attestation_state_str == "missing"
+        else {"margin_account_confirmed_bool": False})
 
 
 def _prepared_cycle(tmp_path, monkeypatch, release_obj, price_df, cycle_str="initialization"):
@@ -119,29 +103,31 @@ def test_disabled_live_template_is_reviewable_but_cannot_build(qualified_release
             core5_helper._state(disabled_release_obj, "2026-09-11"))
 
 
-def test_enabled_live_requires_qualification(qualified_release_obj):
+def test_enabled_live_requires_margin_attestation(qualified_release_obj):
     validate_release_manifest(qualified_release_obj)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="margin_account_confirmed_bool"):
         validate_release_manifest(replace(qualified_release_obj, params_dict={}))
 
 
-@pytest.mark.parametrize("field_str,value_obj", [
-    ("release_id_str", "another.release"), ("account_route_str", "U_ANOTHER"),
-    ("evidence_reference_str", "  "), ("margin_account_confirmed_bool", False),
-    ("dbc_borrow_and_recall_policy_confirmed_bool", False),
-    ("forward_execution_qualified_bool", False), ("operator_approved_bool", False),
-    ("operator_approved_bool", "true"), ("operator_approved_bool", 1),
-    ("approved_at_str", "2026-01-01T00:00:00"),
-    ("approved_at_str", "2100-01-01T00:00:00+00:00"),
-    ("expires_at_str", "not-a-timestamp"), ("expires_at_str", "2099-01-01T00:00:00"),
-    ("expires_at_str", "2000-01-01T00:00:00+00:00"),
-])
-def test_live_qualification_fails_closed(qualified_release_obj, field_str, value_obj):
-    with pytest.raises(ValueError):
-        validate_release_manifest(_changed_qualification(qualified_release_obj, **{field_str: value_obj}))
+@pytest.mark.parametrize("value_obj", [False, "true", 1, None])
+def test_live_margin_attestation_fails_closed(qualified_release_obj, value_obj):
+    with pytest.raises(ValueError, match="margin_account_confirmed_bool"):
+        validate_release_manifest(replace(qualified_release_obj,
+            params_dict={"margin_account_confirmed_bool": value_obj}))
 
 
-def test_qualification_does_not_admit_wrong_account_state(qualified_release_obj, core5_price_df):
+def test_legacy_qualification_record_counts_only_its_margin_flag(qualified_release_obj):
+    # Approval, evidence and expiry fields no longer gate LIVE.
+    legacy_dict = {"margin_account_confirmed_bool": True, "operator_approved_bool": False,
+        "expires_at_str": "2000-01-01T00:00:00+00:00"}
+    validate_release_manifest(replace(qualified_release_obj,
+        params_dict={"core5_live_qualification_dict": legacy_dict}))
+    with pytest.raises(ValueError, match="margin_account_confirmed_bool"):
+        validate_release_manifest(replace(qualified_release_obj, params_dict={
+            "core5_live_qualification_dict": {**legacy_dict, "margin_account_confirmed_bool": False}}))
+
+
+def test_live_release_does_not_admit_wrong_account_state(qualified_release_obj, core5_price_df):
     state_obj = replace(core5_helper._state(qualified_release_obj, "2026-09-11"),
         account_route_str="U_ANOTHER")
     with pytest.raises(ValueError):
@@ -336,16 +322,16 @@ def test_paper_submit_at_cutoff_never_requests_funding_or_claims(
     assert not broker_obj.submitted_order_request_list
 
 
-@pytest.mark.parametrize("qualification_state_str", ["expired", "revoked"])
-def test_actual_yaml_with_invalid_qualification_still_recovers_sent_cycle(
-        qualified_release_obj, core5_price_df, tmp_path, monkeypatch, qualification_state_str):
+@pytest.mark.parametrize("attestation_state_str", ["withdrawn", "missing"])
+def test_actual_yaml_without_margin_attestation_still_recovers_sent_cycle(
+        qualified_release_obj, core5_price_df, tmp_path, monkeypatch, attestation_state_str):
     store_obj, broker_obj, decision_obj, vplan_obj, runner_kwarg_dict = _prepared_cycle(
         tmp_path, monkeypatch, qualified_release_obj, core5_price_df)
     result_dict = runner.submit_ready_vplans(store_obj, broker_obj, decision_obj.submission_timestamp_ts,
         "live", False, vplan_id_int=vplan_obj.vplan_id_int, **runner_kwarg_dict)
     assert result_dict["submitted_vplan_count_int"] == 1
     release_dir_path = _write_release_yaml(tmp_path,
-        _unqualified_release(qualified_release_obj, qualification_state_str))
+        _unattested_release(qualified_release_obj, attestation_state_str))
     loaded_release_obj = load_release_list(str(release_dir_path))[0]
     assert loaded_release_obj.enabled_bool and loaded_release_obj.mode_str == "live"
     with pytest.raises(ValueError):
@@ -375,15 +361,15 @@ def test_actual_yaml_with_invalid_qualification_still_recovers_sent_cycle(
     assert restarted_store_obj.get_latest_decision_plan_for_pod(loaded_release_obj.pod_id_str).status_str == "completed"
 
 
-@pytest.mark.parametrize("qualification_state_str", ["expired", "revoked"])
-def test_actual_yaml_with_invalid_qualification_cannot_submit_ready_plan(
-        qualified_release_obj, core5_price_df, tmp_path, monkeypatch, qualification_state_str):
+@pytest.mark.parametrize("attestation_state_str", ["withdrawn", "missing"])
+def test_actual_yaml_without_margin_attestation_cannot_submit_ready_plan(
+        qualified_release_obj, core5_price_df, tmp_path, monkeypatch, attestation_state_str):
     store_obj, broker_obj, decision_obj, vplan_obj, runner_kwarg_dict = _prepared_cycle(
         tmp_path, monkeypatch, qualified_release_obj, core5_price_df)
     release_dir_path = _write_release_yaml(tmp_path,
-        _unqualified_release(qualified_release_obj, qualification_state_str))
+        _unattested_release(qualified_release_obj, attestation_state_str))
     monkeypatch.setattr(broker_obj, "get_core5_account_snapshot",
-        lambda *_argument_tuple: pytest.fail("Invalid qualification reached account preflight"))
+        lambda *_argument_tuple: pytest.fail("Missing margin attestation reached account preflight"))
     result_dict = runner.submit_ready_vplans(store_obj, broker_obj, decision_obj.submission_timestamp_ts,
         "live", False, vplan_id_int=vplan_obj.vplan_id_int,
         releases_root_path_str=str(release_dir_path), **runner_kwarg_dict)

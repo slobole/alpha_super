@@ -216,10 +216,7 @@ def test_release_template_parses_and_starts_disabled(template_path_obj: Path):
     assert release_obj.pod_budget_fraction_float == expected_budget_float
     if core5_template_bool:
         assert "capital_base_float" not in release_obj.params_dict
-        qualification_dict = release_obj.params_dict["core5_live_qualification_dict"]
-        assert qualification_dict["operator_approved_bool"] is False
-        assert qualification_dict["forward_execution_qualified_bool"] is False
-        assert qualification_dict["evidence_reference_str"] == ""
+        assert release_obj.params_dict["margin_account_confirmed_bool"] is False
     else:
         assert release_obj.params_dict["capital_base_float"] == 100000.0
 
