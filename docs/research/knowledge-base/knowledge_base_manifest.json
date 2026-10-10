@@ -551,6 +551,16 @@
       "sha256": "73c01b0ffec02c742c539d1220961622c7c58d6d71d87efbbcbbd6385e17625f"
     },
     {
+      "bytes": 233376,
+      "path": "assets/nick_radge_strategies_study/01-02_equity_drawdown_2007_2026.png",
+      "sha256": "cc1a81459f6c9b5a5e93b9a240837a0f39bef8662994efb42e1da32e1fa710c9"
+    },
+    {
+      "bytes": 98847,
+      "path": "assets/nick_radge_strategies_study/02-01_strategy_map_sharpe_vs_drawdown.png",
+      "sha256": "bab5901abc6e292d490f1067b4c5b8aeb310e7e01172fac07ab50ed3ad832c7a"
+    },
+    {
       "bytes": 155661,
       "path": "assets/overnight_effect_corrected_full_study/01-cost_sensitivity.png",
       "sha256": "f14138fd1bd35fd776281c22883832c7fd94e81c422b892365287ada27cfaf72"
@@ -779,6 +789,16 @@
       "bytes": 53645,
       "path": "assets/quick5_vol_normalized_signal_positioning_study/02-ic_and_risk.png",
       "sha256": "3c0e44b7431d34f907633e28234d0f49314869795522335b4b680d022cb4ab06"
+    },
+    {
+      "bytes": 253161,
+      "path": "assets/radge_momentum_improvement_study/01-01_equity_drawdown_base_pick_controls.png",
+      "sha256": "62ee4f6df8fdaa4a7c604046482bf31c930883660b211bc2837c1f9cf5b92d91"
+    },
+    {
+      "bytes": 61951,
+      "path": "assets/radge_momentum_improvement_study/02-02_discovery_vs_holdout_round1.png",
+      "sha256": "d0cd5c1a201ef080201c725e9da1b128c5a3d5d42bcca75b128af5694d9f0eb3"
     },
     {
       "bytes": 125356,
@@ -1461,9 +1481,9 @@
       "sha256": "f7662b2a1e1ff39e9624333541b58aec95f69aa37a760b43de70c638b8a54fbf"
     },
     {
-      "bytes": 176726,
+      "bytes": 181074,
       "path": "features.md",
-      "sha256": "8c3158a7d25396ab4370dbfb1d7057a6914bbcbeba86f0af726869c9fdaa0119"
+      "sha256": "fa2d50f751afc63c74926065302fa13d624475f279d4defc23f09538cca702de"
     },
     {
       "bytes": 2639,
@@ -1471,14 +1491,14 @@
       "sha256": "7eeaa19f7fa717dd8dfb5c6eeb22459c1f5da3a75ba1a15da4aff6ac45a5afb5"
     },
     {
-      "bytes": 19032,
+      "bytes": 17845,
       "path": "index.md",
-      "sha256": "ab9bd03e2009781420bf3cfc5841acf40d4d024e72ac871d6c00452bda2803b2"
+      "sha256": "7ab9cda2d11b6c607eed6e7c7b83b9061a80d85d7c60c00e4649164f2557840c"
     },
     {
-      "bytes": 2231364,
+      "bytes": 2258676,
       "path": "knowledge_base_registry.json",
-      "sha256": "060002a03faf8a132b86b829bf1b61dd8544c808b47a0a6a49668ed54c08304e"
+      "sha256": "fa3851faa4d4bd61cf96c65ec35f196c73fa5e3f8d718c82bc8abcaae0a390e2"
     },
     {
       "bytes": 1144,
@@ -1486,9 +1506,9 @@
       "sha256": "2be3964878e488a5d2c30e77f74ad65d699c60773d3e2c61cdbb7c02e63f1e14"
     },
     {
-      "bytes": 131127,
+      "bytes": 132746,
       "path": "sources.md",
-      "sha256": "d69be6357edeb736c852e3e3c3c2ab143941c3ae375ec091faf1d19bbd5bb205"
+      "sha256": "288d70f6f14cfdb15a30eed5556cc031059c982db1d633ac2dac524dba8027d9"
     },
     {
       "bytes": 8197,
@@ -1771,6 +1791,11 @@
       "sha256": "70e5d3cdb764b22991773a4b53af6b6bf51364d0ffab00065cff6e491908d88d"
     },
     {
+      "bytes": 11600,
+      "path": "studies/nick_radge_strategies_study.md",
+      "sha256": "7f314d32e5254187b6ce66111958092db75d3a0e4622bd204de02aec897bc523"
+    },
+    {
       "bytes": 9479,
       "path": "studies/overnight_effect_corrected_full_study.md",
       "sha256": "30dfab3377baac8e1b5ec7bd30a8ee947aeb5e72fd8cf8f30b574928ac24fd85"
@@ -1884,6 +1909,11 @@
       "bytes": 8064,
       "path": "studies/quick5_vol_normalized_signal_positioning_study.md",
       "sha256": "940e1487d285aaca06eb470e475be0168da7122a3693854de59b5c77cce1037b"
+    },
+    {
+      "bytes": 7883,
+      "path": "studies/radge_momentum_improvement_study.md",
+      "sha256": "7420175a06e195a6d7d00cddc1f74dc37bb2480f4cec606c282d59053e89af24"
     },
     {
       "bytes": 12579,
@@ -2256,9 +2286,9 @@
       "sha256": "9fb50b695dab27428a2def0b040a1cc97aae2295169acd18d3c60763a33f4652"
     },
     {
-      "bytes": 108707,
+      "bytes": 111100,
       "path": "studies.md",
-      "sha256": "1ea0e11342d1920dca89ea824e595be2e0e728a0e933b1da916c0e82d711fb1f"
+      "sha256": "a74352976d61357e68e68858c755c0a2b24f58d634f3b1e28efb32834bc75f23"
     }
   ],
   "schema_version": "quant-research-knowledge-base-manifest-v1"

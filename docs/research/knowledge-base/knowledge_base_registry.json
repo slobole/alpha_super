@@ -15,9 +15,9 @@
     }
   ],
   "feature_catalog": "pakal-research/knowledge/STRATEGY_FEATURE_CATALOG.md",
-  "record_count": 153,
+  "record_count": 155,
   "schema_version": "quant-research-knowledge-base-v1",
-  "source_record_count": 156,
+  "source_record_count": 158,
   "source_registry_schema": "quant-research-registry-v1",
   "studies": [
     {
@@ -21066,6 +21066,267 @@
       }
     },
     {
+      "CAGR": 0.086,
+      "Sharpe": 0.823,
+      "adaptive_lineage": {
+        "active_minutes_used": 100,
+        "actual_total_variants": 127,
+        "declared_total_variants": 127,
+        "profile": "deep",
+        "rounds_completed": 1,
+        "stop_reason": "Locked holdout consumed. The round-1 synthesis was rejected; the literal AW2 reconstruction (frozen before results) is promoted to forward_hypothesis. No further same-history tuning."
+      },
+      "artifacts": {
+        "concise_report": "pakal-research/reports/nick_radge_strategies_study/REPORT.md",
+        "decision_log": "pakal-research/reports/nick_radge_strategies_study/decision_log.jsonl",
+        "experiment_ledger": "pakal-research/reports/nick_radge_strategies_study/experiment_ledger.jsonl",
+        "frozen_specification": "pakal-research/reports/nick_radge_strategies_study/research_spec_frozen.json",
+        "full_report": "pakal-research/reports/nick_radge_strategies_study/REPORT_FULL.md",
+        "hypothesis_registry": "pakal-research/reports/nick_radge_strategies_study/hypothesis_registry.json",
+        "manifest": "pakal-research/reports/nick_radge_strategies_study/run_manifest.json",
+        "notebook": "pakal-research/reports/nick_radge_strategies_study/nick_radge_strategies_study.ipynb",
+        "primary_charts": [
+          "pakal-research/reports/nick_radge_strategies_study/charts/01_strategy_map_sharpe_vs_drawdown.png",
+          "pakal-research/reports/nick_radge_strategies_study/charts/02_equity_drawdown_2007_2026.png",
+          "pakal-research/reports/nick_radge_strategies_study/charts/03_regime_filter_family.png"
+        ],
+        "primary_source_code": [
+          "pakal-research/nick_radge_strategies/nrs_engine.py",
+          "pakal-research/nick_radge_strategies/nrs_stock_strategies.py",
+          "pakal-research/nick_radge_strategies/nrs_all_weather.py",
+          "pakal-research/nick_radge_strategies/nrs_run_literal.py",
+          "pakal-research/nick_radge_strategies/nrs_run_tips.py",
+          "pakal-research/nick_radge_strategies/nrs_round1.py"
+        ],
+        "primary_tables": [
+          "pakal-research/reports/nick_radge_strategies_study/tables/all_variants_summary.csv",
+          "pakal-research/reports/nick_radge_strategies_study/tables/promotion_checks.csv",
+          "pakal-research/reports/nick_radge_strategies_study/tables/vendor_replication.csv",
+          "pakal-research/reports/nick_radge_strategies_study/tables/R1_holdout_2016_2026.csv"
+        ],
+        "research_state": "pakal-research/reports/nick_radge_strategies_study/research_state.json",
+        "source_rule_map": "pakal-research/reports/nick_radge_strategies_study/SOURCE_RULE_MAP.md"
+      },
+      "comfortable_capacity": "AW2 with ACWI/PDBC substitutes up to about USD 1M (worst line 0.3% of 20-day dollar volume); R1000 momentum up to about USD 10M",
+      "concise_report": "pakal-research/reports/nick_radge_strategies_study/REPORT.md",
+      "cost_capacity": {
+        "capacity_impact_separate": true,
+        "central_research_round_trip_bps": 10,
+        "comfortable_capacity": "AW2 with ACWI/PDBC substitutes up to about USD 1M (worst line 0.3% of 20-day dollar volume); R1000 momentum up to about USD 10M",
+        "conservative_survival_round_trip_bps": 30,
+        "hard_capacity": "AW2 with IOO above about USD 3M; with substitutes about USD 100M (PDBC)",
+        "paper_like_round_trip_bps": 0,
+        "soft_capacity": "AW2 with substitutes about USD 10M (PDBC 2.9%); AW2 as tested (IOO) already at USD 1M (2.7%); momentum about USD 100M (4% median)",
+        "strained_capacity": "momentum above USD 100M (p95 participation 22%)"
+      },
+      "created_at": "2026-10-06T08:40:00+03:00",
+      "decision_timing": "Close_T (month end for momentum and All Weather; week end for WTT; daily for BBO, CWT178 and mean reversion)",
+      "disposition": "candidate",
+      "feature_findings": [
+        {
+          "corrected_significance": "not significant vs no filter (t 0.66)",
+          "direction": "reduces drawdown in slow bears",
+          "economic_mechanism": "momentum books avoid sustained bear markets",
+          "effect_size": "momentum DD -81% -> -60% (no filter vs SMA200), Sharpe 0.62 -> 0.68",
+          "feature": "index_regime_filter_SMA200",
+          "period_consistency": "helps in 2000-02 and 2008; too slow in Mar 2000, Feb-Apr 2025 and Jul 2026",
+          "recommended_action": "keep as the default; no need to replace",
+          "role": "regime",
+          "status": "confirmed"
+        },
+        {
+          "corrected_significance": "raw p 0.002-0.014; not Holm-significant",
+          "direction": "worse than SMA200",
+          "economic_mechanism": "noisier switching; the ASX 14-filter table does not transfer",
+          "effect_size": "-0.07..-0.13 Sharpe on momentum; deeper drawdowns",
+          "feature": "breadth_and_vix_regime_filters",
+          "period_consistency": "consistent",
+          "recommended_action": "do not use",
+          "role": "regime",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "n.s.",
+          "direction": "no gain",
+          "economic_mechanism": "averaging with weaker filters",
+          "effect_size": "0.61 vs 0.68 (momentum), 0.58 vs 0.55 (WTT)",
+          "feature": "diversified_regime_filters",
+          "period_consistency": "n/a",
+          "recommended_action": "do not use",
+          "role": "regime",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "below SPY (bootstrap P 0.40)",
+          "direction": "weak in US",
+          "economic_mechanism": "institutionalised US large caps; small-cap breakouts mean-revert",
+          "effect_size": "Sharpe 0.34-0.61; R3000 0.07 after 2016",
+          "feature": "absolute_trend_breakout_WTT",
+          "period_consistency": "decays after publication (2013)",
+          "recommended_action": "do not trade on US stocks",
+          "role": "signal",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "bootstrap P(> SPY) 0.73-0.88",
+          "direction": "positive, crash-prone",
+          "economic_mechanism": "winners keep winning; regime filter cuts slow bears",
+          "effect_size": "Sharpe 0.68-0.75, CAGR 20-24%",
+          "feature": "relative_momentum_rank_ROC",
+          "period_consistency": "1992-2026 plateau; post-2016 0.60-0.69",
+          "recommended_action": "already in the book as ndx_L; no new sleeve",
+          "role": "rank",
+          "status": "confirmed"
+        },
+        {
+          "corrected_significance": "t 1.26-1.32, not significant",
+          "direction": "small positive",
+          "economic_mechanism": "less churn at the rank boundary",
+          "effect_size": "+0.05 Sharpe, fewer trades",
+          "feature": "rank_lag_and_gap_skip",
+          "period_consistency": "both eras",
+          "recommended_action": "freeze_as_forward_hypothesis for the L pod",
+          "role": "exit",
+          "status": "inconclusive"
+        },
+        {
+          "corrected_significance": "t 2.2 vs base, single test",
+          "direction": "small gain vs a weak fixed choice",
+          "economic_mechanism": "avoids an unlucky parameter, not a new edge",
+          "effect_size": "0.72 vs 0.67; equals fixed SMA200 (0.74)",
+          "feature": "annual_reopt_most_volatile_parameter",
+          "period_consistency": "picks SMA200 every year since 2011",
+          "recommended_action": "use longer stock filters; skip the ritual",
+          "role": "validation",
+          "status": "inconclusive"
+        },
+        {
+          "corrected_significance": "bootstrap P(> 60/40) 0.81",
+          "direction": "halves drawdowns",
+          "economic_mechanism": "each asset class's slow bear (2008 equities, 2013 gold, 2022 bonds) is sidestepped",
+          "effect_size": "AW1 timed 0.83 / -19% vs the same roster untimed 0.74 / -40%",
+          "feature": "per_asset_10m_trend_on_ETF_roster",
+          "period_consistency": "2007-2026 and 1991-2026 proxies",
+          "recommended_action": "paper shadow RAW-6",
+          "role": "regime",
+          "status": "confirmed"
+        },
+        {
+          "corrected_significance": "n/a",
+          "direction": "decayed",
+          "economic_mechanism": "crowded short-term reversal",
+          "effect_size": "RSI2 Sharpe 1.82 pre-2016, -0.25 after",
+          "feature": "radge_mean_reversion",
+          "period_consistency": "dies after 2016 (also in vendor series)",
+          "recommended_action": "do not use",
+          "role": "signal",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "locked holdout",
+          "direction": "no risk-adjusted gain",
+          "economic_mechanism": "momentum crashes dominate the mix risk",
+          "effect_size": "0.65-0.73 vs AW2 0.82",
+          "feature": "momentum_plus_all_weather_combos",
+          "period_consistency": "holdout: selected combo 0.81 vs AW2 0.97",
+          "recommended_action": "do not use",
+          "role": "sizing",
+          "status": "rejected"
+        }
+      ],
+      "fill_timing": "Open_T+1. Mean reversion uses a day-limit at min(Open, limit). Proxy rows fill at Close_T+1.",
+      "hard_capacity": "AW2 with IOO above about USD 3M; with substitutes about USD 100M (PDBC)",
+      "knowledge_record": "pakal-research/reports/nick_radge_strategies_study/knowledge_record.json",
+      "last_reviewed_at": "2026-10-06T10:00:00+03:00",
+      "limitations": [
+        "The paid rules (US Momentum vol filter, Portfolio Protect, exact US All Weather list and weights, WTT ebook values) are undisclosed. Our versions are reconstructions, not replications.",
+        "The vendor monthly series mix backtest and live data without a flag, so they are a shape target only.",
+        "ETF sample 2007-2026; the long-history proxies are approximations (DBC vs BCOM TR corr 0.88).",
+        "Bitcoin is available only from 2015, so the 5% sleeve cannot be validated in the discovery window.",
+        "Size proxy = turnover rank, not market cap; breadth comes from index members, not the NYSE feed.",
+        "Stock panel ends 2026-09-25; the book series ends 2026-07-24."
+      ],
+      "maximum_drawdown": -0.109,
+      "next_test": "12-month paper shadow of RAW-6 with frozen rules (ACWI/PDBC substitutes allowed). Review 2027-10: excess Sharpe >= 0.6 and drawdown <= 12%.",
+      "next_tests": [
+        "12-month paper shadow of RAW-6 with frozen rules (ACWI/PDBC substitutes allowed). Review 2027-10: excess Sharpe >= 0.6 and drawdown <= 12%.",
+        "Optional: rank lag 10/20 and a 25% gap skip on the live L pod as a forward hypothesis, under a new frozen spec (not tuned here)."
+      ],
+      "notebook": "pakal-research/reports/nick_radge_strategies_study/nick_radge_strategies_study.ipynb",
+      "objective": "Which of Nick Radge's publicly specified strategies and tips survive an executable point-in-time US test (stocks 1992-2026, ETFs 2007-2026, proxies 1991-2026), and which single strategy should be extracted for a forward paper shadow.",
+      "portal_images": [
+        "assets/nick_radge_strategies_study/01-02_equity_drawdown_2007_2026.png",
+        "assets/nick_radge_strategies_study/02-01_strategy_map_sharpe_vs_drawdown.png"
+      ],
+      "primary_cost_layer": "central_research",
+      "primary_metrics": {
+        "CAGR": 0.086,
+        "Sharpe": 0.823,
+        "annualized_volatility": 0.087,
+        "cost_layer": "central_research (5 bps per side ETFs)",
+        "maximum_drawdown": -0.109,
+        "period": "2007-04-02..2026-10-05",
+        "post2016_sharpe": 0.971,
+        "proxy_1991_2026_maxdd": -0.146,
+        "proxy_1991_2026_sharpe": 0.834,
+        "turnover": "monthly rebalance; about 2-3% one-way per month (see F4 summary avg_turnover_per_rebalance)",
+        "universe": "AW2 static roster: SPY QQQ IOO GLD TLT DBC + T-bills"
+      },
+      "replication_outcome": "directionally_replicated",
+      "research_status": "forward_hypothesis",
+      "signal_family": "long_only_momentum_trend_and_tactical_asset_allocation",
+      "soft_capacity": "AW2 with substitutes about USD 10M (PDBC 2.9%); AW2 as tested (IOO) already at USD 1M (2.7%); momentum about USD 100M (4% median)",
+      "sources": [
+        "S1 Algorithmic Advantage ep. 44 transcript (sha256 7301ccc2...)",
+        "S2 thechartist.com.au extraction 2026-10-06 (sha256 4bddfa26...)",
+        "S3 thechartist.com.au /performance/ monthly series 2007-2025 (sha256 5197e1e6...)",
+        "S4 off-site: WTT ebook quotes, Unholy Grails, tradelongterm.com Wayback, Radge tweets, BST/CWT podcasts, Alvarez 2014"
+      ],
+      "study_id": "nick_radge_strategies_study",
+      "tags": [
+        "research-only",
+        "nick-radge",
+        "the-chartist",
+        "momentum",
+        "weekend-trend-trader",
+        "all-weather",
+        "tactical-asset-allocation",
+        "regime-filter",
+        "vendor-audit"
+      ],
+      "timing_attribution": {
+        "artifact": "pakal-research/reports/nick_radge_strategies_study/tables/timing_attribution.csv",
+        "diagnostic_path": "Close_T same-close fill",
+        "executable_path": "Open_T+1 to the same exits",
+        "headline_result": "Next-open fills keep almost all of the same-close result (M1 0.680 vs 0.689; M2 0.730 vs 0.737; AW2 0.823 vs 0.850).",
+        "method": "Rerun with Open_(t+1) replaced by Close_t; same signals and exits",
+        "metrics": {
+          "AW2_next_open_sharpe": 0.823,
+          "AW2_same_close_sharpe": 0.85,
+          "M1_next_open_sharpe": 0.68,
+          "M1_same_close_sharpe": 0.689
+        },
+        "status": "tested"
+      },
+      "title": "Nick Radge (The Chartist) strategies and tips on US data: replication, robustness, and one deployable synthesis",
+      "universes": [
+        "R1000 PIT",
+        "S&P 500 PIT",
+        "Nasdaq-100 PIT",
+        "R3000 PIT liquid",
+        "R1000 ex top-100 (turnover proxy)",
+        "US ETFs SPY QQQ QLD IOO EFA EEM IWM IEF TLT TIP GLD DBC GBTC/IBIT IEI AOR",
+        "1991- proxies: $SPXTR, $NDX, XAUUSD, $BCOMTR, synthetic par Treasuries"
+      ],
+      "verdict": "Extracted strategy: RAW-6, Radge's US All Weather static roster.\n- Rules: SPY/QQQ/IOO 20% each and GLD/TLT/DBC 13.33% each. An ETF is held only while its month-end close is above SMA210; otherwise its weight sits in T-bills. Rebalanced monthly, filled at the next open.\n- Results: 8.6%/yr, excess Sharpe 0.82 (0.97 for 2016-2026), max drawdown -10.9% (2007-2026). Proxies over 1991-2026: Sharpe 0.83, max drawdown -14.6%. Benchmark 60/40: Sharpe 0.64, drawdown -32%.\n- Status: forward_hypothesis for a standalone account. It is redundant with the G3 book (corr 0.81; dominated by the TAA pods).\n- Relative momentum works (about 22%/yr, Sharpe ~0.7) but crashes 43-60% in fast reversals. The owner already runs its NDX form (ndx_L).\n- Absolute trend (WTT, BBO) fails in the US, as Radge himself says.\n- Mean reversion died after 2016.\n- The regime-filter menu and the other tips add nothing over a plain SMA200.",
+      "verdicts": {
+        "economic_value": "AW2 is cost-insensitive (conservative-cost Sharpe 0.80) and liquid with ACWI/PDBC substitutes (Sharpe 0.80). Momentum books earn 20-24% per year but with drawdowns of -45..-60%. Radge's combinations do not beat All Weather alone on a risk-adjusted basis.",
+        "predictive_value": "Momentum ranks carry a crash-prone premium: a plateau of 0.54-0.77 Sharpe over 27 cells, and robust to +/-5% price noise. Per-asset 10-month trend on a fixed ETF roster halves drawdowns versus the same assets untimed. Absolute breakouts are weak in US stocks (WTT R3000 0.34; about 0 after 2016).",
+        "promotion": "AW2: forward_hypothesis, paper shadow only. It passes the standalone gates: post-2016 Sharpe 0.97 vs 0.71 for 60/40, max drawdown -10.9%, bootstrap P 0.81, no single-year dependence. It fails the book-fit gate (G3 1.183 -> 1.169 at 20%). Round-1 synthesis rejected on the locked 2016-2026 holdout.",
+        "source_replication": "Directionally replicated. Monthly correlation with the vendor's own series: US Momentum 0.70-0.73, TLT/NDX 0.84, US All Weather 0.72 (0.84 with bitcoin). Vendor levels (22-30% CAGR combos, -13..-19% DD) are not reproduced. The vendor's high-frequency mean-reversion book is not reproduced after 2016."
+      }
+    },
+    {
       "CAGR": null,
       "Sharpe": null,
       "adaptive_lineage": {
@@ -25585,6 +25846,205 @@
         "predictive_value": "The normalized score had weaker full-sample IC than the raw score and failed its corrected-significance gate.",
         "promotion": "No historical promotion; forward-shadow P1 unchanged after 2026-07-31 only.",
         "source_replication": "The supplied source is methodological commentary, not a Quick5 strategy; only its return-over-volatility idea was transferred."
+      }
+    },
+    {
+      "CAGR": 0.2048887211463674,
+      "Sharpe": 0.63147887524379,
+      "adaptive_lineage": {
+        "active_minutes_used": 120,
+        "actual_total_variants": 37,
+        "declared_total_variants": 48,
+        "profile": "deep",
+        "rounds_completed": 2,
+        "stop_reason": "locked holdout consumed; no pre-registered improvement raised live-era Sharpe"
+      },
+      "artifacts": {
+        "concise_report": "pakal-research/reports/radge_momentum_improvement_study/REPORT.md",
+        "decision_log": "pakal-research/reports/radge_momentum_improvement_study/decision_log.jsonl",
+        "experiment_ledger": "pakal-research/reports/radge_momentum_improvement_study/experiment_ledger.jsonl",
+        "frozen_specification": "pakal-research/reports/radge_momentum_improvement_study/research_spec_frozen.json",
+        "full_report": "pakal-research/reports/radge_momentum_improvement_study/REPORT_FULL.md",
+        "hypothesis_registry": "pakal-research/reports/radge_momentum_improvement_study/hypothesis_registry.json",
+        "manifest": "pakal-research/reports/radge_momentum_improvement_study/run_manifest.json",
+        "notebook": "pakal-research/reports/radge_momentum_improvement_study/radge_momentum_improvement_study.ipynb",
+        "primary_charts": [
+          "pakal-research/reports/radge_momentum_improvement_study/charts/02_discovery_vs_holdout_round1.png",
+          "pakal-research/reports/radge_momentum_improvement_study/charts/01_equity_drawdown_base_pick_controls.png"
+        ],
+        "primary_source_code": [
+          "pakal-research/radge_momentum_improvement/rmi_strategy.py",
+          "pakal-research/radge_momentum_improvement/rmi_books.py",
+          "pakal-research/radge_momentum_improvement/rmi_run_round1.py",
+          "pakal-research/radge_momentum_improvement/rmi_open_holdout.py"
+        ],
+        "primary_tables": [
+          "pakal-research/reports/radge_momentum_improvement_study/tables/round1_discovery.csv",
+          "pakal-research/reports/radge_momentum_improvement_study/tables/holdout_2016_2026.csv"
+        ],
+        "research_state": "pakal-research/reports/radge_momentum_improvement_study/research_state.json",
+        "source_rule_map": "pakal-research/reports/radge_momentum_improvement_study/SOURCE_RULE_MAP.md"
+      },
+      "comfortable_capacity": "R1000 top-10 monthly: about USD 10M (median slot under 1% of 20-day dollar volume; previous study)",
+      "concise_report": "pakal-research/reports/radge_momentum_improvement_study/REPORT.md",
+      "cost_capacity": {
+        "capacity_impact_separate": true,
+        "central_research_round_trip_bps": 20,
+        "comfortable_capacity": "R1000 top-10 monthly: about USD 10M (median slot under 1% of 20-day dollar volume; previous study)",
+        "conservative_survival_round_trip_bps": 50,
+        "hard_capacity": null,
+        "paper_like_round_trip_bps": 0,
+        "soft_capacity": "about USD 100M",
+        "strained_capacity": "above USD 100M (p95 slot participation about 22%)"
+      },
+      "created_at": "2026-10-07T00:15:00+03:00",
+      "decision_timing": "Close_T month-end (tranches +5/+10/+15 sessions)",
+      "disposition": "rejected",
+      "feature_findings": [
+        {
+          "corrected_significance": "holdout bootstrap P 0.50",
+          "direction": "drawdown down, Sharpe flat",
+          "economic_mechanism": "two rankings diversify name concentration",
+          "effect_size": "holdout dSharpe -0.005; maxDD +10.4 pp",
+          "feature": "two_ranking_ensemble_rocnatr",
+          "period_consistency": "discovery +0.053 / holdout -0.005",
+          "recommended_action": "optional drawdown-preference variant; not an edge",
+          "role": "rank",
+          "status": "rejected_as_improvement"
+        },
+        {
+          "corrected_significance": "n.s.",
+          "direction": "drawdown down, Sharpe down in holdout",
+          "economic_mechanism": "scales down after spikes that rebound",
+          "effect_size": "holdout dSharpe -0.05..-0.06",
+          "feature": "portfolio_vol_target",
+          "period_consistency": "discovery flat / holdout negative",
+          "recommended_action": "do not use",
+          "role": "sizing",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "n.s.",
+          "direction": "negative in the live era",
+          "economic_mechanism": "caps remove the leading theme's winners",
+          "effect_size": "holdout -0.025..-0.060",
+          "feature": "sector_and_correlation_caps",
+          "period_consistency": "small positive discovery / negative holdout",
+          "recommended_action": "do not use",
+          "role": "sizing",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "n.s.",
+          "direction": "negative or unstable",
+          "economic_mechanism": "whipsaw; gaps",
+          "effect_size": "stop -0.050/+0.026; daily regime -0.114/-0.075",
+          "feature": "trailing_stop_and_daily_regime",
+          "period_consistency": "unstable",
+          "recommended_action": "do not use",
+          "role": "exit",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "n.s. holdout",
+          "direction": "regime-dependent",
+          "economic_mechanism": "bond-stock correlation turned positive in 2022",
+          "effect_size": "+0.040 / -0.002",
+          "feature": "idle_cash_in_bonds",
+          "period_consistency": "falling-rate era only",
+          "recommended_action": "do not use",
+          "role": "portfolio construction",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "n/a",
+          "direction": "rank > random, < index at the same exposure (live era)",
+          "economic_mechanism": "equal-weight R1000 lagged cap-weighted S&P since 2016; momentum rescues selection",
+          "effect_size": "0.631 vs 0.240 vs 0.704",
+          "feature": "momentum_rank_vs_random_and_index_controls",
+          "period_consistency": "random beat base in 2004-2015",
+          "recommended_action": "judge the strategy against SPY at matched exposure",
+          "role": "diagnostic",
+          "status": "diagnostic"
+        }
+      ],
+      "fill_timing": "Open_T+1",
+      "hard_capacity": null,
+      "knowledge_record": "pakal-research/reports/radge_momentum_improvement_study/knowledge_record.json",
+      "last_reviewed_at": "2026-10-06T21:22:53+00:00",
+      "limitations": [
+        "Smoke-test contamination of 4 kept ideas (disclosed).",
+        "Current GICS (not PIT).",
+        "C4 bond overlay is a return-level approximation.",
+        "M2 is a reconstruction of undisclosed live rules.",
+        "Holdout = one 10-year bull-dominated era."
+      ],
+      "maximum_drawdown": -0.4712142500977998,
+      "next_test": "None for R1000.",
+      "next_tests": [
+        "None for R1000.",
+        "Optional: frozen-spec NDX ensemble (L-rank + Radge blend) for the L pod as its own study."
+      ],
+      "notebook": "pakal-research/reports/radge_momentum_improvement_study/radge_momentum_improvement_study.ipynb",
+      "objective": "Can Radge's R1000 momentum (M2) be improved by pre-declared construction, risk-overlay and signal changes selected on 1992-2015 and confirmed once on 2016-2026?",
+      "portal_images": [
+        "assets/radge_momentum_improvement_study/01-01_equity_drawdown_base_pick_controls.png",
+        "assets/radge_momentum_improvement_study/02-02_discovery_vs_holdout_round1.png"
+      ],
+      "primary_cost_layer": "central_research",
+      "primary_metrics": {
+        "CAGR": 0.2048887211463674,
+        "Sharpe": 0.63147887524379,
+        "annualized_volatility": 0.3670300057078491,
+        "cost_layer": "central_research (10 bps per side)",
+        "maximum_drawdown": -0.4712142500977998,
+        "period": "2016-01-01..2026-09-25 (holdout)",
+        "pick_CAGR": 0.175630379199388,
+        "pick_Sharpe": 0.62639375780547,
+        "pick_maxdd": -0.366589684869235,
+        "turnover": "about 30-45 trades a year per book (monthly rotation)",
+        "universe": "R1000 PIT"
+      },
+      "replication_outcome": "replicated",
+      "research_status": "diagnostic",
+      "signal_family": "cross_sectional_momentum_long_only_rotation",
+      "soft_capacity": "about USD 100M",
+      "sources": [
+        "S0 nick_radge_strategies_study (M2)",
+        "P1 prior Pakal / alpha_super momentum studies",
+        "P2 0_papers/index cards"
+      ],
+      "study_id": "radge_momentum_improvement_study",
+      "tags": [
+        "research-only",
+        "momentum",
+        "nick-radge",
+        "locked-holdout",
+        "rejected-improvements"
+      ],
+      "timing_attribution": {
+        "artifact": "pakal-research/reports/radge_momentum_improvement_study/tables/robustness_pick_vs_base.csv",
+        "diagnostic_path": "signal_lag 1 (stale by one session)",
+        "executable_path": "Open_T+1",
+        "headline_result": "Lag 1 lowers holdout Sharpe for both base (0.607) and pick (0.585); the ranking is not a same-day artefact.",
+        "method": "Same rules with every decision input lagged one session",
+        "metrics": {
+          "base_hold_sharpe_lag1": 0.607,
+          "pick_hold_sharpe_lag1": 0.585
+        },
+        "status": "tested"
+      },
+      "title": "Improving Radge US relative momentum (R1000, CMT-2018 version): pre-registered study with a locked 2016-2026 live-era holdout",
+      "universes": [
+        "R1000 PIT (primary)",
+        "Nasdaq-100 PIT and S&P 500 PIT (robustness)"
+      ],
+      "verdict": "No. None of 19 components or 3 candidates raised the 2016-2026 Sharpe. The frozen pick (50/50 M2 + ROC/NATR20 ensemble) is Sharpe-neutral (0.626 vs 0.631) with max DD -36.7% vs -47.1% and CAGR 17.6% vs 20.5% (a drawdown preference, not an edge). Discovery-to-holdout correlation of the component gains is -0.11. Live-era controls: random rank 0.240, S&P 500 at the same exposure 0.704. Keep the base.",
+      "verdicts": {
+        "economic_value": "No Sharpe gain; the ensemble trades about 3%/yr of CAGR for about 10 pp less drawdown in the live era.",
+        "predictive_value": "Discovery gains do not transfer (corr -0.11); two sign flips.",
+        "promotion": "Rejected under the frozen rule; no candidate.",
+        "source_replication": "Base reproduced exactly (0.0 max abs daily difference)."
       }
     },
     {
