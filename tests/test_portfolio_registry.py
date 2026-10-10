@@ -23,13 +23,24 @@ class _ReadOnlyJobManager:
         return []
 
 
-def test_loren_is_explicitly_wired():
-    assert portfolio_registry.tier_for("loren") is MaturityTier.WIRED
-    assert portfolio_registry.tier_label_for("loren") == "wired"
+def test_loren_is_the_live_book():
+    assert portfolio_registry.tier_for("loren") is MaturityTier.LIVE
+    assert portfolio_registry.tier_label_for("loren") == "live"
 
 
 def test_unregistered_portfolio_defaults_to_research():
     assert portfolio_registry.tier_for("not_registered") is MaturityTier.RESEARCH
+
+
+def test_unregistered_portfolio_takes_its_least_mature_pod_capped_at_wired():
+    core5_str = "strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5"
+    taa_live_str = "strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash"
+    compass_str = "strategies.taa_df.strategy_taa_inflation_compass"
+    assert portfolio_registry.tier_for("book", [taa_live_str]) is MaturityTier.WIRED
+    assert portfolio_registry.tier_for("book", [taa_live_str, core5_str]) is MaturityTier.WIRED
+    assert portfolio_registry.tier_for("book", [core5_str, compass_str]) is MaturityTier.PM_READY
+    assert portfolio_registry.tier_for("book", [core5_str, "strategies.qpi.anything"]) is MaturityTier.RESEARCH
+    assert portfolio_registry.tier_label_for("book", [core5_str, compass_str]) == "candidate"
 
 
 def test_registered_portfolios_exist_and_parse():
@@ -62,13 +73,16 @@ def test_portfolios_page_renders_maturity_column():
     assert response_obj.status_code == 200
     assert "<th>Maturity</th>" in html_str
     assert '<span class="toolbar-group-label">Maturity</span>' in html_str
+    assert 'data-filter="maturity:live"' in html_str
     assert 'data-filter="maturity:wired"' in html_str
-    assert 'data-filter="maturity:pm_ready"' in html_str
+    assert 'data-filter="maturity:candidate"' in html_str
     assert 'data-filter="maturity:research"' in html_str
     assert 'data-filter="measured"' not in html_str
     assert 'data-filter="norun"' not in html_str
     assert 'data-filter="stale"' not in html_str
     assert 'data-filter="combine"' not in html_str
     assert 'data-filter="fresh"' not in html_str
+    assert 'data-maturity="live"' in html_str
     assert 'data-maturity="wired"' in html_str
-    assert '<span class="maturity maturity-wired">WIRED</span>' in html_str
+    assert 'class="maturity maturity-live"' in html_str and ">LIVE</span>" in html_str
+    assert 'class="maturity maturity-wired"' in html_str and ">WIRED</span>" in html_str

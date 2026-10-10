@@ -139,7 +139,7 @@ def test_missing_turnover_invalidates_the_trailing_adv_window():
     assert signal_df.loc[date_idx[83], ("AAA", "adv_63")] == 100_000_000.0
 
 
-def test_bench_wired_badge_does_not_open_live_or_portfolio_routes():
+def test_research_floor_variant_has_no_live_or_portfolio_route():
     strategy_import_str = (
         "strategies.dv2.strategy_mr_dv2_liquidity_floor:DVO2LiquidityFloorStrategy"
     )
@@ -147,8 +147,8 @@ def test_bench_wired_badge_does_not_open_live_or_portfolio_routes():
         "strategies.dv2.strategy_mr_dv2_liquidity_floor"
     )
     assert strategy_entry_obj is not None
-    assert strategy_entry_obj.display_is_wired_bool
-    assert strategy_entry_obj.has_bench_wired_badge_bool
+    assert strategy_entry_obj.maturity_key_str == "research"
+    assert not strategy_entry_obj.has_bench_wired_badge_bool
     assert not strategy_entry_obj.is_wired_bool
     assert not strategy_entry_obj.is_pm_ready_bool
     assert strategy_entry_obj.has_run_variant_bool

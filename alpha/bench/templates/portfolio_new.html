@@ -111,7 +111,7 @@
                        data-label="{{ c.display_name_str }}"></td>
             <td>
               <div><b>{{ c.display_name_str }}</b>
-                {% if c.is_wired_bool %}<span class="badge badge-wired">wired</span>{% elif c.is_pm_ready_bool %}<span class="badge badge-pmready">pm-ready</span>{% endif %}
+                {% if c.is_wired_bool %}<span class="badge badge-wired">{{ c.maturity_key_str }}</span>{% elif c.is_pm_ready_bool %}<span class="badge badge-pmready">candidate</span>{% endif %}
               </div>
               <div class="mono muted-2">{{ c.stem_str }}</div>
             </td>

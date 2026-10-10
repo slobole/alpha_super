@@ -193,24 +193,27 @@ def test_catalog_lists_strategies_and_flags_wired():
     )
 
 
-def test_dv2_liquidity_floor_has_bench_wired_badge_without_live_maturity(recording_client):
-    strategy_module_str = "strategies.dv2.strategy_mr_dv2_liquidity_floor"
-    strategy_entry_obj = catalog.get_strategy_by_module(strategy_module_str)
-    assert strategy_entry_obj is not None
-    assert strategy_entry_obj.display_is_wired_bool
-    assert not strategy_entry_obj.is_wired_bool
-
+def test_catalog_shows_each_strategy_at_its_registry_tier(recording_client):
+    """LIVE / WIRED / CANDIDATE / RESEARCH come from the registry only; the old
+    display-only WIRED badge for the DV2 floor variants is retired."""
     client_obj, _, _ = recording_client
     catalog_html_str = client_obj.get("/").get_data(as_text=True)
-    assert re.search(
-        rf'<tr[^>]*data-module="{re.escape(strategy_module_str)}"[^>]*data-maturity="wired"',
-        catalog_html_str,
-    )
-    response_obj = client_obj.get(f"/strategy/{strategy_module_str}")
+    for module_str, maturity_str in (
+        ("strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled", "live"),
+        ("strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash", "live"),
+        ("strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5", "wired"),
+        ("strategies.taa_df.strategy_taa_inflation_compass", "candidate"),
+        ("strategies.dv2.strategy_mr_dv2_liquidity_floor", "research"),
+    ):
+        strategy_entry_obj = catalog.get_strategy_by_module(module_str)
+        assert strategy_entry_obj is not None and strategy_entry_obj.maturity_key_str == maturity_str
+        assert re.search(
+            rf'<tr[^>]*data-module="{re.escape(module_str)}"[^>]*data-maturity="{maturity_str}"',
+            catalog_html_str,
+        )
+    response_obj = client_obj.get("/strategy/strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled")
     assert response_obj.status_code == 200
-    html_str = response_obj.get_data(as_text=True)
-    assert "Bench WIRED designation" in html_str
-    assert "Bench designation only; no LIVE release" in html_str
+    assert "Live strategy" in response_obj.get_data(as_text=True)
 
 
 def test_catalog_handles_non_utf8_sources_without_crashing():
@@ -1424,7 +1427,8 @@ def test_mockup_shell_has_only_bench_and_knowledge_surfaces(recording_client):
     assert ">BENCH</a>" in html_str
     assert ">KNOWLEDGE BASE</a>" in html_str
     assert 'href="/knowledge/"' in html_str
-    assert ">LIVE<" not in html_str
+    # No LIVE navigation surface; a LIVE maturity badge in the catalog is fine.
+    assert ">LIVE</a>" not in html_str
     assert "/live" not in html_str
     assert re.search(r"\d{2}:\d{2}:\d{2} (EST|EDT)", html_str)
 

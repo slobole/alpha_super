@@ -113,7 +113,7 @@ def validate_spec_dict(spec_dict: dict[str, Any]) -> None:
     if len(registry_import_set) != expected_promoted_count_int:
         raise RuntimeError("Promoted registry count changed after the spec was frozen.")
     wired_count_int = sum(
-        tier_obj == strategy_registry.MaturityTier.WIRED
+        tier_obj >= strategy_registry.MaturityTier.WIRED
         for tier_obj in strategy_registry.STRATEGY_TIER_DICT.values()
     )
     pm_ready_count_int = sum(

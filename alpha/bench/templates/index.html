@@ -32,8 +32,9 @@
   <div class="toolbar-group">
     <span class="toolbar-group-label">Maturity</span>
     <span class="filter-chip active" data-filter="all">All</span>
-    <span class="filter-chip" data-filter="maturity:wired">Wired</span>
-    <span class="filter-chip" data-filter="maturity:pm_ready">PM_ready</span>
+    <span class="filter-chip" data-filter="maturity:live" title="Trading in a live account today">Live</span>
+    <span class="filter-chip" data-filter="maturity:wired" title="Passed its checks; ready to deploy">Wired</span>
+    <span class="filter-chip" data-filter="maturity:candidate" title="Serious and portfolio-ready; not wired to live yet">Candidate</span>
     <span class="filter-chip" data-filter="maturity:research">Research</span>
   </div>
 
@@ -78,7 +79,7 @@
       <tr class="strat-item catalog-row"
           data-module="{{ s.module_import_str }}"
           data-href="{{ url_for('strategy_page_fn', module_import_str=s.module_import_str) }}"
-          data-maturity="{{ 'wired' if s.display_is_wired_bool else 'pm_ready' if s.is_pm_ready_bool else 'research' }}"
+          data-maturity="{{ s.maturity_key_str }}"
           data-recent="{{ '1' if card.has_recent_run_bool else '0' }}"
           data-category="{{ s.category_str }}"
           data-subcategory="{{ s.subcategory_str or '' }}"
@@ -89,11 +90,7 @@
           data-trades="{{ '%.0f'|format(sv.trades) if sv.trades is not none }}"
           data-lastrun="{{ '%.0f'|format(sv.last_run) if sv.last_run is not none }}">
         <td class="catalog-name mono">{{ s.stem_str }}{% if not s.has_run_variant_bool %} <span class="badge badge-norun">no run_variant</span>{% endif %}</td>
-        <td>
-          {% if s.display_is_wired_bool %}<span class="maturity maturity-wired"{% if s.has_bench_wired_badge_bool %} title="Bench designation only; no LIVE release"{% endif %}>WIRED</span>
-          {% elif s.is_pm_ready_bool %}<span class="maturity maturity-pm">PM_READY</span>
-          {% else %}<span class="maturity maturity-research">RESEARCH</span>{% endif %}
-        </td>
+        <td><span class="maturity maturity-{{ s.maturity_key_str }}">{{ s.maturity_display_str }}</span></td>
         {# Coarse code so the column scans vertically; the specific sleeve is
            already in the module stem beside it. The full label — including the
            momentum subfamily, which is the real discriminator there — stays
@@ -138,17 +135,13 @@
         <tr class="strat-item catalog-row"
             data-module="{{ s.module_import_str }}"
             data-href="{{ url_for('strategy_page_fn', module_import_str=s.module_import_str) }}"
-            data-maturity="{{ 'wired' if s.display_is_wired_bool else 'pm_ready' if s.is_pm_ready_bool else 'research' }}"
+            data-maturity="{{ s.maturity_key_str }}"
             data-recent="0"
             data-category="{{ s.category_str }}"
             data-subcategory="{{ s.subcategory_str or '' }}"
             data-search="{{ (s.display_name_str ~ ' ' ~ s.stem_str ~ ' ' ~ s.summary_str ~ ' ' ~ s.category_label_str ~ ' ' ~ (s.subcategory_label_str or ''))|lower }}">
           <td class="catalog-name mono">{{ s.stem_str }}{% if not s.has_run_variant_bool %} <span class="badge badge-norun">no run_variant</span>{% endif %}</td>
-          <td>
-            {% if s.display_is_wired_bool %}<span class="maturity maturity-wired"{% if s.has_bench_wired_badge_bool %} title="Bench designation only; no LIVE release"{% endif %}>WIRED</span>
-            {% elif s.is_pm_ready_bool %}<span class="maturity maturity-pm">PM_READY</span>
-            {% else %}<span class="maturity maturity-research">RESEARCH</span>{% endif %}
-          </td>
+          <td><span class="maturity maturity-{{ s.maturity_key_str }}">{{ s.maturity_display_str }}</span></td>
           {# Coarse code so the column scans vertically; the specific sleeve is
            already in the module stem beside it. The full label — including the
            momentum subfamily, which is the real discriminator there — stays

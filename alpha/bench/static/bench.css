@@ -1951,7 +1951,10 @@ kbd {
   letter-spacing: .08em;
   text-align: center;
 }
+/* LIVE is the one solid badge: real money, visible at a glance. */
+.maturity-live { background: var(--color-profit-dark); color: var(--color-profit-wash); font-weight: 600; }
 .maturity-wired { background: var(--color-profit-wash); color: var(--color-profit-dark); }
+.maturity-candidate,
 .maturity-pm { background: var(--color-warning-wash); color: var(--color-warning-dark); }
 .maturity-research { background: var(--color-neutral); color: var(--color-muted); }
 

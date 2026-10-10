@@ -11,13 +11,11 @@
 
 <header class="catalog-head">
   <div class="page-kicker">
-    {{ 'Bench WIRED designation' if strategy.has_bench_wired_badge_bool else 'Wired strategy' if strategy.is_wired_bool else 'PM_ready strategy' if strategy.is_pm_ready_bool else 'Research strategy' }}
+    {{ {'live': 'Live strategy', 'wired': 'Wired strategy', 'candidate': 'Candidate strategy', 'research': 'Research strategy'}[strategy.maturity_key_str] }}
   </div>
   <div class="artifact-title-row">
     <h1 class="job-title mono">{{ strategy.stem_str }}</h1>
-    {% if strategy.display_is_wired_bool %}<span class="maturity maturity-wired"{% if strategy.has_bench_wired_badge_bool %} title="Bench designation only; no LIVE release"{% endif %}>WIRED</span>
-    {% elif strategy.is_pm_ready_bool %}<span class="maturity maturity-pm">PM_READY</span>
-    {% else %}<span class="maturity maturity-research">RESEARCH</span>{% endif %}
+    <span class="maturity maturity-{{ strategy.maturity_key_str }}">{{ strategy.maturity_display_str }}</span>
   </div>
   <p class="overview-path mono">{{ strategy.rel_path_str }}</p>
   {% if strategy.summary_str %}<p class="catalog-strapline">{{ strategy.summary_str }}</p>{% endif %}

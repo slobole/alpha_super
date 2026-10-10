@@ -12,11 +12,21 @@ This module makes that expressible only one way. A strategy has one maturity
 tier, each consumer asks for a floor, and "wired but not portfolio-ready" cannot
 be written down.
 
-    RESEARCH  a file that runs. The default: anything absent from the table.
-    PM_READY  the engine contract holds — a common run_variant, honoured
-              capital, a truthfully declared benchmark — so a portfolio book
-              may allocate to it.
-    WIRED     connected to the live execution path; deployment is separate.
+Four tiers (owner definitions, 2026-10-10), shown in Bench as:
+
+    LIVE       actually trading in a live account today. Set by hand when a pod
+               goes live or stops.
+    WIRED      connected to the live execution path, passed its checks, and
+               ready to deploy; deployment itself is separate.
+    CANDIDATE  (code name PM_READY) a serious strategy whose engine contract
+               holds — a common run_variant, honoured capital, a truthfully
+               declared benchmark — so a portfolio book may allocate to it, but
+               it is not wired to live execution yet.
+    RESEARCH   everything else: a file that runs. The default for anything
+               absent from the table.
+
+Consumers ask for a floor (``>=``), so LIVE counts as WIRED and as PM_READY for
+every live allowlist and portfolio check.
 
 *** CRITICAL*** A tier is a claim about plumbing, not about edge. PM_READY says
 the harness will not silently misreport the strategy; it says nothing about
@@ -37,12 +47,14 @@ class MaturityTier(IntEnum):
     RESEARCH = 1
     PM_READY = 2
     WIRED = 3
+    LIVE = 4
 
 
 TIER_LABEL_DICT: dict[MaturityTier, str] = {
     MaturityTier.RESEARCH: "research",
-    MaturityTier.PM_READY: "pm-ready",
+    MaturityTier.PM_READY: "candidate",
     MaturityTier.WIRED: "wired",
+    MaturityTier.LIVE: "live",
 }
 
 
@@ -59,11 +71,12 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     # (A-QPI-05), an undocumented selection among 14 variants, and -1.8 pp/yr
     # small-account friction. Its live host route was removed with it.
     "strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote": MaturityTier.WIRED,
-    "strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash": MaturityTier.WIRED,
+    # ── live: trading in the owner's live account (NDX ~40% / TAA ~60%) ─────
+    "strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash": MaturityTier.LIVE,
     "strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash": MaturityTier.WIRED,
     "strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash": MaturityTier.WIRED,
     "strategies.momentum.strategy_mo_atr_normalized_ndx:AtrNormalizedNdxStrategy": MaturityTier.WIRED,
-    "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy": MaturityTier.WIRED,
+    "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy": MaturityTier.LIVE,
     # ── pm-ready: may join a book, not connected to live ────────────────────
     # Owner demotion 2026-09-30: retain portfolio eligibility without a live route.
     "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit": MaturityTier.PM_READY,

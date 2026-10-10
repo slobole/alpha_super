@@ -33,8 +33,9 @@
   <div class="toolbar-group">
     <span class="toolbar-group-label">Maturity</span>
     <span class="filter-chip active" data-filter="all">All</span>
-    <span class="filter-chip" data-filter="maturity:wired">Wired</span>
-    <span class="filter-chip" data-filter="maturity:pm_ready">PM_ready</span>
+    <span class="filter-chip" data-filter="maturity:live" title="The book that trades in the live account">Live</span>
+    <span class="filter-chip" data-filter="maturity:wired" title="Every pod is wired; ready to deploy">Wired</span>
+    <span class="filter-chip" data-filter="maturity:candidate" title="Every pod is at least a candidate">Candidate</span>
     <span class="filter-chip" data-filter="maturity:research">Research</span>
   </div>
   <span class="toolbar-recent">
@@ -73,7 +74,7 @@
         {% set p = v.portfolio %}
         <tr class="pf-row"
             data-search="{{ v.search_text_str }}"
-            data-maturity="{{ 'wired' if p.is_wired_bool else 'pm_ready' if p.is_pm_ready_bool else 'research' }}"
+            data-maturity="{{ p.maturity_key_str }}"
             data-name="{{ p.name_str|lower }}"
             data-schema="{{ p.schema_str }}"
             data-pods="{{ p.pod_tuple|length }}"
@@ -106,11 +107,7 @@
               <a class="btn btn-sm btn-ghost" href="{{ url_for('portfolio_manage_page_fn', action_str='delete', config=p.rel_path_str) }}">Delete</a>
             </div>
           </td>
-          <td>
-            {% if p.is_wired_bool %}<span class="maturity maturity-wired">WIRED</span>
-            {% elif p.is_pm_ready_bool %}<span class="maturity maturity-pm">PM_READY</span>
-            {% else %}<span class="maturity maturity-research">RESEARCH</span>{% endif %}
-          </td>
+          <td><span class="maturity maturity-{{ p.maturity_key_str }}" title="{{ 'Set by hand' if p.is_live_bool else 'Least mature pod sets the tier' }}">{{ p.maturity_display_str }}</span></td>
           <td><span class="badge badge-cat">{{ 'fresh run' if p.schema_str == 'manager' else 'combine pkls' }}</span>
             <div class="cell-note">{{ v.rebalance_label_str }}</div>
           </td>

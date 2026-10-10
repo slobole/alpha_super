@@ -79,6 +79,15 @@ class PodCandidate:
         return self.tier_int >= int(MaturityTier.PM_READY)
 
     @property
+    def maturity_key_str(self) -> str:
+        from alpha.bench.catalog import maturity_key_str
+        return maturity_key_str(self.tier_int)
+
+    @property
+    def maturity_display_str(self) -> str:
+        return self.maturity_key_str.upper()
+
+    @property
     def window_str(self) -> str | None:
         return self.run_obj.backtest_window_str
 

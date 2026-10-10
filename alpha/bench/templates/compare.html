@@ -40,7 +40,7 @@
           <td class="muted">Family</td>
           {% for view in column_view_list %}
           <td><span class="badge badge-cat">{{ view.strategy.category_label_str }}</span>
-            {% if view.strategy.display_is_wired_bool %}<span class="badge badge-wired"{% if view.strategy.has_bench_wired_badge_bool %} title="Bench designation only; no LIVE release"{% endif %}>Wired</span>{% endif %}</td>
+            {% if view.strategy.is_wired_bool %}<span class="badge badge-wired">{{ 'Live' if view.strategy.is_live_bool else 'Wired' }}</span>{% endif %}</td>
           {% endfor %}
         </tr>
         <tr>

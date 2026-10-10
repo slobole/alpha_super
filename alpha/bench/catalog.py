@@ -35,15 +35,10 @@ REPO_ROOT_PATH = Path(__file__).resolve().parents[2]
 STRATEGIES_ROOT_PATH = REPO_ROOT_PATH / "strategies"
 PORTFOLIOS_ROOT_PATH = REPO_ROOT_PATH / "portfolios"
 
-# Display-only label requested for the standalone DV2 floor. It does not
-# change registry maturity, portfolio eligibility, or LIVE release support.
-BENCH_WIRED_BADGE_MODULE_SET = frozenset(
-    {
-        "strategies.dv2.strategy_mr_dv2_liquidity_floor",
-        "strategies.dv2.strategy_mr_dv2_liquidity_floor_adv_rank",
-        "strategies.dv2.strategy_mr_dv2_industry_etf",
-    }
-)
+# Display-only WIRED badges for modules that are not wired. Retired 2026-10-10:
+# WIRED now means "passed its checks and ready to deploy" (owner definition),
+# so a strategy shows exactly its registry tier.
+BENCH_WIRED_BADGE_MODULE_SET: frozenset[str] = frozenset()
 
 # Friendly labels for the strategy sub-folders. Unknown folders fall back to a
 # title-cased version of the folder name, so a brand-new family still renders.
@@ -185,6 +180,23 @@ class StrategyEntry:
         """May be allocated to inside a portfolio book. Wired implies pm-ready."""
         return self.tier_int >= int(MaturityTier.PM_READY)
 
+    @property
+    def is_live_bool(self) -> bool:
+        return self.tier_int >= int(MaturityTier.LIVE)
+
+    @property
+    def maturity_key_str(self) -> str:
+        """``live`` | ``wired`` | ``candidate`` | ``research``: filter key and CSS suffix."""
+        return maturity_key_str(self.tier_int)
+
+    @property
+    def maturity_display_str(self) -> str:
+        return self.maturity_key_str.upper()
+
+
+def maturity_key_str(tier_int: int) -> str:
+    return strategy_registry.TIER_LABEL_DICT[MaturityTier(int(tier_int))]
+
 
 @dataclass(frozen=True)
 class PortfolioPod:
@@ -223,6 +235,18 @@ class PortfolioEntry:
     def is_pm_ready_bool(self) -> bool:
         """A WIRED portfolio is also past the PM_READY maturity floor."""
         return self.tier_int >= int(MaturityTier.PM_READY)
+
+    @property
+    def is_live_bool(self) -> bool:
+        return self.tier_int >= int(MaturityTier.LIVE)
+
+    @property
+    def maturity_key_str(self) -> str:
+        return maturity_key_str(self.tier_int)
+
+    @property
+    def maturity_display_str(self) -> str:
+        return self.maturity_key_str.upper()
 
 
 def _module_import_str(module_path: Path) -> str:
@@ -435,15 +459,10 @@ def list_strategies() -> list[StrategyEntry]:
             )
         )
 
-    # Keep the Bench-only display badge with the other WIRED rows, while the
-    # stored maturity tier remains the operational registry value.
+    # Most mature first: LIVE, WIRED, CANDIDATE, RESEARCH.
     entry_list.sort(
         key=lambda entry_obj: (
-            -(
-                int(MaturityTier.WIRED)
-                if entry_obj.display_is_wired_bool
-                else entry_obj.tier_int
-            ),
+            -entry_obj.tier_int,
             entry_obj.category_label_str.lower(),
             entry_obj.stem_str.lower(),
         )
@@ -519,7 +538,6 @@ def list_portfolios() -> list[PortfolioEntry]:
     entry_list: list[PortfolioEntry] = []
     for config_path in sorted(PORTFOLIOS_ROOT_PATH.glob("*.yaml")):
         rel_path_str = _rel_posix_str(config_path)
-        tier_obj = portfolio_registry.tier_for(config_path.stem)
         try:
             config_dict = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
             if not isinstance(config_dict, dict):
@@ -530,6 +548,10 @@ def list_portfolios() -> list[PortfolioEntry]:
                 or "allocation_policy_str" in config_dict
             )
             capital_obj = config_dict.get("capital", config_dict.get("capital_base_float"))
+            raw_pod_list = config_dict.get("pods") if isinstance(config_dict.get("pods"), list) else []
+            tier_obj = portfolio_registry.tier_for(config_path.stem, [
+                str(pod_dict.get("strategy_import_str", pod_dict.get("strategy", "")))
+                for pod_dict in raw_pod_list if isinstance(pod_dict, dict)])
             entry_list.append(
                 PortfolioEntry(
                     name_str=config_path.stem,
@@ -547,6 +569,7 @@ def list_portfolios() -> list[PortfolioEntry]:
                 )
             )
         except (OSError, ValueError, yaml.YAMLError) as exception_obj:
+            tier_obj = portfolio_registry.tier_for(config_path.stem)
             entry_list.append(
                 PortfolioEntry(
                     name_str=config_path.stem,

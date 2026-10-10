@@ -87,14 +87,14 @@ def test_history_universe_uses_only_past_closes():
     assert universe_df["BBB"].iloc[MIN_HISTORY_SESSION_INT - 1] == 0
 
 
-def test_bench_wired_badge_does_not_open_live_or_portfolio_routes():
+def test_research_variants_have_no_live_or_portfolio_route():
     for module_str, class_str in (
         ("strategies.dv2.strategy_mr_dv2_liquidity_floor_adv_rank", "DVO2LiquidityFloorAdvRankStrategy"),
         ("strategies.dv2.strategy_mr_dv2_industry_etf", "DVO2IndustryEtfStrategy"),
     ):
         entry_obj = catalog.get_strategy_by_module(module_str)
         assert entry_obj is not None
-        assert entry_obj.display_is_wired_bool
+        assert entry_obj.maturity_key_str == "research"
         assert not entry_obj.is_wired_bool
         assert entry_obj.has_run_variant_bool
         assert entry_obj.has_capacity_analysis_bool
