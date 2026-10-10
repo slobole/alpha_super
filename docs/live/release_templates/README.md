@@ -3,12 +3,11 @@
 TL;DR: these files are safe examples only. Real client release YAMLs live under
 `alpha/live/releases/<client_id>/` on each VPS and are ignored by Git.
 
-**Daily pods (CORE5 and every MR capsule template) never go there.** Copy them
-into their own daily release root **outside `alpha\live\releases`** (for example
-`C:\alpha\daily_releases`), never into or below an NDX/TAA root: every serve
-reads all YAMLs under its root, so one rejected daily YAML would stop the
-NDX/TAA serves. See "Validate Staged Releases Before Copying Them Into The
-Active Root" in `docs/live/LIVE_RUNBOOK.md`.
+Daily pods (CORE5 and the MR capsule templates) go in the same folder as
+NDX/TAA. Every serve reads all YAMLs under the root, so one rejected YAML stops
+every serve there, NDX/TAA included: validate the complete staged root first.
+See "Validate Staged Releases Before Copying Them Into The Active Root" in
+`docs/live/LIVE_RUNBOOK.md`.
 
 ## Workflow
 

@@ -171,6 +171,16 @@ def test_daily_unregistration_targets_separate_task_by_default(tmp_path):
     assert capture_dict == {"UnregisteredTaskName": "AlphaDailyOpsWatchdog"}
 
 
+@pytest.mark.parametrize("parameter_dict", [
+    {"Mode": "live", "DailyHeartbeat": True},
+    {"Mode": "live", "DailyHeartbeat": True, "ReleasesRoot": "alpha\\live\\releases"},
+])
+def test_optional_daily_task_may_watch_the_shared_releases_root(tmp_path, parameter_dict):
+    # One releases folder (owner decision 2026-10-11): no separate daily root is required.
+    _, _, capture_dict = _run_setup(tmp_path, parameter_dict)
+    assert capture_dict["TaskName"] == "AlphaDailyOpsWatchdog"
+
+
 def test_wrapper_keeps_a_drive_root_separator(tmp_path):
     arguments_list = _run_wrapper(tmp_path, {"Mode": "paper", "DailyHeartbeat": True, "ReleasesRoot": "D:\\"})
     assert arguments_list[arguments_list.index("--releases-root") + 1] == "D:\\"
@@ -182,12 +192,6 @@ def test_wrapper_keeps_a_drive_root_separator(tmp_path):
         "Refusing to change the NDX/TAA task"),
     ({"TaskName": "AlphaLiveOpsWatchdog", "DailyHeartbeat": True, "Unregister": True}, "Refusing to change the NDX/TAA task"),
     ({"Mode": "live", "HeartbeatUrl": ""}, "Refusing to change the NDX/TAA task"),
-    ({"Mode": "paper", "DailyHeartbeat": True}, "requires -ReleasesRoot"),
-    ({"Mode": "paper", "DailyHeartbeat": True, "ReleasesRoot": "<repo>\\alpha\\live\\releases\\daily"},
-        "must be outside alpha\\live\\releases"),
-    # A relative root resolves against the repo root, as the task's wrapper does.
-    ({"Mode": "paper", "DailyHeartbeat": True, "ReleasesRoot": "alpha\\live\\releases\\daily"},
-        "must be outside alpha\\live\\releases"),
     ({"TaskName": "AlphaLiveOpsWatchdog ", "DailyHeartbeat": True, "ReleasesRoot": "C:\\alpha\\daily_releases"},
         "Refusing to change the NDX/TAA task"),
 ])

@@ -154,8 +154,8 @@ roots. This includes disabled daily releases: `54b417f` parses the whole root
 and can reject a daily YAML before an NDX/TAA serve starts. Its MR capsule
 strategy imports are unsupported. Preserve the YAMLs in the saved
 configuration backup outside all active roots; do not delete the backup.
-Also, **before checking out the old revision**, stop every daily serve,
-unregister the daily watchdog task with
+Also, **before checking out the old revision**, stop every daily serve and, if
+one was registered, unregister the optional daily watchdog task with
 `setup_live_ops_watchdog_task.ps1 -TaskName AlphaDailyOpsWatchdog -Unregister`
 (this form works with both the old and the new script; never run a plain
 `-Unregister`, which removes the NDX/TAA task) and pause the daily external
@@ -709,64 +709,32 @@ In the current deployment model, this path should normally contain releases for 
 ### Validate Staged Releases Before Copying Them Into The Active Root
 
 Each `serve` parses **every `*.yaml` under its configured release root and all of
-its subfolders**, including disabled releases, before applying `--pod-id`. Keep
-CORE5 and MR capsule YAMLs in their **own daily release root, outside
-`alpha\live\releases`** (a folder nested under the NDX/TAA root is still read by
-the NDX/TAA serves). Point each daily serve and the daily watchdog at that root
-with `--releases-root`. The NDX/TAA serves and watchdog continue to read only
-their existing root. A rejected daily YAML then cannot stop those NDX/TAA serves.
-A disabled daily release still has to parse successfully within the daily root.
+its subfolders**, including disabled releases, before applying `--pod-id`.
+CORE5 and MR capsule YAMLs live in the **same release root as NDX/TAA** (owner
+decision 2026-10-11: one releases folder). One rejected YAML, daily or not,
+therefore stops every serve that reads the root, NDX/TAA included. Always run the
+complete-root validation below before copying a new or changed YAML into it.
 
-Start one serve per daily pod with the daily root (its default database is
-`alpha/live/state/<mode>/<pod_id>.sqlite3`):
+Start one serve per daily pod on the same root, like the NDX/TAA serves (its
+default database is `alpha/live/state/<mode>/<pod_id>.sqlite3`):
 
 ```powershell
-uv run python -m alpha.live.scheduler_service serve --mode paper --pod-id <daily_pod_id> --releases-root 'C:\alpha\daily_releases' --log-path 'C:\alpha\daily_logs\events.jsonl'
+uv run python -m alpha.live.scheduler_service serve --mode live --pod-id <daily_pod_id>
 ```
 
-The daily watchdog finds the pod databases through a dashboard mapping file.
-When every daily serve uses the default database path, a missing or empty
-`daily_dashboard.yaml` is correct. If a daily serve uses `--db-path`, list it:
+The existing watchdog task (`AlphaLiveOpsWatchdog`, `-Mode live`) reads the same
+root, so it already covers the daily pods: its Inspector report includes them and
+it posts the daily alerts below. No separate daily task, heartbeat URL or root is
+needed. If a daily serve uses `--db-path`, list it in the dashboard config's
+`db_overrides` so the watchdog and dashboard find its database:
 
 ```yaml
 db_overrides:
-  <daily_pod_id>: C:\alpha\daily_state\<daily_pod_id>.sqlite3
+  <daily_pod_id>: C:\alpha\state\<daily_pod_id>.sqlite3
 ```
 
-Run the daily watchdog **without `-Mode`**, so one task watches every daily pod in
-the daily root, paper and live alike. A `-Mode live` task never watches paper
-pods, and changing its mode later restarts the watch window of every pod.
-
-For a daily-root deployment, use its own scheduled task, report and notification
-state paths. Set `ALPHA_DAILY_HEARTBEAT_URL` in `config.env` to a separate external
-heartbeat check (suggested period 5 minutes, grace 15 minutes). Daily monitoring
-never falls back to the NDX/TAA `ALPHA_INSPECTOR_HEARTBEAT_URL`. An explicit
-`--heartbeat-url=` (or PowerShell `-HeartbeatUrl ''`) disables the heartbeat even
-when the environment URL is set. Daily mode rejects an environment or explicit URL
-that points at the `ALPHA_INSPECTOR_HEARTBEAT_URL` check (same host, port and path,
-ignoring scheme, host case, default ports, trailing slashes, `/fail`-style
-suffixes, query and fragment), reports a configuration failure, and sends neither
-success nor `/fail` to it.
-
-`config.env` is shared with the NDX/TAA watchdog and serves: a malformed line
-stops them, and a UTF-8 byte-order mark (Windows PowerShell `Set-Content
--Encoding utf8` writes one) silently renames the first key. Keep a copy before
-editing, then check that it parses and that every expected key name is listed
-(values are not printed):
-
-```powershell
-.\.venv\Scripts\python.exe -c "import pathlib,sys; from scripts.norgate_config_env import default_config_env_path_obj, load_config_env_file; p=default_config_env_path_obj(); sys.exit('config.env starts with a BOM; save it as UTF-8 without BOM') if p.read_bytes().startswith(b'\xef\xbb\xbf') else None; print(sorted(load_config_env_file(p)))"
-```
-
-The daily task treats each of these as a configuration failure (red report, exit
-1, `/fail` on its own check when configured, one Discord message): no
-`ALPHA_DAILY_HEARTBEAT_URL` and no explicit `--heartbeat-url=`; no
-`ALPHA_DISCORD_WEBHOOK_URL`; no enabled daily release in its root and mode (for
-example a mistyped `-ReleasesRoot`). A failure that persists is reposted once a
-day, not on every run.
-
-It alerts once per pod, alert kind and session, and every message carries the
-required action:
+The watchdog alerts once per pod, alert kind and session, and every message
+carries the required action:
 
 - `decision_incomplete`: no usable decision by the 09:28 cutoff; nothing was sent.
 - `opening_not_dispatched`: five minutes after the open the opening batch was never
@@ -790,34 +758,13 @@ launch between midnight and 09:28 already owes that morning's open and alerts if
 it cannot build and send in time. These alerts never suppress the serve's own
 detailed alerts (owned orders with symbol, quantity, side and client ID; capsule
 holding halts).
-Verify its command before scheduling it (replace the example paths, including
-the event log used by the daily serves and the dashboard DB mapping file):
 
-```powershell
-.\scripts\run_live_ops_watchdog.ps1 -DailyHeartbeat -ReleasesRoot 'C:\alpha\daily_releases' -OutputPath 'C:\alpha\daily_watchdog\ops_report_latest.json' -NotificationStatePath 'C:\alpha\daily_watchdog\notification_state.json' -EventLogPath 'C:\alpha\daily_logs\events.jsonl' -DashboardConfig 'C:\alpha\daily_dashboard.yaml' -Json
-```
-
-After the approved deployment's manual check succeeds, register the same scope:
-
-```powershell
-.\scripts\setup_live_ops_watchdog_task.ps1 -TaskName 'AlphaDailyOpsWatchdog' -DailyHeartbeat -ReleasesRoot 'C:\alpha\daily_releases' -OutputPath 'C:\alpha\daily_watchdog\ops_report_latest.json' -NotificationStatePath 'C:\alpha\daily_watchdog\notification_state.json' -EventLogPath 'C:\alpha\daily_logs\events.jsonl' -DashboardConfig 'C:\alpha\daily_dashboard.yaml' -Json
-```
-
-The existing NDX/TAA watchdog keeps its current root and state paths. Do not
-point two watchdog tasks at the same report, notification state file, or external
-heartbeat check. `-DailyHeartbeat` defaults to task name `AlphaDailyOpsWatchdog`
-and report/state files under `alpha/live/logs/daily_watchdog/`; explicit paths
-above make the deployed scope reviewable. Mode-only setup retains
-`AlphaLiveOpsWatchdog` and its existing defaults. To remove only the daily task,
-use `setup_live_ops_watchdog_task.ps1 -TaskName AlphaDailyOpsWatchdog -Unregister`
-(use the custom name when one was used). These commands are operator
-instructions, not authorization to register a task or deploy.
-
-The setup script refuses every daily-only option (`-DailyHeartbeat`,
-`-ReleasesRoot`, the path options, `-HeartbeatUrl`, `-Json`) when the task name is
-the NDX/TAA task `AlphaLiveOpsWatchdog`, refuses `-DailyHeartbeat` without
-`-ReleasesRoot`, and refuses a daily root inside `alpha\live\releases`. It cannot
-see which roots other serves read; that remains an operator check.
+An optional separate daily task (`setup_live_ops_watchdog_task.ps1 -DailyHeartbeat`,
+default name `AlphaDailyOpsWatchdog`, its own report/state files and
+`ALPHA_DAILY_HEARTBEAT_URL` check) can watch only the daily pods of the same root.
+It is not needed: running it beside `AlphaLiveOpsWatchdog` posts each daily alert
+twice. The setup script refuses daily-only options for the task name
+`AlphaLiveOpsWatchdog`.
 
 Prepare new YAML files outside every active release root. Make an offline staging
 copy of the complete root that the serves will read, add the proposed files there,
@@ -836,11 +783,6 @@ staged_root_path_obj = Path(sys.argv[1]).resolve()
 if not staged_root_path_obj.is_dir() or not any(staged_root_path_obj.rglob("*.yaml")):
     raise SystemExit("Staging root is missing or contains no YAML releases; stop.")
 release_list = load_release_list(str(staged_root_path_obj))
-daily_count_int = sum(1 for release_obj in release_list
-    if release_obj.strategy_import_str == "strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5"
-    or release_obj.strategy_import_str.startswith("strategies.mr_capsule."))
-if 0 < daily_count_int < len(release_list):
-    raise SystemExit("Mixed root: CORE5/MR capsule releases must be in their own daily root; stop.")
 for release_obj in release_list:
     validate_release_manifest(release_obj)
     print(f"PASS: {release_obj.source_path_str}")
@@ -853,7 +795,6 @@ if ($LASTEXITCODE -ne 0) { throw 'Release validation failed; do not copy staged 
 
 This command reads YAML and runs the branch's validation functions. It opens no
 pod database, contacts no broker, and does not sync data or enable a release.
-It refuses a root that mixes daily (CORE5/MR capsule) releases with any other.
 The complete-root check catches duplicate enabled release/pod IDs and daily-pod
 account conflicts within that staged root. Enabled CORE5 and MR capsule LIVE
 releases also require `params.margin_account_confirmed_bool: true`. Require the final
@@ -864,8 +805,7 @@ configuration validation; enablement and deployment still require approval.
 Each CORE5 or MR capsule pod must have its **own dedicated IBKR account/subaccount**
 and full-account budget (`execution.pod_budget_fraction_float: 1.0`). Do not share that account
 with NDX, TAA, another daily pod, or another independently managed strategy.
-Inventory all running serves, scheduled tasks and broker clients, including
-separate release roots: assign a **globally unique broker client ID to each
+Inventory all running serves, scheduled tasks and broker clients: assign a **globally unique broker client ID to each
 concurrent process connecting to the same TWS/IB Gateway session**. Check both
 YAML `broker.client_id_int` (or flat `broker_client_id_int`) and command-line
 `--broker-client-id` overrides.

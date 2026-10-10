@@ -9,10 +9,12 @@ Usage:
   .\scripts\setup_live_ops_watchdog_task.ps1 -Mode live       # scope to live only
   .\scripts\setup_live_ops_watchdog_task.ps1 -IntervalMinutes 10
   .\scripts\setup_live_ops_watchdog_task.ps1 -Unregister      # remove
-  .\scripts\setup_live_ops_watchdog_task.ps1 -Mode live -DailyHeartbeat -ReleasesRoot C:\alpha\daily_releases
+  .\scripts\setup_live_ops_watchdog_task.ps1 -Mode live -DailyHeartbeat   # optional daily-only task
 
-DailyHeartbeat uses a separate default task name, report and notification state,
-and requires -ReleasesRoot outside alpha\live\releases. Daily-only options are
+Daily pods share the NDX/TAA releases root, and the AlphaLiveOpsWatchdog task
+already covers them. The optional DailyHeartbeat task watches only the daily pods
+with a separate default task name, report and notification state; running it
+beside AlphaLiveOpsWatchdog posts each daily alert twice. Daily-only options are
 refused for the NDX/TAA task name AlphaLiveOpsWatchdog.
 Use EventLogPath and DashboardConfig to match the daily serves' saved evidence.
 With -DailyHeartbeat, HeartbeatUrl '' explicitly disables the daily dead-man
@@ -64,20 +66,6 @@ $daily_option_list = @("DailyHeartbeat", "ReleasesRoot", "OutputPath", "Notifica
 if ($TaskName.Trim() -eq "AlphaLiveOpsWatchdog" -and $daily_option_list) {
     throw ("Refusing to change the NDX/TAA task 'AlphaLiveOpsWatchdog' with daily-only option(s): " +
         ($daily_option_list -join ", ") + ". Use -DailyHeartbeat with its own task name.")
-}
-if ($DailyHeartbeat -and -not $Unregister) {
-    if (-not $ReleasesRoot) {
-        throw "-DailyHeartbeat requires -ReleasesRoot: the daily pods' own release root."
-    }
-    $legacy_root_path_str = [IO.Path]::GetFullPath((Join-Path $repo_root_path_str "alpha\live\releases")).TrimEnd('\')
-    # The task runs from the repo root, so resolve a relative root the same way
-    # (.NET's own current directory is not the PowerShell location).
-    $daily_root_input_str = if ([IO.Path]::IsPathRooted($ReleasesRoot)) { $ReleasesRoot } else { Join-Path $repo_root_path_str $ReleasesRoot }
-    $daily_root_path_str = [IO.Path]::GetFullPath($daily_root_input_str).TrimEnd('\')
-    if ($daily_root_path_str -eq $legacy_root_path_str -or
-            $daily_root_path_str.StartsWith($legacy_root_path_str + "\", [StringComparison]::OrdinalIgnoreCase)) {
-        throw "The daily release root must be outside alpha\live\releases (the NDX/TAA root reads every subfolder)."
-    }
 }
 
 if ($Unregister) {
