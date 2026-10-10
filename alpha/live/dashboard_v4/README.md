@@ -236,6 +236,13 @@ and plan creation times.
 The selected cycle sits above financial context: history picker, seven steps,
 then Plan vs actual, Decision, Orders, Fills, Reconcile and Events tabs.
 Failed cycles show their evidence and a short review instruction.
+Daily pods (CORE5, MR capsule) also get an **Exceptions** tab with the selected
+cycle's saved close-of-day exceptions: symbol, the trade still missing to reach
+the plan, a readable reason, expected and actual shares (a target-weight intent
+shows its weight). Same-day MKT exit completions are noted above the table. When
+exceptions exist, the Reconcile step links there and the tab opens by default
+unless a step failed. Monthly pods never show the tab; `?tab=exceptions` falls
+back to their default tab.
 The Pod heading always shows the current Pod state, including non-cycle gates
 and database failures. The selected cycle has a separate badge and verdict.
 

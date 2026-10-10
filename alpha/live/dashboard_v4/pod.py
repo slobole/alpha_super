@@ -13,7 +13,8 @@ from alpha.live.ops_report import parse_timestamp_ts
 
 
 TAB_TUPLE = (("plan", "Plan vs actual"), ("decision", "Decision"), ("orders", "Orders"),
-             ("fills", "Fills"), ("reconcile", "Reconcile"), ("events", "Broker events"), ("files", "Files"))
+             ("fills", "Fills"), ("reconcile", "Reconcile"), ("exceptions", "Exceptions"),
+             ("events", "Broker events"), ("files", "Files"))
 STEP_TAB_DICT = {"Data": "decision", "Decide": "decision", "Plan": "plan", "Submit": "orders",
                  "Fill": "fills", "Reconcile": "reconcile", "EOD": "events"}
 
@@ -193,6 +194,36 @@ def build_evidence_tables_dict(source_dict, *, as_of_ts, fresh_bool):
     return result_dict
 
 
+def build_daily_exceptions_table_dict(daily_cycle_dict):
+    """Daily pods only: one row per saved close-of-day exception (what is missing to reach the plan)."""
+    from alpha.live.dashboard_v4.daily_cycle import EXCEPTION_REASON_LABEL_DICT
+
+    ok_bool = daily_cycle_dict.get("status_str") == "ok"
+    result_dict = (daily_cycle_dict.get("execution_result_dict") or {}) if ok_bool else {}
+    row_list = []
+    for item_dict in result_dict.get("exception_list") or []:
+        side_str, quantity_float = item_dict.get("side_str"), _number_float(item_dict.get("quantity_float"))
+        missing_str = f"{side_str} {_number_str(quantity_float)}" if side_str in {"BUY", "SELL"} and quantity_float is not None else "—"
+        expected_float, weight_float = _number_float(item_dict.get("expected_share_float")), _number_float(item_dict.get("target_weight_float"))
+        expected_str = (_number_str(expected_float) if expected_float is not None
+            else _number_str(weight_float * 100) + "% weight" if weight_float is not None else "—")
+        row_list.append(_row_dict([_text_str(item_dict.get("asset_str")), missing_str,
+            EXCEPTION_REASON_LABEL_DICT.get(item_dict.get("reason_str"), "Other exception"),
+            expected_str, _number_str(item_dict.get("actual_share_float"))]))
+    note_list = []
+    count_int = result_dict.get("exception_count_int")
+    if isinstance(count_int, int) and count_int > len(row_list):
+        note_list.append(f"Showing {len(row_list)} of {count_int} exceptions.")
+    completion_list = [_text_str(item_dict.get("asset_str")) for item_dict in
+        (daily_cycle_dict.get("completion_request_list") or [] if ok_bool else [])]
+    if completion_list:
+        note_list.append("Same-day exit completion (MKT): " + ", ".join(completion_list) + ".")
+    table_dict = _table_dict(["Symbol", "Missing trade", "Reason", "Expected", "Actual"], row_list, note_str=" ".join(note_list))
+    table_dict["empty_str"] = ("No exceptions: the day closed as planned." if result_dict.get("status_str") == "completed"
+        else "No close-of-day result yet for this cycle." if ok_bool else "Close-of-day exceptions could not be read.")
+    return table_dict
+
+
 def build_pod_page_dict(overview_dict, source_dict, finance_dict, *, pod_id_str, as_of_ts, tab_str=""):
     pod_summary_dict = next(item_dict for item_dict in overview_dict["pod_list"] if item_dict["pod_id_str"] == pod_id_str)
     row_dict = deepcopy(source_dict.get("pod_row_dict") or {})
@@ -226,9 +257,18 @@ def build_pod_page_dict(overview_dict, source_dict, finance_dict, *, pod_id_str,
             # Do not display that value as the actual acknowledgement time.
             if submit_ts is not None and all(ack_ts > submit_ts for ack_ts in ack_time_list):
                 step_list[3].update(actual_time_str=_time_str(max(ack_time_list).isoformat(), as_of_ts), delta_str="", time_kind_str="ACK")
-    failed_step_dict = next((step_dict for step_dict in step_list if step_dict["state_str"] == "Failed"), {})
-    tab_str = tab_str or failed_step_dict.get("tab_str") or "plan"
     tables_dict = build_evidence_tables_dict(source_dict, as_of_ts=as_of_ts, fresh_bool=fresh_bool)
+    if "daily_cycle_dict" in row_dict:
+        tables_dict["exceptions"] = build_daily_exceptions_table_dict(row_dict["daily_cycle_dict"])
+        if tables_dict["exceptions"]["row_list"]:
+            # A daily close is judged from holdings: its evidence is the exceptions list.
+            for step_dict in step_list:
+                if step_dict["label_str"] == "Reconcile":
+                    step_dict["tab_str"] = "exceptions"
+    failed_step_dict = next((step_dict for step_dict in step_list if step_dict["state_str"] == "Failed"), {})
+    if tab_str not in tables_dict:
+        tab_str = ""
+    tab_str = tab_str or failed_step_dict.get("tab_str") or ("exceptions" if (tables_dict.get("exceptions") or {}).get("row_list") else "plan")
     selected_dict = source_dict.get("selected_cycle_dict") or {}
     historical_bool = bool(selected_dict) and not selected_dict.get("current_bool", False)
     scheduler_dict = pod_summary_dict.get("scheduler_dict") or {}
@@ -307,7 +347,8 @@ def build_pod_page_dict(overview_dict, source_dict, finance_dict, *, pod_id_str,
         "verdict_detail_str": verdict_detail_str,
         "issue_bool": issue_bool, "issue_title_str": issue_title_str, "issue_detail_str": issue_detail_str,
         "step_list": step_list, "tab_str": tab_str, "table_dict": tables_dict[tab_str], "tables_dict": tables_dict,
-        "tab_list": [{"key_str": key_str, "label_str": label_str, "count_int": len(tables_dict[key_str]["row_list"]) if key_str in {"orders", "fills"} else None} for key_str, label_str in TAB_TUPLE if key_str != "files" or tables_dict["files"]["row_list"]],
+        "tab_list": [{"key_str": key_str, "label_str": label_str, "count_int": len(tables_dict[key_str]["row_list"]) if key_str in {"orders", "fills", "exceptions"} else None}
+            for key_str, label_str in TAB_TUPLE if key_str in tables_dict and (key_str != "files" or tables_dict["files"]["row_list"])],
         "cycle_list": source_dict.get("cycle_list") or [], "selected_cycle_dict": selected_dict,
         "history_truncated_bool": source_dict.get("history_truncated_bool", False),
         "historical_bool": historical_bool,

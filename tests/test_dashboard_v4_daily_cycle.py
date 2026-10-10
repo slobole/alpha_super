@@ -367,3 +367,53 @@ def test_pod_page_issue_title_and_detail_come_from_the_projection(daily_wiring_t
     assert page_dict["issue_detail_str"].startswith("The opening batch never reached the broker.")
     assert page_dict["attention_dict"]["daily_status_key_str"] == "not_sent"
     assert [step_dict["fact_str"] for step_dict in page_dict["step_list"]][3] == "Not sent"
+
+
+def _weight_exception():
+    return {"asset_str": "AAPL", "side_str": "BUY", "quantity_float": 12.0, "reason_str": "decision_intent_not_dispatched",
+        "expected_share_float": None, "actual_share_float": 0.0, "target_weight_float": 0.1, "intent_str": "target_weight"}
+
+
+def test_exceptions_table_lists_each_saved_exception_with_readable_reason():
+    from alpha.live.dashboard_v4.pod import build_daily_exceptions_table_dict
+    daily_dict = _closed("completed_with_exceptions", [_exception("actual_holding_differs_from_vplan"), _weight_exception(),
+        _exception("some_future_reason")])
+    daily_dict["completion_request_list"] = [{"asset_str": "DBC", "vplan_id_int": 9, "claimed_timestamp_str": None, "send_failed_bool": False}]
+    table_dict = build_daily_exceptions_table_dict(daily_dict)
+    assert table_dict["column_list"] == ["Symbol", "Missing trade", "Reason", "Expected", "Actual"]
+    assert [row_dict["cell_list"] for row_dict in table_dict["row_list"]] == [
+        ["SPY", "BUY 3", "Not filled / holding differs from plan", "10", "7"],
+        ["AAPL", "BUY 12", "Not sent", "10% weight", "0"],
+        ["SPY", "BUY 3", "Other exception", "10", "7"]]
+    assert table_dict["note_str"] == "Same-day exit completion (MKT): DBC."
+
+
+def test_exceptions_table_says_when_rows_are_capped_and_explains_empty_states():
+    from alpha.live.dashboard_v4.pod import build_daily_exceptions_table_dict
+    capped_dict = _closed("completed_with_exceptions", [_exception("decision_intent_not_dispatched")])
+    capped_dict["execution_result_dict"]["exception_count_int"] = 250
+    assert build_daily_exceptions_table_dict(capped_dict)["note_str"] == "Showing 1 of 250 exceptions."
+    assert build_daily_exceptions_table_dict(_closed("completed"))["empty_str"] == "No exceptions: the day closed as planned."
+    assert build_daily_exceptions_table_dict(_daily_dict())["empty_str"] == "No close-of-day result yet for this cycle."
+    assert build_daily_exceptions_table_dict({"status_str": "unknown"})["empty_str"] == "Close-of-day exceptions could not be read."
+
+
+def test_pod_page_shows_the_exceptions_tab_for_daily_pods_only(daily_wiring_tuple):
+    workspace_dict, _, provider_obj, _ = daily_wiring_tuple
+    overview_dict = _overview(workspace_dict, provider_obj)
+    daily_pod_str, monthly_pod_str = (overview_dict["pod_list"][index_int]["pod_id_str"] for index_int in (0, 1))
+    source_dict = provider_obj.get_pod_cycles_dict(daily_pod_str, as_of_ts=DEMO_NOW_TS)
+    daily_dict = _closed("completed_with_exceptions", [_exception("actual_holding_differs_from_vplan")])
+    daily_dict["as_of_timestamp_str"] = DEMO_NOW_TS.isoformat()
+    source_dict["pod_row_dict"]["daily_cycle_dict"] = daily_dict
+    page_dict = build_pod_page_dict(overview_dict, source_dict, {}, pod_id_str=daily_pod_str, as_of_ts=DEMO_NOW_TS)
+    tab_dict = next(item_dict for item_dict in page_dict["tab_list"] if item_dict["key_str"] == "exceptions")
+    assert (tab_dict["label_str"], tab_dict["count_int"]) == ("Exceptions", 1)
+    assert next(step_dict for step_dict in page_dict["step_list"] if step_dict["label_str"] == "Reconcile")["tab_str"] == "exceptions"
+    selected_dict = build_pod_page_dict(overview_dict, source_dict, {}, pod_id_str=daily_pod_str, as_of_ts=DEMO_NOW_TS, tab_str="exceptions")
+    assert selected_dict["table_dict"]["row_list"][0]["cell_list"][0] == "SPY"
+    monthly_source_dict = provider_obj.get_pod_cycles_dict(monthly_pod_str, as_of_ts=DEMO_NOW_TS)
+    monthly_dict = build_pod_page_dict(overview_dict, monthly_source_dict, {}, pod_id_str=monthly_pod_str,
+        as_of_ts=DEMO_NOW_TS, tab_str="exceptions")
+    assert "exceptions" not in {item_dict["key_str"] for item_dict in monthly_dict["tab_list"]}
+    assert monthly_dict["tab_str"] != "exceptions"

@@ -44,7 +44,8 @@ Buy dropped (funding); `bil_buy_withheld_after_funding_buys_dropped` BIL buy wit
    `daily_demo.py` seeding real writers (paper, `demo_daily_*`).
 2. Dropped (one releases folder): daily LIVE pods already appear beside NDX/TAA, money included through the
    existing single-root workspace and IBKR sync. Still open: wire `daily_demo.py` into the demo app (`--demo-daily`).
-3. Exceptions tab and same-day completion orders in evidence (`:daily-completion:` keys).
+3. Done 2026-10-11: Exceptions tab on the Pod page (per-symbol close-of-day exceptions, same-day MKT completions
+   noted). Still open: show completion orders as rows in the Orders tab (`:daily-completion:` keys).
 4. Next-trade forecast after an exceptions day (`next_operation.py`, `dashboard.py:1433` status tuple).
 5. System page: daily watchdog report, receipt, `.daily.sqlite3` alert keys, pod outboxes.
 6. Activity labels for daily events; pending reconciles quiet; mode filter.
