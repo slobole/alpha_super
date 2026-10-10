@@ -154,8 +154,7 @@ class DailyAlertDelivery:
     delivered_bool: bool
 
 
-def deliver_daily_alerts(summary_dict, *, webhook_url_str, webhook_poster_fn, mode_str=None, now_ts=None,
-        suppressed_session_key_set=None):
+def deliver_daily_alerts(summary_dict, *, webhook_url_str, webhook_poster_fn, mode_str=None, now_ts=None):
     if not webhook_url_str:
         return []
     delivery_list = []
@@ -187,15 +186,10 @@ def deliver_daily_alerts(summary_dict, *, webhook_url_str, webhook_poster_fn, mo
                 continue
             delivered_bool = False
             try:
-                payload_body_dict = json.loads(alert_dict["payload_json_str"])
-                session_str = (payload_body_dict.get("session_close_timestamp_str", "")[:10]
-                    if alert_dict["alert_kind_str"] == "cycle_overdue" else
-                    payload_body_dict.get("signal_date_str", "") if alert_dict["alert_kind_str"] == "capsule_holding_halt" else "")
-                session_key_str = "|".join((configured_mode_str, pod_id_str, session_str))
-                delivered_bool = session_key_str in (suppressed_session_key_set or set())
-                if not delivered_bool:
-                    delivered_bool = all(bool(webhook_poster_fn(webhook_url_str, payload_dict))
-                        for payload_dict in _payload_list(alert_dict, current_status_str))
+                # Detailed alerts (owned orders, holdings) are always posted,
+                # even when the watchdog heartbeat already flagged the session.
+                delivered_bool = all(bool(webhook_poster_fn(webhook_url_str, payload_dict))
+                    for payload_dict in _payload_list(alert_dict, current_status_str))
             finally:
                 with closing(sqlite3.connect(db_uri_str, uri=True, timeout=5.0)) as connection_obj, connection_obj:
                     connection_obj.execute(f"""UPDATE daily_pod_alert SET delivered_timestamp_str=?,

@@ -24,15 +24,23 @@ def isolated_watchdog_io(monkeypatch):
     real_load_delivered_key_set_fn = watchdog_module.daily_watchdog_module.load_delivered_key_set
     monkeypatch.delenv(DAILY_HEARTBEAT_ENV_STR, raising=False)
     monkeypatch.setattr(watchdog_module.ops_report_module, "utc_now_ts", lambda: AS_OF_TS)
+    real_refresh_enabled_since_fn = watchdog_module.daily_watchdog_module.refresh_enabled_since_dict
     monkeypatch.setattr(watchdog_module.daily_watchdog_module, "daily_heartbeat_alert_list",
         lambda *args, **kwargs: [])
     monkeypatch.setattr(watchdog_module.daily_watchdog_module, "load_delivered_key_set",
         lambda *args, **kwargs: set())
+    # The fake dashboard has no release files: report one enabled daily pod and
+    # no enabled-since history unless a test exercises those checks itself.
+    monkeypatch.setattr(watchdog_module.daily_watchdog_module, "enabled_daily_release_count_int",
+        lambda *args, **kwargs: 1)
+    monkeypatch.setattr(watchdog_module.daily_watchdog_module, "refresh_enabled_since_dict",
+        lambda *args, **kwargs: {})
     # Durable per-cycle delivery is covered by its own SQLite tests; this file
     # isolates the watchdog routing and failure boundary without opening pod DBs.
     monkeypatch.setattr(watchdog_module, "_run_capsule_notifications_tuple",
         lambda *args, **kwargs: ({}, []))
-    return real_load_delivered_key_set_fn
+    return {"load_delivered_key_set": real_load_delivered_key_set_fn,
+        "refresh_enabled_since_dict": real_refresh_enabled_since_fn}
 
 
 def _daily_row_dict(strategy_import_str=CORE5_STRATEGY_IMPORT_STR, *,
@@ -133,14 +141,21 @@ def test_daily_heartbeat_url_is_independent_and_empty_override_disables(monkeypa
     argv_list = ["--daily-heartbeat"]
     if override_str is not None:
         argv_list.extend(["--heartbeat-url", override_str])
-    return_code_int, heartbeat_list, _, _ = _run_watchdog(monkeypatch, tmp_path,
+    return_code_int, heartbeat_list, webhook_list, _ = _run_watchdog(monkeypatch, tmp_path,
         summary_dict={"as_of_timestamp_str": AS_OF_TS.isoformat(),
             "pod_row_dict_list": [_daily_row_dict()]},
-        heartbeat_env_url_str=HEARTBEAT_URL_STR, extra_argv_list=argv_list)
-    assert return_code_int == 0
+        heartbeat_env_url_str=HEARTBEAT_URL_STR, discord_webhook_url_str="mock-discord",
+        extra_argv_list=argv_list)
+    result_dict = json.loads(capsys.readouterr().out)
     assert [url_str for url_str, _ in heartbeat_list] == ([] if expected_url_str is None else [expected_url_str])
-    assert json.loads(capsys.readouterr().out)["heartbeat_status_str"] == (
-        "disabled" if expected_url_str is None else "sent")
+    assert result_dict["heartbeat_status_str"] == ("disabled" if expected_url_str is None else "sent")
+    if daily_env_str is None and override_str is None:
+        # A missing daily URL is a broken monitor, not a silent opt-out.
+        assert return_code_int == 1 and len(webhook_list) == 1
+        assert result_dict["daily_watchdog_error_list"] == [{
+            "reason_code_str": "daily_watchdog_heartbeat_url_missing", "error_type_str": "ConfigurationError"}]
+    else:
+        assert return_code_int == 0 and webhook_list == []
 
 
 def test_daily_default_paths_are_distinct_before_any_report_write(monkeypatch, capsys):
@@ -168,19 +183,19 @@ def test_daily_configured_event_log_reaches_dashboard_and_daily_check(monkeypatc
         return []
     monkeypatch.setattr(watchdog_module.daily_watchdog_module, "daily_heartbeat_alert_list", daily_check_fn)
     return_code_int, _, _, _ = _run_watchdog(monkeypatch, tmp_path,
-        summary_builder_fn=summary_builder_fn,
-        extra_argv_list=["--daily-heartbeat", "--event-log-path", log_path_str])
+        summary_builder_fn=summary_builder_fn, discord_webhook_url_str="mock-discord",
+        extra_argv_list=["--daily-heartbeat", "--event-log-path", log_path_str, "--heartbeat-url", ""])
     assert return_code_int == 0
     assert observed_app_dict["event_log_path_str"] == log_path_str
     assert observed_check_list[0][0][2] == log_path_str
 
 
-@pytest.mark.parametrize("failure_phase_str", ["check", "delivered_state"])
+@pytest.mark.parametrize("failure_phase_str", ["check", "enabled_since_state"])
 def test_daily_check_failures_are_visible_once_without_monthly_contamination(
         monkeypatch, tmp_path, capsys, failure_phase_str):
     def fail_fn(*args, **kwargs):
         raise RuntimeError("private-token-and-path-must-not-be-printed")
-    method_name_str = "daily_heartbeat_alert_list" if failure_phase_str == "check" else "load_delivered_key_set"
+    method_name_str = "daily_heartbeat_alert_list" if failure_phase_str == "check" else "refresh_enabled_since_dict"
     monkeypatch.setattr(watchdog_module.daily_watchdog_module, method_name_str, fail_fn)
     monkeypatch.setenv(DAILY_HEARTBEAT_ENV_STR, DAILY_HEARTBEAT_URL_STR)
     return_code_int, heartbeat_list, webhook_list, report_path_obj = _run_watchdog(monkeypatch,
@@ -232,9 +247,11 @@ def test_real_daily_dedup_cache_failure_is_loud_and_daily_only(monkeypatch, tmp_
     import sqlite3
 
     state_path_obj = tmp_path / "watchdog_notification_state.daily.sqlite3"
-    # Restore the real reader saved before this file's no-I/O autofixture.
-    monkeypatch.setattr(watchdog_module.daily_watchdog_module, "load_delivered_key_set",
-        isolated_watchdog_io)
+    # Restore the real state writer saved before this file's no-I/O autofixture;
+    # no release files are needed to reach the watchdog-owned SQLite state.
+    monkeypatch.setattr(watchdog_module.daily_watchdog_module, "refresh_enabled_since_dict",
+        isolated_watchdog_io["refresh_enabled_since_dict"])
+    monkeypatch.setattr(watchdog_module.daily_watchdog_module, "load_release_list", lambda _root_str: [])
     with ExitStack() as context_obj:
         if cache_failure_str == "corrupt":
             state_path_obj.write_bytes(b"not a SQLite database")
@@ -300,30 +317,27 @@ def test_daily_heartbeat_transport_exception_is_contained_and_never_leaks_secret
     assert "secret" not in captured_obj.out + captured_obj.err + json.dumps(webhook_list)
 
 
-def test_failed_daily_delivery_still_loads_prior_success_suppression(monkeypatch, tmp_path, capsys):
-    suppressed_key_set = {"live|other_daily_pod|2026-06-08"}
-    read_path_list = []
-    received_key_list = []
+def test_failed_daily_delivery_is_visible_and_never_suppresses_detailed_alerts(monkeypatch, tmp_path, capsys):
+    received_call_list = []
     monkeypatch.setattr(watchdog_module.daily_watchdog_module, "daily_heartbeat_alert_list",
-        lambda *args, **kwargs: [{"pod_id_str": "daily_core5"}])
+        lambda *args, **kwargs: [{"pod_id_str": "daily_core5", "kind_str": "decision_incomplete"}])
     def failed_delivery_fn(*args, **kwargs):
         assert kwargs["raise_on_failure_bool"] is True
         raise watchdog_module.daily_watchdog_module.DailyHeartbeatDeliveryError(1)
-    def load_keys_fn(state_path_str):
-        read_path_list.append(state_path_str)
-        return suppressed_key_set
-    def capsule_delivery_fn(summary_dict, mode_str, webhook_url_str, suppressed_session_key_set):
-        received_key_list.append(suppressed_session_key_set)
+    def capsule_delivery_fn(summary_dict, mode_str, webhook_url_str):
+        # The serve's detailed outbox runs with no heartbeat-based suppression.
+        received_call_list.append((mode_str, webhook_url_str))
         return {}, []
     monkeypatch.setattr(watchdog_module.daily_watchdog_module, "deliver_daily_heartbeat_alerts", failed_delivery_fn)
-    monkeypatch.setattr(watchdog_module.daily_watchdog_module, "load_delivered_key_set", load_keys_fn)
+    monkeypatch.setattr(watchdog_module.daily_watchdog_module, "load_delivered_key_set",
+        lambda *_args: pytest.fail("Delivered heartbeat keys must not suppress detailed alerts"))
     monkeypatch.setattr(watchdog_module, "_run_capsule_notifications_tuple", capsule_delivery_fn)
     monkeypatch.setenv(DAILY_HEARTBEAT_ENV_STR, DAILY_HEARTBEAT_URL_STR)
     return_code_int, heartbeat_list, webhook_list, _ = _run_watchdog(monkeypatch, tmp_path,
         summary_dict=_mixed_summary_dict(), heartbeat_env_url_str=HEARTBEAT_URL_STR,
         discord_webhook_url_str="mock-discord", extra_argv_list=["--daily-heartbeat"])
-    assert return_code_int == 1 and len(read_path_list) == 1
-    assert received_key_list == [suppressed_key_set]
+    assert return_code_int == 1
+    assert received_call_list == [(None, "mock-discord")]
     assert len(webhook_list) == 1
     assert [url_str for url_str, _ in heartbeat_list] == [DAILY_HEARTBEAT_URL_STR + "/fail"]
     assert json.loads(capsys.readouterr().out)["daily_watchdog_error_list"] == [{

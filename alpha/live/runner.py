@@ -4083,6 +4083,7 @@ def _reconcile_daily_cycles(state_store_obj, broker_adapter_resolver_obj, as_of_
                 # Recording failure is observable but cannot veto fresh holdings
                 # settlement. The subsequent daily refresh remains mandatory.
                 reporting_error_str = None
+                reporting_retryable_bool = True
                 try:
                     allowed_order_id_set = {str(row_dict["broker_order_id_str"]) for row_dict in
                         state_store_obj.get_broker_order_row_dict_list_for_vplan(vplan_obj.vplan_id_int)}
@@ -4116,12 +4117,23 @@ def _reconcile_daily_cycles(state_store_obj, broker_adapter_resolver_obj, as_of_
                     reporting_error_str = _persist_daily_execution_report(state_store_obj, broker_adapter_obj, release_obj, decision_plan_obj,
                         vplan_obj, record_list, event_list, fill_list, as_of_ts, log_path_str,
                         collect_open_prices_bool=True)
+                    if reporting_error_str is not None:
+                        # The fills are saved. The broker only serves the open of
+                        # the current session, so after the next open an open-price
+                        # retry can never succeed: finish the report without it.
+                        report_session_date_obj = scheduler_utils.to_market_timestamp_ts(
+                            decision_plan_obj.target_execution_timestamp_ts, release_obj.session_calendar_id_str).date()
+                        reporting_retryable_bool = as_of_ts < scheduler_utils.get_session_open_timestamp_ts(
+                            scheduler_utils.get_next_session_label_ts(report_session_date_obj, release_obj.session_calendar_id_str),
+                            release_obj.session_calendar_id_str)
                 except Exception as exception_obj:
                     reporting_error_str = str(exception_obj) or type(exception_obj).__name__
+                    reporting_retryable_bool = True
                     log_event("daily_fill_reporting_unavailable", _build_decision_plan_log_payload_dict(
                         release_obj, decision_plan_obj, as_of_ts, {"severity_str": "warning", "error_str": str(exception_obj)}), log_path_str=log_path_str)
                 try:
-                    finish_post_close_report_attempt(state_store_obj, decision_plan_obj, reporting_error_str)
+                    finish_post_close_report_attempt(state_store_obj, decision_plan_obj, reporting_error_str,
+                        retryable_bool=reporting_retryable_bool)
                 except Exception as exception_obj:
                     log_event("daily_report_audit_unavailable", _build_decision_plan_log_payload_dict(
                         release_obj, decision_plan_obj, as_of_ts, {"severity_str": "warning", "error_str": str(exception_obj)}), log_path_str=log_path_str)

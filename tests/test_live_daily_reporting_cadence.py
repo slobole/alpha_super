@@ -219,3 +219,47 @@ def test_reporting_claim_rejects_monthly_release_without_creating_daily_table(da
         claim_post_close_report_attempt(store_obj, monthly_release_obj, decision_obj, CLOSE_TS)
     with store_obj._connect() as connection_obj:
         assert connection_obj.execute("SELECT 1 FROM sqlite_master WHERE name='daily_post_close_report'").fetchone() is None
+
+
+def test_open_price_failure_after_next_open_finishes_report_without_retry(daily_case, tmp_path):
+    store_obj, _, decision_obj, plan_obj, broker_obj = daily_case
+    broker_obj.position_dict.update(plan_obj.target_share_map)
+    # First post-close pass only on the next morning: the broker serves the
+    # current session's tick open, so an open-price retry can never succeed.
+    broker_obj.as_of_ts = datetime(2026, 10, 6, 9, 45, tzinfo=MARKET_ZONE_OBJ)
+    count_dict = _reporting_counts_dict(broker_obj, "open_price")
+    _poll(store_obj, broker_obj, tmp_path)
+    assert count_dict == {"history": 1, "open_price": 1}
+    with store_obj._connect() as connection_obj:
+        status_str, error_str = connection_obj.execute("SELECT status_str,error_str FROM daily_post_close_report").fetchone()
+    assert status_str == "reported" and "synthetic open reference failure" in error_str
+    assert daily_reporting.get_retry_post_close_report_decision_id_list(
+        store_obj, broker_obj.as_of_ts + timedelta(minutes=1), env_mode_str="paper") == []
+    broker_obj.as_of_ts += timedelta(seconds=30)
+    _poll(store_obj, broker_obj, tmp_path)
+    assert count_dict == {"history": 1, "open_price": 1}
+
+
+def test_stale_attempt_from_stopped_process_is_retried_after_lease(daily_case):
+    store_obj, release_obj, decision_obj, _, _ = daily_case
+    assert claim_post_close_report_attempt(store_obj, release_obj, decision_obj, CLOSE_TS)
+    retry_ids = daily_reporting.get_retry_post_close_report_decision_id_list
+    within_lease_ts = CLOSE_TS + daily_reporting.REPORT_ATTEMPT_LEASE - timedelta(seconds=1)
+    assert not claim_post_close_report_attempt(store_obj, release_obj, decision_obj, within_lease_ts)
+    assert retry_ids(store_obj, within_lease_ts, env_mode_str="paper") == []
+    after_lease_ts = CLOSE_TS + daily_reporting.REPORT_ATTEMPT_LEASE
+    assert retry_ids(store_obj, after_lease_ts, env_mode_str="paper") == [decision_obj.decision_plan_id_int]
+    assert claim_post_close_report_attempt(store_obj, release_obj, decision_obj, after_lease_ts)
+    assert not claim_post_close_report_attempt(store_obj, release_obj, decision_obj, after_lease_ts)
+
+
+def test_failed_report_retries_stop_after_retry_window(daily_case):
+    store_obj, release_obj, decision_obj, _, _ = daily_case
+    assert claim_post_close_report_attempt(store_obj, release_obj, decision_obj, CLOSE_TS)
+    daily_reporting.finish_post_close_report_attempt(store_obj, decision_obj, "broker outage")
+    retry_ids = daily_reporting.get_retry_post_close_report_decision_id_list
+    last_ts = CLOSE_TS + daily_reporting.REPORT_RETRY_WINDOW - timedelta(seconds=1)
+    assert retry_ids(store_obj, last_ts, env_mode_str="paper") == [decision_obj.decision_plan_id_int]
+    expired_ts = CLOSE_TS + daily_reporting.REPORT_RETRY_WINDOW
+    assert retry_ids(store_obj, expired_ts, env_mode_str="paper") == []
+    assert not claim_post_close_report_attempt(store_obj, release_obj, decision_obj, expired_ts)

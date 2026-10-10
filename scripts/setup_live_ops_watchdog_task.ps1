@@ -11,10 +11,12 @@ Usage:
   .\scripts\setup_live_ops_watchdog_task.ps1 -Unregister      # remove
   .\scripts\setup_live_ops_watchdog_task.ps1 -Mode live -DailyHeartbeat -ReleasesRoot C:\alpha\daily_releases
 
-DailyHeartbeat uses a separate default task name, report and notification state.
+DailyHeartbeat uses a separate default task name, report and notification state,
+and requires -ReleasesRoot outside alpha\live\releases. Daily-only options are
+refused for the NDX/TAA task name AlphaLiveOpsWatchdog.
 Use EventLogPath and DashboardConfig to match the daily serves' saved evidence.
-HeartbeatUrl '' explicitly disables the external heartbeat; otherwise Python
-loads the applicable heartbeat environment variable from config.env.
+With -DailyHeartbeat, HeartbeatUrl '' explicitly disables the daily dead-man
+ping; otherwise Python requires ALPHA_DAILY_HEARTBEAT_URL from config.env.
 
 Scope the task to -Mode live when incubation/paper rehearsal pods would
 otherwise keep the dead-man switch permanently red (rehearsal pods build plans
@@ -49,14 +51,38 @@ if ($DailyHeartbeat -and -not $PSBoundParameters.ContainsKey("TaskName")) {
     $TaskName = "AlphaDailyOpsWatchdog"
 }
 
+$script_dir_path_str = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repo_root_path_str = Split-Path -Parent $script_dir_path_str
+
+# Guard the existing NDX/TAA task: daily-only options must never repoint or
+# replace it (a forgotten -DailyHeartbeat would watch the daily root while the
+# legacy dead-man check stays green).
+# Capture first: inside a script block $PSBoundParameters is that block's own.
+$bound_parameter_dict = $PSBoundParameters
+$daily_option_list = @("DailyHeartbeat", "ReleasesRoot", "OutputPath", "NotificationStatePath", "HeartbeatUrl",
+    "EventLogPath", "DashboardConfig", "Json") | Where-Object { $bound_parameter_dict.ContainsKey($_) }
+if ($TaskName -eq "AlphaLiveOpsWatchdog" -and $daily_option_list) {
+    throw ("Refusing to change the NDX/TAA task 'AlphaLiveOpsWatchdog' with daily-only option(s): " +
+        ($daily_option_list -join ", ") + ". Use -DailyHeartbeat with its own task name.")
+}
+if ($DailyHeartbeat -and -not $Unregister) {
+    if (-not $ReleasesRoot) {
+        throw "-DailyHeartbeat requires -ReleasesRoot: the daily pods' own release root."
+    }
+    $legacy_root_path_str = [IO.Path]::GetFullPath((Join-Path $repo_root_path_str "alpha\live\releases")).TrimEnd('\')
+    $daily_root_path_str = [IO.Path]::GetFullPath($ReleasesRoot).TrimEnd('\')
+    if ($daily_root_path_str -eq $legacy_root_path_str -or
+            $daily_root_path_str.StartsWith($legacy_root_path_str + "\", [StringComparison]::OrdinalIgnoreCase)) {
+        throw "The daily release root must be outside alpha\live\releases (the NDX/TAA root reads every subfolder)."
+    }
+}
+
 if ($Unregister) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
     Write-Step "PASS" "Unregistered scheduled task '$TaskName'."
     exit 0
 }
 
-$script_dir_path_str = Split-Path -Parent $MyInvocation.MyCommand.Path
-$repo_root_path_str = Split-Path -Parent $script_dir_path_str
 $wrapper_path_str = Join-Path $script_dir_path_str "run_live_ops_watchdog.ps1"
 if (-not (Test-Path -LiteralPath $wrapper_path_str)) {
     throw "Wrapper script not found: $wrapper_path_str"

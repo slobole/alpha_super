@@ -29,7 +29,7 @@ def test_decision_heartbeat_waits_until_next_open_minus_two_minutes(daily_case, 
         encoding="utf-8")
     assert _alerts(monkeypatch, daily_case, tmp_path, OPEN_TS - timedelta(minutes=2, seconds=1)) == []
     alert_dict, = _alerts(monkeypatch, daily_case, tmp_path, OPEN_TS - timedelta(minutes=2))
-    assert alert_dict == {"mode_str": "paper", "pod_id_str": "daily_pod",
+    assert alert_dict == {"mode_str": "paper", "pod_id_str": "daily_pod", "account_route_str": "DU_TEST",
         "session_str": "2026-10-02", "kind_str": "decision_incomplete",
         "last_error_str": "unknown foreign symbol"}
 
@@ -139,7 +139,7 @@ def test_early_close_cycle_alert_uses_exchange_close(daily_case, monkeypatch, tm
         and alert_dict["session_str"] == "2026-11-27" for alert_dict in after_list)
 
 
-def test_successful_heartbeat_is_one_per_pod_session_and_failed_send_retries(tmp_path):
+def test_heartbeat_is_one_per_pod_kind_session_and_failed_send_retries(tmp_path):
     alert_list = [{"mode_str": "live", "pod_id_str": "core5", "session_str": "2026-10-05",
         "kind_str": "decision_incomplete", "last_error_str": "serve down"},
         {"mode_str": "live", "pod_id_str": "core5", "session_str": "2026-10-05",
@@ -150,14 +150,16 @@ def test_successful_heartbeat_is_one_per_pod_session_and_failed_send_retries(tmp
         sent_list.append(payload_dict)
         return len(sent_list) > 1
     assert daily_watchdog.deliver_daily_heartbeat_alerts(alert_list[:1], state_path_str, "webhook", poster_fn) == []
-    assert daily_watchdog.deliver_daily_heartbeat_alerts(alert_list, state_path_str, "webhook", poster_fn) != []
-    assert len(sent_list) == 2
+    # Two causes in one session are two messages; neither hides the other.
+    assert daily_watchdog.deliver_daily_heartbeat_alerts(alert_list, state_path_str, "webhook", poster_fn) == alert_list
+    assert len(sent_list) == 3
     assert daily_watchdog.deliver_daily_heartbeat_alerts(alert_list, state_path_str, "webhook", poster_fn) == []
-    assert len(sent_list) == 2
-    assert daily_watchdog.load_delivered_key_set(state_path_str) == {"live|core5|2026-10-05"}
+    assert len(sent_list) == 3
+    assert daily_watchdog.load_delivered_key_set(state_path_str) == {
+        "live|core5|decision_incomplete|2026-10-05", "live|core5|cycle_open_after_close|2026-10-05"}
 
 
-def test_existing_overdue_outbox_is_suppressed_after_heartbeat_delivery(daily_case, tmp_path):
+def test_detailed_overdue_outbox_is_still_posted_after_heartbeat_delivery(daily_case, tmp_path):
     store_obj, release_obj, decision_obj, _, _ = daily_case
     state_path_str = str(tmp_path / "watchdog.daily.sqlite3")
     alert_list = [{"mode_str": "paper", "pod_id_str": release_obj.pod_id_str,
@@ -170,14 +172,16 @@ def test_existing_overdue_outbox_is_suppressed_after_heartbeat_delivery(daily_ca
     daily_watchdog.deliver_daily_heartbeat_alerts(alert_list, state_path_str, "webhook", poster_fn)
     assert len(posted_list) == 1
     enqueue_daily_cycle_overdue(store_obj, release_obj, decision_obj, CLOSE_TS + timedelta(hours=1),
-        error_str="serve recovered")
+        error_str="serve recovered", owned_order_row_list=[{"account_route_str": release_obj.account_route_str,
+            "asset_str": "BIL", "side_str": "BUY", "remaining_amount_float": 1038.0, "client_id_int": 41}])
     summary_dict = {"pod_row_dict_list": [{"db_path_str": store_obj.db_path_str,
         "pod_id_str": release_obj.pod_id_str, "account_route_str": release_obj.account_route_str,
         "mode_str": release_obj.mode_str, "strategy_import_str": release_obj.strategy_import_str}]}
     delivery_list = deliver_daily_alerts(summary_dict, webhook_url_str="webhook", webhook_poster_fn=poster_fn,
-        mode_str="paper", suppressed_session_key_set=daily_watchdog.load_delivered_key_set(state_path_str))
+        mode_str="paper")
     assert len(delivery_list) == 1 and delivery_list[0].delivered_bool
-    assert len(posted_list) == 1
+    assert len(posted_list) == 2
+    assert "BIL: quantity=1038; side=BUY; client_id=41" in posted_list[1]["content"]
 
 
 @pytest.mark.parametrize("raise_http_bool", [False, True])
@@ -202,11 +206,11 @@ def test_explicit_delivery_failure_is_visible_after_other_alerts_and_releases_cl
     assert error_info.value.failed_count_int == 1
     assert "private transport detail" not in str(error_info.value)
     assert len(posted_list) == 2
-    assert daily_watchdog.load_delivered_key_set(state_path_str) == {"live|healthy_pod|2026-10-05"}
+    assert daily_watchdog.load_delivered_key_set(state_path_str) == {"live|healthy_pod|decision_incomplete|2026-10-05"}
     with sqlite3.connect(state_path_str) as connection_obj:
         assert connection_obj.execute("SELECT delivery_claim_str, delivery_claimed_timestamp_str, "
             "delivered_timestamp_str FROM daily_watchdog_alert WHERE alert_key_str=?",
-            ("live|failed_pod|2026-10-05",)).fetchone() == (None, None, None)
+            ("live|failed_pod|decision_incomplete|2026-10-05",)).fetchone() == (None, None, None)
 
     retry_list = []
     assert daily_watchdog.deliver_daily_heartbeat_alerts(alert_list, state_path_str, "webhook",
@@ -227,3 +231,88 @@ def test_watchdog_owned_sqlite_failure_reaches_caller(tmp_path, operation_str):
                 "kind_str": "decision_incomplete", "last_error_str": "serve down"}]
             daily_watchdog.deliver_daily_heartbeat_alerts(alert_list, str(state_path_obj), "webhook",
                 lambda *_args: pytest.fail("Invalid state must fail before HTTP"), raise_on_failure_bool=True)
+
+
+def test_undispatched_open_alerts_five_minutes_after_the_open(daily_case, monkeypatch, tmp_path):
+    store_obj, _, decision_obj, plan_obj, _ = daily_case
+    store_obj.mark_decision_plan_status(decision_obj.decision_plan_id_int, "planned")
+    store_obj.mark_vplan_status(plan_obj.vplan_id_int, "ready")
+    assert _alerts(monkeypatch, daily_case, tmp_path, OPEN_TS + timedelta(minutes=4, seconds=59)) == []
+    alert_dict, = _alerts(monkeypatch, daily_case, tmp_path, OPEN_TS + timedelta(minutes=5))
+    assert (alert_dict["kind_str"], alert_dict["session_str"]) == ("opening_not_dispatched", "2026-10-02")
+    # A dispatched opening (zero orders included) is never flagged.
+    store_obj.mark_vplan_status(plan_obj.vplan_id_int, "submitted")
+    assert _alerts(monkeypatch, daily_case, tmp_path, OPEN_TS + timedelta(minutes=5)) == []
+
+
+def test_pod_is_checked_only_for_sessions_closed_after_it_was_first_seen_enabled(daily_case, monkeypatch, tmp_path):
+    store_obj, release_obj, decision_obj, _, _ = daily_case
+    store_obj.mark_decision_plan_status(decision_obj.decision_plan_id_int, "blocked")
+    key_tuple = (release_obj.mode_str, release_obj.pod_id_str, release_obj.release_id_str)
+    monkeypatch.setattr(daily_watchdog, "load_release_list", lambda _root_str: [release_obj])
+    monkeypatch.setattr(daily_watchdog.dashboard, "resolve_db_path_for_release_str",
+        lambda _release_obj, _config_obj: store_obj.db_path_str)
+    def alerts_for(enabled_since_ts):
+        return daily_watchdog.daily_heartbeat_alert_list(str(tmp_path), str(tmp_path / "none.yaml"),
+            str(tmp_path / "events.jsonl"), OPEN_TS - timedelta(minutes=2), "paper",
+            enabled_since_dict={key_tuple: enabled_since_ts})
+    friday_close_ts = OPEN_TS.replace(day=2, hour=16, minute=0)
+    assert alerts_for(friday_close_ts) == []  # first seen at the close: launch day
+    assert [alert_dict["kind_str"] for alert_dict in alerts_for(friday_close_ts - timedelta(minutes=1))] == [
+        "decision_incomplete"]
+    assert daily_watchdog.daily_heartbeat_alert_list(str(tmp_path), str(tmp_path / "none.yaml"),
+        str(tmp_path / "events.jsonl"), OPEN_TS - timedelta(minutes=2), "paper", enabled_since_dict={}) == []
+
+
+def test_enabled_since_resets_when_a_release_is_disabled_or_removed(daily_case, monkeypatch, tmp_path):
+    _, release_obj, _, _, _ = daily_case
+    state_path_str = str(tmp_path / "watchdog.daily.sqlite3")
+    key_tuple = (release_obj.mode_str, release_obj.pod_id_str, release_obj.release_id_str)
+    release_list = [release_obj]
+    monkeypatch.setattr(daily_watchdog, "load_release_list", lambda _root_str: list(release_list))
+    first_dict = daily_watchdog.refresh_enabled_since_dict(state_path_str, "root", "paper", OPEN_TS)
+    assert first_dict == {key_tuple: OPEN_TS}
+    assert daily_watchdog.refresh_enabled_since_dict(state_path_str, "root", "paper",
+        OPEN_TS + timedelta(days=1)) == {key_tuple: OPEN_TS}
+    release_list[:] = [replace(release_obj, enabled_bool=False)]
+    assert daily_watchdog.refresh_enabled_since_dict(state_path_str, "root", "paper", OPEN_TS + timedelta(days=2)) == {}
+    release_list[:] = [release_obj]
+    assert daily_watchdog.refresh_enabled_since_dict(state_path_str, "root", "paper",
+        OPEN_TS + timedelta(days=3)) == {key_tuple: OPEN_TS + timedelta(days=3)}
+    release_list[:] = []
+    assert daily_watchdog.refresh_enabled_since_dict(state_path_str, "root", "paper", OPEN_TS + timedelta(days=4)) == {}
+
+
+def test_one_broken_pod_check_never_blinds_the_other_pods(daily_case, monkeypatch, tmp_path):
+    store_obj, release_obj, decision_obj, _, _ = daily_case
+    store_obj.mark_decision_plan_status(decision_obj.decision_plan_id_int, "blocked")
+    broken_release_obj = replace(release_obj, release_id_str="broken.v1", pod_id_str="broken_pod")
+    broken_db_path_str = str(tmp_path / "broken.sqlite3")
+    with sqlite3.connect(broken_db_path_str) as connection_obj:
+        connection_obj.execute("""CREATE TABLE decision_plan (decision_plan_id_int INTEGER, release_id_str TEXT,
+            pod_id_str TEXT, account_route_str TEXT, signal_timestamp_str TEXT, target_execution_timestamp_str TEXT,
+            status_str TEXT)""")
+        connection_obj.execute("CREATE TABLE vplan (vplan_id_int INTEGER, decision_plan_id_int INTEGER, status_str TEXT)")
+        connection_obj.execute("INSERT INTO decision_plan VALUES (1,'broken.v1','broken_pod','DU_TEST','not-a-time','x','planned')")
+    monkeypatch.setattr(daily_watchdog, "load_release_list", lambda _root_str: [broken_release_obj, release_obj])
+    monkeypatch.setattr(daily_watchdog.dashboard, "resolve_db_path_for_release_str",
+        lambda candidate_obj, _config_obj: broken_db_path_str if candidate_obj.pod_id_str == "broken_pod"
+            else store_obj.db_path_str)
+    alert_list = daily_watchdog.daily_heartbeat_alert_list(str(tmp_path), str(tmp_path / "none.yaml"),
+        str(tmp_path / "events.jsonl"), OPEN_TS - timedelta(minutes=2), "paper")
+    assert {(alert_dict["pod_id_str"], alert_dict["kind_str"]) for alert_dict in alert_list} == {
+        ("broken_pod", "heartbeat_check_failed"), ("daily_pod", "decision_incomplete")}
+    broken_dict, = [alert_dict for alert_dict in alert_list if alert_dict["pod_id_str"] == "broken_pod"]
+    assert broken_dict["last_error_str"].startswith("ValueError: ")
+
+
+def test_last_error_ignores_errors_logged_before_the_session(tmp_path):
+    log_path_obj = tmp_path / "events.jsonl"
+    log_path_obj.write_text("\n".join(json.dumps(row_dict) for row_dict in [
+        {"pod_id_str": "core5", "error_str": "old open-price error", "event_timestamp_str": "2026-09-28T14:00:00+00:00"},
+        {"pod_id_str": "core5", "error_str": "today's snapshot missing", "event_timestamp_str": "2026-10-02T21:00:00+00:00"},
+    ]) + "\n", encoding="utf-8")
+    since_ts = OPEN_TS.replace(day=2, hour=16, minute=0)
+    assert daily_watchdog._last_error_str(str(log_path_obj), "core5", None, since_ts) == "today's snapshot missing"
+    later_ts = since_ts + timedelta(days=1)
+    assert daily_watchdog._last_error_str(str(log_path_obj), "core5", None, later_ts).startswith("No error recorded since ")

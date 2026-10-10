@@ -84,9 +84,11 @@ def test_wrapper_forwards_explicit_daily_paths_and_url_without_interpreting_them
         "OutputPath": "C:\\daily reports\\report.json", "NotificationStatePath": "C:\\daily state\\state.json",
         "EventLogPath": "C:\\daily serve\\events.jsonl", "DashboardConfig": "C:\\daily mappings\\config.yaml",
         "HeartbeatUrl": "https://heartbeat.invalid/token?a='value'&b=$false", "Json": True}
+    # A trailing separator is dropped: Windows PowerShell 5.1 would let it
+    # escape the closing quote of a native argument that contains a space.
     assert _run_wrapper(tmp_path, parameter_dict) == [
         "run", "python", "scripts\\live_ops_watchdog.py", "--mode", "live", "--daily-heartbeat",
-        "--releases-root", parameter_dict["ReleasesRoot"], "--output-path", parameter_dict["OutputPath"],
+        "--releases-root", "C:\\owner's & daily", "--output-path", parameter_dict["OutputPath"],
         "--notification-state-path", parameter_dict["NotificationStatePath"],
         "--heartbeat-url=" + parameter_dict["HeartbeatUrl"], "--event-log-path", parameter_dict["EventLogPath"],
         "--dashboard-config", parameter_dict["DashboardConfig"], "--json",
@@ -167,3 +169,32 @@ exit 17
 def test_daily_unregistration_targets_separate_task_by_default(tmp_path):
     _, _, capture_dict = _run_setup(tmp_path, {"DailyHeartbeat": True, "Unregister": True})
     assert capture_dict == {"UnregisteredTaskName": "AlphaDailyOpsWatchdog"}
+
+
+def test_wrapper_keeps_a_drive_root_separator(tmp_path):
+    arguments_list = _run_wrapper(tmp_path, {"Mode": "paper", "DailyHeartbeat": True, "ReleasesRoot": "D:\\"})
+    assert arguments_list[arguments_list.index("--releases-root") + 1] == "D:\\"
+
+
+@pytest.mark.parametrize("parameter_dict,message_str", [
+    ({"Mode": "live", "ReleasesRoot": "C:\\alpha\\daily_releases"}, "Refusing to change the NDX/TAA task"),
+    ({"TaskName": "AlphaLiveOpsWatchdog", "DailyHeartbeat": True, "ReleasesRoot": "C:\\alpha\\daily_releases"},
+        "Refusing to change the NDX/TAA task"),
+    ({"TaskName": "AlphaLiveOpsWatchdog", "DailyHeartbeat": True, "Unregister": True}, "Refusing to change the NDX/TAA task"),
+    ({"Mode": "live", "HeartbeatUrl": ""}, "Refusing to change the NDX/TAA task"),
+    ({"Mode": "paper", "DailyHeartbeat": True}, "requires -ReleasesRoot"),
+    ({"Mode": "paper", "DailyHeartbeat": True, "ReleasesRoot": "<repo>\\alpha\\live\\releases\\daily"},
+        "must be outside alpha\\live\\releases"),
+])
+def test_setup_refuses_daily_options_that_would_touch_the_ndx_taa_task(tmp_path, parameter_dict, message_str):
+    repository_path_obj, environment_dict = _script_case(tmp_path, {})
+    parameter_dict = {key_str: value_obj.replace("<repo>", str(repository_path_obj)) if isinstance(value_obj, str)
+        else value_obj for key_str, value_obj in parameter_dict.items()}
+    Path(environment_dict["WATCHDOG_TEST_PARAMS"]).write_text(json.dumps(parameter_dict), encoding="utf-8")
+    result_obj = _run_powershell(PARAMETER_LOAD_STR + SCHEDULER_STUB_STR + """
+& (Join-Path $env:WATCHDOG_TEST_SCRIPT_DIR 'setup_live_ops_watchdog_task.ps1') @parameter_dict
+""", environment_dict)
+    assert result_obj.returncode != 0
+    assert message_str in result_obj.stderr + result_obj.stdout
+    # Nothing was registered or unregistered.
+    assert not Path(environment_dict["WATCHDOG_TEST_CAPTURE"]).exists()

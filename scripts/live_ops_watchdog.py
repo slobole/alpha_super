@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import io
 import json
@@ -35,6 +35,7 @@ from pathlib import Path
 import re
 import sys
 import tempfile
+from urllib.parse import urlsplit
 
 
 REPO_ROOT_PATH = Path(__file__).resolve().parents[1]
@@ -55,6 +56,8 @@ WATCHDOG_NOTIFICATION_STATE_PATH_STR = "alpha/live/logs/watchdog_notification_st
 HEARTBEAT_URL_ENV_VAR_NAME_STR = "ALPHA_INSPECTOR_HEARTBEAT_URL"
 DAILY_HEARTBEAT_URL_ENV_VAR_NAME_STR = "ALPHA_DAILY_HEARTBEAT_URL"
 DAILY_RECEIPT_FIELD_TUPLE = ("daily_watchdog_error_list", "daily_watchdog_failure_alert_status_str")
+# A persisting daily-watchdog failure is reposted once a day, not every run.
+DAILY_FAILURE_REMINDER_INTERVAL = timedelta(hours=24)
 FATAL_EXIT_CODE_INT = 2
 RUN_RECEIPT_SCHEMA_STR = "live_ops_watchdog_run.v1"
 CAPSULE_RECEIPT_FIELD_TUPLE = ("capsule_notification_attempt_count_int",
@@ -210,12 +213,40 @@ def _record_daily_failure(report_dict, receipt_context_dict, reason_code_str, er
     print(f"CRITICAL DAILY watchdog: {reason_code_str} ({error_type_str})", file=sys.stderr)
 
 
+def _normalized_heartbeat_url_str(url_str):
+    """Host, port and path only: aliases of one check compare equal."""
+    url_str = (url_str or "").strip()
+    if not url_str:
+        return ""
+    split_obj = urlsplit(url_str if "://" in url_str else "//" + url_str)
+    try:
+        port_int = split_obj.port
+    except ValueError:
+        port_int = None
+    port_str = "" if port_int in (None, 80, 443) else f":{port_int}"
+    return f"{(split_obj.hostname or '').lower().rstrip('.')}{port_str}{split_obj.path.rstrip('/')}"
+
+
+def _daily_failure_post_due_bool(failure_state_path_obj, signature_str, as_of_ts):
+    try:
+        state_dict = json.loads(failure_state_path_obj.read_text(encoding="utf-8"))
+        posted_ts = datetime.fromisoformat(state_dict["posted_timestamp_str"])
+        return state_dict.get("signature_str") != signature_str or as_of_ts - posted_ts >= DAILY_FAILURE_REMINDER_INTERVAL
+    except Exception:
+        # Unknown history must not silence an incident.
+        return True
+
+
 def _finish_daily_heartbeat_tuple(parsed_args_obj, as_of_ts, report_dict, receipt_context_dict):
     heartbeat_url_str = (parsed_args_obj.heartbeat_url_str if parsed_args_obj.heartbeat_url_str is not None
         else os.getenv(DAILY_HEARTBEAT_URL_ENV_VAR_NAME_STR, ""))
     heartbeat_status_str, heartbeat_fail_signal_bool = "disabled", False
-    inspector_url_str = os.getenv(HEARTBEAT_URL_ENV_VAR_NAME_STR, "").strip().split("?", 1)[0].split("#", 1)[0].rstrip("/")
-    daily_url_str = heartbeat_url_str.strip().split("?", 1)[0].split("#", 1)[0].rstrip("/")
+    if parsed_args_obj.heartbeat_url_str is None and not heartbeat_url_str.strip():
+        # Only an explicit --heartbeat-url= may switch the daily dead-man off.
+        _record_daily_failure(report_dict, receipt_context_dict,
+            "daily_watchdog_heartbeat_url_missing", "ConfigurationError")
+    inspector_url_str = _normalized_heartbeat_url_str(os.getenv(HEARTBEAT_URL_ENV_VAR_NAME_STR, ""))
+    daily_url_str = _normalized_heartbeat_url_str(heartbeat_url_str)
     if inspector_url_str and (daily_url_str == inspector_url_str or daily_url_str.startswith(inspector_url_str + "/")):
         # Even a misconfigured daily URL must never mark the legacy check alive
         # or failed. Withhold both requests and expose the configuration error.
@@ -246,26 +277,43 @@ def _finish_daily_heartbeat_tuple(parsed_args_obj, as_of_ts, report_dict, receip
                         payload_dict, timeout_seconds_float=parsed_args_obj.heartbeat_timeout_seconds_float)
                 except Exception as error_obj:
                     print(f"CRITICAL DAILY watchdog: failure ping failed ({type(error_obj).__name__})", file=sys.stderr)
+    notification_path_obj = Path(parsed_args_obj.notification_state_path_str)
+    failure_state_path_obj = notification_path_obj.with_name(notification_path_obj.stem + ".daily_failure.json")
     if receipt_context_dict.get("daily_watchdog_error_list"):
         webhook_url_str = notifications_module.discord_webhook_url_from_env_str()
         alert_status_str = "disabled"
-        if webhook_url_str:
-            detail_str = "; ".join(f"{error_dict['reason_code_str']} ({error_dict['error_type_str']})"
-                for error_dict in receipt_context_dict["daily_watchdog_error_list"])
-            payload_dict = {"content": ("CRITICAL DAILY watchdog failure. Inspect the daily report and task log.\n"
+        detail_str = "; ".join(f"{error_dict['reason_code_str']} ({error_dict['error_type_str']})"
+            for error_dict in receipt_context_dict["daily_watchdog_error_list"])
+        signature_str = "|".join(sorted({error_dict["reason_code_str"]
+            for error_dict in receipt_context_dict["daily_watchdog_error_list"]}))
+        if webhook_url_str and not _daily_failure_post_due_bool(failure_state_path_obj, signature_str, as_of_ts):
+            # Same incident, already posted: the red report and /fail ping stay.
+            alert_status_str = "already_posted"
+        elif webhook_url_str:
+            payload_dict = {"content": ("CRITICAL DAILY watchdog failure. Inspect the daily report "
+                f"({parsed_args_obj.output_path_str}) and its daily_watchdog_error_list.\n"
                 + detail_str)[:1900], "allowed_mentions": {"parse": []}}
             try:
                 alert_status_str = "sent" if notifications_module.post_discord_webhook_bool(
                     webhook_url_str, payload_dict) else "failed"
             except Exception:
                 alert_status_str = "failed"
+            if alert_status_str == "sent":
+                with contextlib.suppress(OSError):
+                    failure_state_path_obj.parent.mkdir(parents=True, exist_ok=True)
+                    failure_state_path_obj.write_text(json.dumps({"signature_str": signature_str,
+                        "posted_timestamp_str": as_of_ts.isoformat()}), encoding="utf-8")
         receipt_context_dict["daily_watchdog_failure_alert_status_str"] = alert_status_str
         report_dict["daily_watchdog_failure_alert_status_str"] = alert_status_str
         write_report_atomic(report_dict, parsed_args_obj.output_path_str)
+    else:
+        # The incident is over; the next failure posts immediately.
+        with contextlib.suppress(OSError):
+            failure_state_path_obj.unlink(missing_ok=True)
     return heartbeat_status_str, heartbeat_fail_signal_bool
 
 
-def _run_capsule_notifications_tuple(summary_dict, mode_str, webhook_url_str, suppressed_session_key_set=None):
+def _run_capsule_notifications_tuple(summary_dict, mode_str, webhook_url_str):
     """Contain capsule failures per pod; preserve cross-pod scope validation."""
     from alpha.live.mr_capsule_adapter import MR_CAPSULE_STRATEGY_IMPORT_TUPLE
     from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR
@@ -314,8 +362,7 @@ def _run_capsule_notifications_tuple(summary_dict, mode_str, webhook_url_str, su
             phase_str = "delivery"
             daily_delivery_list = daily_notifications_module.deliver_daily_alerts(
                 pod_summary_dict, webhook_url_str=webhook_url_str,
-                webhook_poster_fn=notifications_module.post_discord_webhook_bool, mode_str=mode_str,
-                suppressed_session_key_set=suppressed_session_key_set)
+                webhook_poster_fn=notifications_module.post_discord_webhook_bool, mode_str=mode_str)
             if result_dict["capsule_notification_attempt_count_int"] is not None:
                 result_dict["capsule_notification_attempt_count_int"] += len(daily_delivery_list)
             phase_str = "pending"
@@ -375,7 +422,6 @@ def _run_report_pipeline_tuple(
     )
     receipt_context_dict = {"summary_dict": summary_dict,
         "notification_configured_bool": bool(webhook_url_str)}
-    suppressed_session_key_set = set()
     from alpha.live.daily_reconcile import DAILY_STRATEGY_IMPORT_TUPLE
     daily_scope_bool = parsed_args_obj.daily_heartbeat_bool or any(
         row_dict.get("strategy_import_str") in DAILY_STRATEGY_IMPORT_TUPLE
@@ -384,18 +430,40 @@ def _run_report_pipeline_tuple(
     if daily_scope_bool:
         notification_path_obj = Path(parsed_args_obj.notification_state_path_str)
         daily_state_path_str = str(notification_path_obj.with_name(notification_path_obj.stem + ".daily.sqlite3"))
+        daily_releases_root_path_str = (parsed_args_obj.releases_root_path_str
+            or dashboard_module.DEFAULT_RELEASES_ROOT_PATH_STR)
+        if parsed_args_obj.daily_heartbeat_bool:
+            # A daily task that cannot alert, or watches nothing, is a broken
+            # monitor; never let it report green.
+            if not webhook_url_str:
+                _record_daily_failure(report_dict, receipt_context_dict,
+                    "daily_watchdog_webhook_missing", "ConfigurationError")
+            try:
+                if daily_watchdog_module.enabled_daily_release_count_int(
+                        daily_releases_root_path_str, parsed_args_obj.mode_str) == 0:
+                    _record_daily_failure(report_dict, receipt_context_dict,
+                        "daily_watchdog_no_enabled_daily_releases", "ConfigurationError")
+            except Exception as error_obj:
+                _record_daily_failure(report_dict, receipt_context_dict,
+                    "daily_watchdog_releases_unreadable", type(error_obj).__name__)
         try:
+            enabled_since_dict = daily_watchdog_module.refresh_enabled_since_dict(daily_state_path_str,
+                daily_releases_root_path_str, parsed_args_obj.mode_str, as_of_ts)
             daily_heartbeat_alert_list = daily_watchdog_module.daily_heartbeat_alert_list(
-                parsed_args_obj.releases_root_path_str or dashboard_module.DEFAULT_RELEASES_ROOT_PATH_STR,
+                daily_releases_root_path_str,
                 parsed_args_obj.dashboard_config_path_str or dashboard_module.DEFAULT_CONFIG_PATH_STR,
                 parsed_args_obj.event_log_path_str if parsed_args_obj.daily_heartbeat_bool else
-                dashboard_module.DEFAULT_EVENT_LOG_PATH_STR, as_of_ts, parsed_args_obj.mode_str)
+                dashboard_module.DEFAULT_EVENT_LOG_PATH_STR, as_of_ts, parsed_args_obj.mode_str,
+                enabled_since_dict=enabled_since_dict)
+            if parsed_args_obj.daily_heartbeat_bool and any(alert_dict["kind_str"] == "heartbeat_check_failed"
+                    for alert_dict in daily_heartbeat_alert_list):
+                # The failed pod gets its own alert; the other pods were still checked.
+                _record_daily_failure(report_dict, receipt_context_dict,
+                    "daily_watchdog_pod_check_failed", "PodCheckFailed")
             if daily_heartbeat_alert_list:
                 daily_watchdog_module.deliver_daily_heartbeat_alerts(daily_heartbeat_alert_list,
                     daily_state_path_str, webhook_url_str, notifications_module.post_discord_webhook_bool,
                     **({"raise_on_failure_bool": True} if parsed_args_obj.daily_heartbeat_bool else {}))
-            if not parsed_args_obj.daily_heartbeat_bool:
-                suppressed_session_key_set = daily_watchdog_module.load_delivered_key_set(daily_state_path_str)
         except Exception as error_obj:
             if parsed_args_obj.daily_heartbeat_bool:
                 _record_daily_failure(report_dict, receipt_context_dict,
@@ -403,16 +471,10 @@ def _run_report_pipeline_tuple(
             # A broken daily monitor cannot suppress the existing Inspector alerts,
             # run receipt or external dead-man heartbeat.
             pass
-        if parsed_args_obj.daily_heartbeat_bool:
-            # A failed delivery may follow successful deliveries for other pods.
-            # Retain their durable suppression even when the scan/delivery failed.
-            try:
-                suppressed_session_key_set = daily_watchdog_module.load_delivered_key_set(daily_state_path_str)
-            except Exception as error_obj:
-                _record_daily_failure(report_dict, receipt_context_dict,
-                    "daily_watchdog_check_failed", type(error_obj).__name__)
+    # The heartbeat never suppresses the serve's own detailed alerts (owned
+    # orders, holdings): both channels deliver, two messages are acceptable.
     capsule_result_dict, invalid_scope_row_list = _run_capsule_notifications_tuple(
-        summary_dict, parsed_args_obj.mode_str, webhook_url_str, suppressed_session_key_set)
+        summary_dict, parsed_args_obj.mode_str, webhook_url_str)
     if capsule_result_dict:
         receipt_context_dict.update(capsule_result_dict)
         # An invalid DB path does not invalidate the pod's receipt identity.

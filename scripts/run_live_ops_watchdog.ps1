@@ -39,6 +39,22 @@ else {
     }
 }
 
+function Get-NativePathArgument {
+    # Windows PowerShell 5.1 quotes an argument containing a space, and a
+    # trailing backslash then escapes the closing quote for the native process.
+    # Drop trailing separators (a drive root keeps one; it has no space).
+    param([string]$PathStr)
+    if (-not $PathStr) { return $PathStr }
+    $trimmed_path_str = $PathStr.TrimEnd('\', '/')
+    if ($trimmed_path_str -match '^[A-Za-z]:$') { return $trimmed_path_str + '\' }
+    return $trimmed_path_str
+}
+$ReleasesRoot = Get-NativePathArgument $ReleasesRoot
+$OutputPath = Get-NativePathArgument $OutputPath
+$NotificationStatePath = Get-NativePathArgument $NotificationStatePath
+$EventLogPath = Get-NativePathArgument $EventLogPath
+$DashboardConfig = Get-NativePathArgument $DashboardConfig
+
 # Forward an optional mode scope (live/paper/incubation) to the watchdog.
 # Omitting -Mode keeps the all-modes default.
 $py_arg_list = @()
