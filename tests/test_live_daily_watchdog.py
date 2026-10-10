@@ -240,9 +240,23 @@ def test_undispatched_open_alerts_five_minutes_after_the_open(daily_case, monkey
     assert _alerts(monkeypatch, daily_case, tmp_path, OPEN_TS + timedelta(minutes=4, seconds=59)) == []
     alert_dict, = _alerts(monkeypatch, daily_case, tmp_path, OPEN_TS + timedelta(minutes=5))
     assert (alert_dict["kind_str"], alert_dict["session_str"]) == ("opening_not_dispatched", "2026-10-02")
+    # A claimed but unconfirmed dispatch may already be live: never "not dispatched".
+    store_obj.mark_vplan_status(plan_obj.vplan_id_int, "submitting")
+    alert_dict, = _alerts(monkeypatch, daily_case, tmp_path, OPEN_TS + timedelta(minutes=5))
+    assert alert_dict["kind_str"] == "opening_dispatch_unconfirmed"
     # A dispatched opening (zero orders included) is never flagged.
     store_obj.mark_vplan_status(plan_obj.vplan_id_int, "submitted")
     assert _alerts(monkeypatch, daily_case, tmp_path, OPEN_TS + timedelta(minutes=5)) == []
+
+
+def test_heartbeat_post_tells_the_operator_what_to_do(tmp_path):
+    posted_list = []
+    alert_list = [{"mode_str": "paper", "pod_id_str": "core5", "account_route_str": "DU1", "session_str": "2026-10-05",
+        "kind_str": "opening_dispatch_unconfirmed", "last_error_str": "crash"}]
+    daily_watchdog.deliver_daily_heartbeat_alerts(alert_list, str(tmp_path / "state.sqlite3"), "webhook",
+        lambda _url_str, payload_dict: posted_list.append(payload_dict) or True)
+    content_str = posted_list[0]["content"]
+    assert "Account DU1" in content_str and "do NOT resend" in content_str
 
 
 def test_pod_owes_every_decision_whose_cutoff_follows_first_enabled_sighting(daily_case, monkeypatch, tmp_path):

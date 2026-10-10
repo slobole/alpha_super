@@ -14,7 +14,18 @@ from alpha.live.release_manifest import load_release_list
 # was not sent at the auction (serve down, crash after the claim, retry stuck).
 OPENING_DISPATCH_GRACE_MINUTES_INT = 5
 UNDISPATCHED_DECISION_STATUS_SET = {"planned", "vplan_ready"}
-UNDISPATCHED_VPLAN_STATUS_SET = {None, "ready", "submitting"}
+# No claim: nothing of the opening batch can have reached the broker.
+UNSENT_VPLAN_STATUS_SET = {None, "ready"}
+# Claimed but never confirmed: orders may already be live at the broker.
+UNCONFIRMED_VPLAN_STATUS_SET = {"submitting"}
+ALERT_ACTION_STR_DICT = {
+    "decision_incomplete": "No usable decision for this session; nothing was sent for it. Check the daily serve and its event log.",
+    "opening_not_dispatched": "The opening batch was never claimed, so none of it reached the broker. Check the daily serve.",
+    "opening_dispatch_unconfirmed": ("The opening dispatch was claimed but never confirmed: orders may already be live. "
+        "Check broker orders and fills before any action; do NOT resend."),
+    "cycle_open_after_close": "The cycle is still open one hour after the close. Check owned orders at the broker; daily reconciliation keeps retrying.",
+    "heartbeat_check_failed": "This pod could not be checked; the other daily pods still are. Check its database and release file.",
+}
 # Rotated logs from concurrent serves are only roughly ordered; scan this far
 # past the requested window before concluding that no recent error exists.
 EVENT_LOG_ORDER_TOLERANCE = timedelta(hours=1)
@@ -152,9 +163,11 @@ def _release_alert_list(release_obj, config_obj, event_log_path_str, as_of_ts, e
                     decision_id_int, candidate_close_ts)))
         elif (matching_row_dict is not None
                 and matching_row_dict["status_str"] in UNDISPATCHED_DECISION_STATUS_SET
-                and matching_row_dict.get("vplan_status_str") in UNDISPATCHED_VPLAN_STATUS_SET
+                and matching_row_dict.get("vplan_status_str") in UNSENT_VPLAN_STATUS_SET | UNCONFIRMED_VPLAN_STATUS_SET
                 and as_of_ts >= next_open_ts + timedelta(minutes=OPENING_DISPATCH_GRACE_MINUTES_INT)):
-            alert_list.append(_alert_dict(release_obj, session_str, "opening_not_dispatched",
+            kind_str = ("opening_dispatch_unconfirmed"
+                if matching_row_dict.get("vplan_status_str") in UNCONFIRMED_VPLAN_STATUS_SET else "opening_not_dispatched")
+            alert_list.append(_alert_dict(release_obj, session_str, kind_str,
                 load_error_str or _last_error_str(event_log_path_str, release_obj.pod_id_str,
                     decision_id_int, candidate_close_ts)))
     # *** CRITICAL *** A target execution session is overdue only after
@@ -293,10 +306,12 @@ def deliver_daily_heartbeat_alerts(alert_list, state_path_str, webhook_url_str, 
                 continue
         account_line_str = (f"Account {alert_dict['account_route_str']}\n"
             if alert_dict.get("account_route_str") else "")
+        action_str = ALERT_ACTION_STR_DICT.get(alert_dict["kind_str"], "")
         payload_dict = {"content": (f"CRITICAL DAILY / {alert_dict['mode_str'].upper()} / {alert_dict['pod_id_str']}\n"
             + account_line_str
             + f"Session {alert_dict['session_str']}: {alert_dict['kind_str']}.\n"
-            f"Last error: {alert_dict['last_error_str']}")[:1900], "allowed_mentions": {"parse": []}}
+            + (f"Action: {action_str}\n" if action_str else "")
+            + f"Last error: {alert_dict['last_error_str']}")[:1900], "allowed_mentions": {"parse": []}}
         try:
             delivered_bool = bool(webhook_poster_fn(webhook_url_str, payload_dict))
         except Exception:

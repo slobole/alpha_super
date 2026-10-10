@@ -765,19 +765,31 @@ The daily task treats each of these as a configuration failure (red report, exit
 example a mistyped `-ReleasesRoot`). A failure that persists is reposted once a
 day, not on every run.
 
-It alerts once per pod, alert kind and session: `decision_incomplete` (no usable
-decision by the 09:28 cutoff), `opening_not_dispatched` (five minutes after the
-open the opening batch has still not been dispatched: serve down, crash after the
-claim, or auto-submit off), `cycle_open_after_close` (the cycle is still open one
-hour after the exchange close) and `heartbeat_check_failed` (that pod could not be
-checked; the other pods still are). A dispatch that the broker preflight refused
-is recorded as dispatched; it appears in that day's close-of-day exceptions. A pod
-deployed with `auto_submit_enabled_bool: false` raises `opening_not_dispatched`
-on every session until its batch is submitted. A pod is checked for every decision
-whose 09:28 cutoff falls after the watchdog first saw it enabled: an evening
-launch is watched from the next open, and a launch or re-enable never pages for
-earlier days. These alerts never suppress the serve's own detailed alerts (owned
-orders with symbol, quantity, side and client ID; capsule holding halts).
+It alerts once per pod, alert kind and session, and every message carries the
+required action:
+
+- `decision_incomplete`: no usable decision by the 09:28 cutoff; nothing was sent.
+- `opening_not_dispatched`: five minutes after the open the opening batch was never
+  claimed (serve down or asleep, VPlan not built, or auto-submit off), so none of
+  it reached the broker.
+- `opening_dispatch_unconfirmed`: the dispatch was claimed but never confirmed (a
+  crash during the send). Orders **may already be live**: check broker orders and
+  fills before any action and **never resend** from this alert.
+- `cycle_open_after_close`: the cycle is still open one hour after the exchange
+  close.
+- `heartbeat_check_failed`: that pod could not be checked; the other pods still are.
+
+A dispatch that the broker preflight refused is recorded as dispatched; it appears
+in that day's close-of-day exceptions. A pod deployed with
+`auto_submit_enabled_bool: false` raises `opening_not_dispatched` on every session
+until its batch is submitted. A pod is checked for every decision whose 09:28
+cutoff falls after the watchdog first saw it enabled: an evening launch is watched
+from the next open, and a launch or re-enable never pages for earlier days. Enable
+a daily pod in the evening after the data snapshot or after the 09:30 open; a
+launch between midnight and 09:28 already owes that morning's open and alerts if
+it cannot build and send in time. These alerts never suppress the serve's own
+detailed alerts (owned orders with symbol, quantity, side and client ID; capsule
+holding halts).
 Verify its command before scheduling it (replace the example paths, including
 the event log used by the daily serves and the dashboard DB mapping file):
 

@@ -399,3 +399,12 @@ def test_daily_heartbeat_refuses_legacy_url_collision_including_known_endpoint_a
     assert result_dict["heartbeat_fail_signal_bool"] is False
     assert "daily_watchdog_heartbeat_scope_conflict" in captured_obj.err
     assert HEARTBEAT_URL_STR not in captured_obj.out + captured_obj.err + json.dumps(webhook_list)
+
+
+@pytest.mark.parametrize("alias_str", ["https://hc-ping.example//inspector", "HTTP://HC-PING.EXAMPLE:443/inspector/",
+    "hc-ping.example./inspector/fail?x=1#y", " https://user@hc-ping.example:80/inspector "])
+def test_inspector_url_aliases_normalize_to_the_same_check(alias_str):
+    assert (watchdog_module._normalized_heartbeat_url_str(alias_str)
+        == watchdog_module._normalized_heartbeat_url_str("https://hc-ping.example/inspector")
+        or watchdog_module._normalized_heartbeat_url_str(alias_str).startswith(
+            watchdog_module._normalized_heartbeat_url_str("https://hc-ping.example/inspector") + "/"))

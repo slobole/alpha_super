@@ -224,7 +224,8 @@ def _normalized_heartbeat_url_str(url_str):
     except ValueError:
         port_int = None
     port_str = "" if port_int in (None, 80, 443) else f":{port_int}"
-    return f"{(split_obj.hostname or '').lower().rstrip('.')}{port_str}{split_obj.path.rstrip('/')}"
+    path_str = re.sub(r"/{2,}", "/", split_obj.path).rstrip("/")
+    return f"{(split_obj.hostname or '').lower().rstrip('.')}{port_str}{path_str}"
 
 
 def _daily_failure_post_due_bool(failure_state_path_obj, signature_str, as_of_ts):
