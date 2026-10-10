@@ -57,8 +57,8 @@ $script_dir_path_str = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repo_root_path_str = Split-Path -Parent $script_dir_path_str
 
 # Guard the existing NDX/TAA task: daily-only options must never repoint or
-# replace it (a forgotten -DailyHeartbeat would watch the daily root while the
-# legacy dead-man check stays green).
+# replace it (a forgotten -DailyHeartbeat would watch only the daily pods while
+# the legacy dead-man check stays green).
 # Capture first: inside a script block $PSBoundParameters is that block's own.
 $bound_parameter_dict = $PSBoundParameters
 $daily_option_list = @("DailyHeartbeat", "ReleasesRoot", "OutputPath", "NotificationStatePath", "HeartbeatUrl",

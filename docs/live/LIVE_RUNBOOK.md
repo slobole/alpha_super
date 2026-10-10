@@ -967,11 +967,21 @@ Fund TWR. It does not change orders, sizing, scheduler state, reconciliation,
 `healthz`, or the existing Overview.
 
 The Activity Flex Query must be XML, Account-by-Account, Breakout by Day, and
-contain both LIVE accounts with exactly these fields:
+contain every LIVE account in the releases folder (NDX, TAA, and each CORE5 or
+MR capsule pod) with exactly these fields:
 
 - Account Information: `Account ID`, `Currency`.
 - Change in NAV, Mark-to-Market: `Account ID`, `Currency`, `From Date`,
   `To Date`, `Starting Value`, `Ending Value`, `TWR`.
+
+The sync requires the query's accounts to match the LIVE releases exactly, and a
+mismatch fails it for every pod (money stops at the last good day; trading is
+unaffected). When a new LIVE pod gets its own account (for example CORE5 or an
+MR capsule pod): add the account to the query only after its LIVE YAML is in the
+releases folder, and before the second 06:15 run after the pod's first broker
+EOD. A pod first synced more than 35 days after its first EOD needs
+`bootstrap --replace`. If its serve uses `--db-path`, list that path in the
+dashboard config's `db_overrides`, or its returns are never recorded.
 
 Add these secrets/settings to ignored `config.env`:
 

@@ -1,7 +1,9 @@
 # Dashboard V4 for the daily pods (CORE5, MR capsule)
 
-Owner request 2026-10-10: make the UI correct for the daily pods before and during PAPER. Plan written by Claude
-from a read-only audit of `dee5499`. Branch `ui-daily-pods-20261010`. One commit per phase.
+Owner request 2026-10-10: make the UI correct for the daily pods. Plan written by Claude from a read-only audit of
+`dee5499`. One commit per phase. Owner decisions since: the daily pods are LIVE (no Paper section), and
+2026-10-11 one releases folder for NDX/TAA and the daily pods, so the dashboard and the IBKR sync read them from
+the same root with no extra settings.
 
 ## Hard rules
 - NDX/TAA (monthly, LIVE) render byte-identically. Phase 0 golden hashes prove it after every phase.
@@ -40,14 +42,13 @@ Buy dropped (funding); `bil_buy_withheld_after_funding_buys_dropped` BIL buy wit
 0. Golden hashes of the monthly/demo pages (`tests/test_dashboard_v4_monthly_golden.py`).
 1. `daily_data.py` reader + `daily_cycle.py` projection; cycle/overview/pod/next_commands wired behind the gate;
    `daily_demo.py` seeding real writers (paper, `demo_daily_*`).
-2. Paper section and multiple roots: repeatable `--source name=,root=,config=,log=,watchdog=,modes=`;
-   `MultiSourceDataProvider` with per-source error isolation; Paper panel, rail and header tab; money LIVE-only;
-   `--demo-daily`.
+2. Dropped (one releases folder): daily LIVE pods already appear beside NDX/TAA, money included through the
+   existing single-root workspace and IBKR sync. Still open: wire `daily_demo.py` into the demo app (`--demo-daily`).
 3. Exceptions tab and same-day completion orders in evidence (`:daily-completion:` keys).
 4. Next-trade forecast after an exceptions day (`next_operation.py`, `dashboard.py:1433` status tuple).
 5. System page: daily watchdog report, receipt, `.daily.sqlite3` alert keys, pod outboxes.
 6. Activity labels for daily events; pending reconciles quiet; mode filter.
 7. BIL/SPMO shown as "Parked" (SPMO never "Cash").
-8. Deferred until a daily pod goes LIVE: money for extra-source LIVE pods.
+8. Dropped: no extra source exists with one folder.
 
 Each phase updates `alpha/live/dashboard_v4/README.md` and passes the README test commands.

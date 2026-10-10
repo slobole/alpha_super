@@ -187,12 +187,12 @@ def test_wrapper_keeps_a_drive_root_separator(tmp_path):
 
 
 @pytest.mark.parametrize("parameter_dict,message_str", [
-    ({"Mode": "live", "ReleasesRoot": "C:\\alpha\\daily_releases"}, "Refusing to change the NDX/TAA task"),
-    ({"TaskName": "AlphaLiveOpsWatchdog", "DailyHeartbeat": True, "ReleasesRoot": "C:\\alpha\\daily_releases"},
+    ({"Mode": "live", "ReleasesRoot": "C:\\alpha\\releases"}, "Refusing to change the NDX/TAA task"),
+    ({"TaskName": "AlphaLiveOpsWatchdog", "DailyHeartbeat": True, "ReleasesRoot": "C:\\alpha\\releases"},
         "Refusing to change the NDX/TAA task"),
     ({"TaskName": "AlphaLiveOpsWatchdog", "DailyHeartbeat": True, "Unregister": True}, "Refusing to change the NDX/TAA task"),
     ({"Mode": "live", "HeartbeatUrl": ""}, "Refusing to change the NDX/TAA task"),
-    ({"TaskName": "AlphaLiveOpsWatchdog ", "DailyHeartbeat": True, "ReleasesRoot": "C:\\alpha\\daily_releases"},
+    ({"TaskName": "AlphaLiveOpsWatchdog ", "DailyHeartbeat": True, "ReleasesRoot": "C:\\alpha\\releases"},
         "Refusing to change the NDX/TAA task"),
 ])
 def test_setup_refuses_daily_options_that_would_touch_the_ndx_taa_task(tmp_path, parameter_dict, message_str):
