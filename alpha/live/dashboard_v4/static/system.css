@@ -42,3 +42,5 @@
   .system-page .system-group-empty { display: none; }
   .system-pods th:first-child, .system-pods th:nth-child(2), .system-releases th:first-child, .system-releases th:nth-child(4) { width: auto; }
 }
+.system-page .system-unchecked th b, .system-page .system-unchecked td { color: var(--ink-3); font-weight: 400; }
+.system-page .system-group-muted th { color: var(--ink-3); }

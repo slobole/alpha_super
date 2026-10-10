@@ -4,6 +4,7 @@ from datetime import datetime, time, timezone
 
 from alpha.live.dashboard_v3.filters import MARKET_TIMEZONE_OBJ
 from alpha.live.dashboard_v3.schedule import build_market_status
+from alpha.live.dashboard_v4.durations import human_duration_str
 from alpha.live.ops_report import parse_timestamp_ts
 
 
@@ -33,9 +34,6 @@ def build_market_view_dict(*, now_ts: datetime) -> dict:
         if local_ts < transition_ts:
             label_str, countdown_str = "Post-market", "ends in "
     if countdown_str and transition_ts:
-        seconds_int = max(0, int((transition_ts - now_ts).total_seconds()))
-        hours_int, remaining_int = divmod(seconds_int, 3600)
-        minutes_int, seconds_int = divmod(remaining_int, 60)
-        detail_str = f"{countdown_str}{hours_int:02}:{minutes_int:02}:{seconds_int:02}"
+        detail_str = countdown_str + human_duration_str((transition_ts - now_ts).total_seconds())
     return {"state_str": "skip" if label_str == "Market closed" else "now",
             "label_str": label_str, "detail_str": detail_str}

@@ -225,6 +225,10 @@ def build_positions_page_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
         invested_str=_money_str(invested_float), cash_str=_money_str(financial_dict["cash_float"]),
         weight_str="100.0%" if financial_dict["complete_bool"] else "—")
     all_row_list = enrich_positions_dict(result_dict, source_by_pod_dict, pod_str=pod_str, as_of_ts=as_of_ts)
+    closed_int = sum(not row_dict.get("open_bool", True) for row_dict in all_row_list)
+    if complete_bool and pod_str == "all" and closed_int:
+        # "All" also lists positions closed today; name both counts so they agree.
+        result_dict["verdict_str"] = f"{len(symbol_dict)} open positions · {closed_int} closed today"
     search_key_str = search_str.strip().casefold()
     result_dict["row_list"] = [row_dict for row_dict in all_row_list
         if (not search_key_str or search_key_str in row_dict["symbol_str"].casefold())

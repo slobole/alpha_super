@@ -12,6 +12,8 @@ from threading import Lock
 import time
 from zoneinfo import ZoneInfo
 
+from alpha.live.dashboard_v4.console_data import open_shared_read_obj
+
 
 TARGET_LIMIT_INT = 32
 EVENT_LIMIT_INT = 1000
@@ -278,7 +280,8 @@ def _read_file_dict(path_obj, identity_dict, *, source_str, as_of_ts, from_ts, b
     result_dict = {"event_list": [], "reason_set": set(), "oldest_ts": None, "newest_ts": None,
         "boundary_bool": False, "complete_records_int": 0, "as_of_ts": as_of_ts}
     local_seen_set, previous_ts, pending_bytes, discard_bool = set(), None, b"", False
-    with path_obj.open("rb") as file_obj:
+    # Shared delete access: a scan can never block the writer's rotation rename.
+    with open_shared_read_obj(path_obj) as file_obj:
         file_obj.seek(0, 2)
         offset_int = file_obj.tell()
         first_bool = True

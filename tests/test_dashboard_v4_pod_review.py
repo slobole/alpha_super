@@ -75,7 +75,8 @@ def test_submit_time_is_last_verified_broker_ack_not_mutable_order_time():
     view_dict = build_pod_page_dict(overview_dict, source_dict, {}, pod_id_str=pod_id_str, as_of_ts=DEMO_NOW_TS)
     assert view_dict["step_list"][3]["actual_time_str"] == "09:40:07"
     assert view_dict["step_list"][3]["fact_str"] == "All orders acknowledged"
-    assert view_dict["verdict_detail_str"].startswith("Cycle next: EOD")
+    # The header carries the single current Next line.
+    assert view_dict["verdict_detail_str"] == ""
 
 
 def test_event_table_keeps_symbol_and_latest_first():

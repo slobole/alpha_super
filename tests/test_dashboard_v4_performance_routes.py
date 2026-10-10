@@ -140,8 +140,8 @@ def test_default_page_has_live_shell_active_navigation_and_financial_provenance(
     performance_anchor_str = re.search(r'<a\b[^>]*href="/performance"[^>]*>(.*?)</a>', nav_str, re.S)[0]
     assert 'aria-current="page"' in performance_anchor_str and "Performance" in performance_anchor_str
     assert "Performance is not available yet" not in html_str
-    assert 'title="PAPER is not available in V4 yet"' in html_str
-    assert 'title="INCUBATION is not available in V4 yet"' in html_str
+    # Modes without V4 views are hidden, not shown as dead controls.
+    assert "PAPER is not available" not in html_str and "INCUBATION is not available" not in html_str
     assert response_obj.headers["Cache-Control"] == "no-store"
     assert response_obj.headers["X-Content-Type-Options"] == "nosniff"
     assert response_obj.headers["X-Frame-Options"] == "DENY"

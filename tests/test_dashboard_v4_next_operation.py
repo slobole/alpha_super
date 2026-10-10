@@ -36,7 +36,7 @@ def _next_dict(row_dict, **option_dict):
     return build_next_operation_dict(row_dict, cycle_dict, now_ts=now_ts, **option_dict)
 
 
-def test_weekend_wait_has_next_session_eod_without_changing_cycle_evidence(pod_row_dict, monkeypatch):
+def test_weekend_wait_shows_the_next_trade_decision_without_changing_cycle_evidence(pod_row_dict, monkeypatch):
     row_dict = _monthly_dict(pod_row_dict)
     before_dict = deepcopy(row_dict)
     def forbidden_fn(*args, **kwargs):
@@ -44,10 +44,11 @@ def test_weekend_wait_has_next_session_eod_without_changing_cycle_evidence(pod_r
     for name_str in ("next_due", "get_scheduler_decision", "run_once"):
         monkeypatch.setattr("alpha.live.scheduler_service." + name_str, forbidden_fn)
     result_dict = _next_dict(row_dict)
-    assert result_dict["next_str"] == "EOD"
-    assert result_dict["next_time_str"] == "09-21 16:10:00"
-    assert datetime.fromisoformat(result_dict["next_timestamp_str"]) == datetime.fromisoformat("2026-09-21T20:10:00+00:00")
-    assert result_dict["next_detail_str"] == "Scheduled" and result_dict["next_forecast_bool"]
+    # A monthly Pod's next trade, not the routine EOD snapshot on the next session.
+    assert result_dict["next_str"] == "Decide"
+    assert result_dict["next_time_str"] == "after 09-30 16:00:00"
+    assert result_dict["next_timestamp_str"] == ""
+    assert result_dict["next_detail_str"] == "Scheduled · trade 10-01 09:30:00" and result_dict["next_forecast_bool"]
     assert row_dict == before_dict
     cycle_dict = build_cycle_view_dict(row_dict, now_ts=datetime.fromisoformat(row_dict["as_of_timestamp_str"]))
     assert cycle_dict["pill_str"] == "Waiting"
@@ -60,7 +61,8 @@ def test_weekend_wait_has_next_session_eod_without_changing_cycle_evidence(pod_r
 ])
 def test_eod_forecast_uses_holidays_early_close_and_et_dst(pod_row_dict, now_str, signal_str, expected_str, utc_str):
     row_dict = _monthly_dict(pod_row_dict, now_str)
-    row_dict["latest_decision_signal_timestamp_str"] = signal_str
+    # No decision forecast for this clock, so EOD is the next operation.
+    row_dict.update(latest_decision_signal_timestamp_str=signal_str, execution_policy_str="unknown", signal_clock_str="unknown")
     result_dict = _next_dict(row_dict)
     assert result_dict["next_str"] == "EOD"
     assert result_dict["next_time_str"] == expected_str
@@ -75,12 +77,13 @@ def test_month_end_decision_precedes_eod_but_is_not_a_data_ready_deadline(pod_ro
     assert result_dict["next_str"] == "Decide"
     assert result_dict["next_time_str"] == "after 16:00:00"
     assert result_dict["next_timestamp_str"] == ""  # Cannot count down to vendor readiness.
-    assert result_dict["next_detail_str"] == "Scheduled · when data is ready"
+    assert result_dict["next_detail_str"] == "Scheduled · trade 10-01 09:30:00"
     assert result_dict["next_forecast_bool"] is True
 
 
 def test_saved_monday_eod_time_is_retained_as_scheduled(pod_row_dict):
     row_dict = _monthly_dict(pod_row_dict, "2026-09-21T14:00:00+00:00")
+    row_dict.update(execution_policy_str="unknown", signal_clock_str="unknown")
     row_dict["eod_snapshot_dict"].update(status_str="waiting", expected_market_date_str="2026-09-21",
         expected_due_timestamp_str="2026-09-21T20:10:00+00:00")
     result_dict = _next_dict(row_dict)
@@ -90,6 +93,7 @@ def test_saved_monday_eod_time_is_retained_as_scheduled(pod_row_dict):
 
 def test_completed_friday_eod_forecasts_monday_without_relabeling_snapshot(pod_row_dict):
     row_dict = _monthly_dict(pod_row_dict, "2026-09-18T21:00:00+00:00")
+    row_dict.update(execution_policy_str="unknown", signal_clock_str="unknown")
     row_dict["eod_snapshot_dict"].update(status_str="completed", expected_market_date_str="2026-09-18",
         latest_market_date_str="2026-09-18", latest_timestamp_str="2026-09-18T20:10:04+00:00",
         expected_due_timestamp_str="2026-09-18T20:10:00+00:00", same_session_bool=True)
@@ -224,12 +228,12 @@ def test_overview_and_current_header_keep_next_operation_when_browsing_history(p
     current_dict = overview_dict["pod_list"][0]
     assert current_dict["pill_str"] == current_dict["now_str"] == "Waiting"
     assert current_dict["now_detail_str"] == "No trade scheduled"
-    assert current_dict["next_detail_str"].startswith("Scheduled · in ")
+    assert current_dict["next_detail_str"] == "Scheduled · trade 10-01 09:30:00"
     source_dict = {"status_str": "ok", "pod_row_dict": deepcopy(row_dict), "selected_explicit_bool": True,
         "selected_cycle_dict": {"current_bool": False, "session_date_str": "2026-09-01"}}
     result_dict = build_pod_page_dict(overview_dict, source_dict, {}, pod_id_str=row_dict["pod_id_str"], as_of_ts=now_ts)
-    assert result_dict["header_dict"]["next_str"] == "EOD"
-    assert result_dict["header_dict"]["next_time_str"] == "09-21 16:10:00"
+    assert result_dict["header_dict"]["next_str"] == "Decide"
+    assert result_dict["header_dict"]["next_time_str"] == "after 09-30 16:00:00"
     assert result_dict["historical_bool"] and result_dict["verdict_str"].startswith("Saved cycle:")
     assert result_dict["verdict_detail_str"] == "Saved status for 2026-09-01."
     unavailable_dict = build_pod_page_dict(overview_dict, {"status_str": "unknown", "selected_current_bool": True}, {},

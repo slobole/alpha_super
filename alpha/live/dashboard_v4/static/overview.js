@@ -33,18 +33,44 @@
   let scheduler_check_snapshot_obj = null;
   let positions_search_snapshot_obj = null;
   let allocation_focus_snapshot_obj = null;
+  let open_detail_snapshot_obj = null;
+  // One failed poll only degrades the page; saved status still expires on time.
+  const FAILURE_LIMIT_INT = 3;
+  const IN_FLIGHT_LIMIT_MS = 12000;
+  let failure_count_int = 0;
+  let request_in_flight_bool = false;
+  let last_poll_ms = Date.now();
+  // Panels with data-own-refresh-ms refresh on their own cadence (money panels,
+  // dated facts from the last close; the Activity timeline). Never while hidden.
+  const own_seen_map = new WeakMap();
+  let own_open_key_list = [];
   const clock_formatter_obj = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
   });
+
+  function show_refresh_banner(shell_obj, state_str, reason_str) {
+    const failure_obj = shell_obj.querySelector('.refresh-error');
+    if (failure_obj) failure_obj.hidden = false;
+    const state_obj = shell_obj.querySelector('[data-refresh-state]');
+    if (state_obj) state_obj.textContent = state_str;
+    const reason_obj = shell_obj.querySelector('[data-refresh-reason]');
+    if (reason_obj) reason_obj.textContent = reason_str;
+  }
+
+  function mark_degraded() {
+    // Keep the last saved observation, dimmed, until it expires or polls keep failing.
+    const shell_obj = document.getElementById('overview-shell');
+    if (!shell_obj || shell_obj.getAttribute('data-source-stale') === 'true') return;
+    shell_obj.setAttribute('data-refresh-degraded', 'true');
+    show_refresh_banner(shell_obj, 'Update failed', 'Retrying. Showing the last saved status.');
+  }
 
   function mark_unknown(reason_str = 'Update failed.') {
     const shell_obj = document.getElementById('overview-shell');
     if (!shell_obj) return;
     shell_obj.setAttribute('data-source-stale', 'true');
-    const failure_obj = shell_obj.querySelector('.refresh-error');
-    if (failure_obj) failure_obj.hidden = false;
-    const reason_obj = shell_obj.querySelector('[data-refresh-reason]');
-    if (reason_obj) reason_obj.textContent = reason_str;
+    shell_obj.removeAttribute('data-refresh-degraded');
+    show_refresh_banner(shell_obj, 'Unknown', reason_str);
     shell_obj.querySelectorAll('[data-observed-state]').forEach((mark_obj) => {
       const label_str = mark_obj.getAttribute('aria-label') || '';
       const step_str = label_str.includes(' · ') ? label_str.split(' · ')[0] + ' · ' : '';
@@ -85,10 +111,60 @@
     shell_obj.querySelectorAll('[data-verdict], [data-cycle-verdict]').forEach((verdict_obj) => {
       verdict_obj.textContent = 'Status unknown.';
     });
+    // Countdowns and open-item counts are current claims too.
+    shell_obj.querySelectorAll('.deadline, .mode-count').forEach((claim_obj) => {
+      claim_obj.hidden = true;
+    });
   }
 
   function check_expiry() {
     if (observed_shell_obj && Date.now() >= valid_until_ms) mark_unknown('Saved status is out of date.');
+  }
+
+  function maybe_poll(now_bool = false) {
+    // A custom trigger replaces HTMX "every": hidden tabs send no requests.
+    const shell_obj = document.getElementById('overview-shell');
+    if (!shell_obj || document.hidden) return;
+    if (request_in_flight_bool && Date.now() - request_start_ms < IN_FLIGHT_LIMIT_MS) return;
+    const interval_ms = Number(shell_obj.getAttribute('data-refresh-ms'));
+    if (!(interval_ms > 0) || (!now_bool && Date.now() - last_poll_ms < interval_ms)) return;
+    if (typeof shell_obj.dispatchEvent !== 'function' || typeof CustomEvent !== 'function') return;
+    last_poll_ms = Date.now();
+    shell_obj.dispatchEvent(new CustomEvent('v4poll'));
+  }
+
+  function dispatch_own(element_obj) {
+    if (typeof element_obj.dispatchEvent !== 'function' || typeof CustomEvent !== 'function') return;
+    own_seen_map.set(element_obj, Date.now());
+    element_obj.dispatchEvent(new CustomEvent('v4own'));
+  }
+
+  function refresh_own() {
+    // Each panel counts its interval from when it was first seen in the page.
+    if (document.hidden || typeof document.querySelectorAll !== 'function') return;
+    document.querySelectorAll('[data-own-refresh-ms]').forEach((element_obj) => {
+      const interval_ms = Number(element_obj.getAttribute('data-own-refresh-ms'));
+      if (!(interval_ms > 0)) return;
+      if (!own_seen_map.has(element_obj)) own_seen_map.set(element_obj, Date.now());
+      else if (Date.now() - own_seen_map.get(element_obj) >= interval_ms) dispatch_own(element_obj);
+    });
+  }
+
+  function mark_own_failed(event_obj) {
+    // The status poll stays healthy, so the panel itself must say it is behind.
+    const target_obj = event_obj.detail && (event_obj.detail.target || event_obj.detail.elt);
+    const panel_obj = target_obj && target_obj.closest && target_obj.closest('[data-own-refresh-ms]');
+    if (!panel_obj) return;
+    panel_obj.setAttribute('data-own-failed', 'true');
+    if (typeof panel_obj.querySelectorAll !== 'function') return;
+    panel_obj.querySelectorAll('[data-own-status]').forEach((status_obj) => {
+      status_obj.textContent = '· Update failed · last ' + (status_obj.getAttribute('data-own-updated') || 'unknown');
+    });
+  }
+
+  function own_event(event_obj) {
+    const target_obj = event_obj.detail && (event_obj.detail.target || event_obj.detail.elt);
+    return Boolean(target_obj && target_obj.closest && target_obj.closest('[data-own-refresh-ms]'));
   }
 
   function update_clock() {
@@ -113,6 +189,7 @@
     clock_observed_ms = Date.now();
     if (source_obj !== shell_obj && valid_until_ms > Date.now()) {
       shell_obj.removeAttribute('data-source-stale');
+      shell_obj.removeAttribute('data-refresh-degraded');
       const failure_obj = shell_obj.querySelector('.refresh-error');
       if (failure_obj) failure_obj.hidden = true;
       shell_obj.querySelectorAll('[data-update-time]').forEach((label_obj) => {
@@ -192,6 +269,8 @@
   }
 
   function overview_event(event_obj) {
+    // A panel's own request never counts as an operating-status refresh.
+    if (own_event(event_obj)) return false;
     const target_obj = event_obj.detail && (event_obj.detail.target || event_obj.detail.elt);
     return target_obj && (target_obj.id === 'overview-shell' || target_obj.closest('#overview-shell'));
   }
@@ -239,6 +318,44 @@
     if (match_list.length === 1) match_list[0].focus({preventScroll: true});
   }
 
+  function copy_by_selection_bool(text_str) {
+    // Older copy path; often allowed where the Clipboard API is denied.
+    try {
+      const area_obj = document.createElement('textarea');
+      area_obj.value = text_str;
+      area_obj.setAttribute('readonly', '');
+      area_obj.style.position = 'fixed';
+      area_obj.style.opacity = '0';
+      document.body.append(area_obj);
+      area_obj.select();
+      const copied_bool = document.execCommand('copy');
+      area_obj.remove();
+      return copied_bool;
+    } catch (error_obj) {
+      return false;
+    }
+  }
+
+  function copy_text(text_str) {
+    // Clipboard API, then the selection copy, then show the command to copy by hand.
+    const api_promise = navigator.clipboard && navigator.clipboard.writeText
+      ? navigator.clipboard.writeText(text_str) : Promise.reject(new Error('no clipboard'));
+    return api_promise.then(() => 'true', () => {
+      if (copy_by_selection_bool(text_str)) return 'true';
+      if (typeof window.prompt === 'function') window.prompt('Copy this command (Ctrl+C), then close:', text_str);
+      return 'shown';
+    });
+  }
+
+  document.addEventListener('click', (event_obj) => {
+    const button_obj = event_obj.target && event_obj.target.closest && event_obj.target.closest('[data-copy-command]');
+    if (!button_obj) return;
+    copy_text(button_obj.getAttribute('data-copy-command')).then((state_str) => {
+      button_obj.setAttribute('data-copied', state_str);
+      window.setTimeout(() => button_obj.removeAttribute('data-copied'), 1600);
+    });
+  });
+
   document.addEventListener('input', (event_obj) => {
     if (event_obj.target && event_obj.target.getAttribute('data-positions-search') !== null) {
       filter_positions(document.getElementById('overview-shell'));
@@ -247,18 +364,24 @@
 
   ['htmx:responseError', 'htmx:sendError', 'htmx:timeout', 'htmx:swapError'].forEach((event_str) => {
     document.addEventListener(event_str, (event_obj) => {
+      if (own_event(event_obj)) mark_own_failed(event_obj);
       if (overview_event(event_obj)) {
         selection_snapshot_obj = null;
         scheduler_check_snapshot_obj = null;
         positions_search_snapshot_obj = null;
         allocation_focus_snapshot_obj = null;
-        mark_unknown();
+        request_in_flight_bool = false;
+        failure_count_int += 1;
+        if (failure_count_int >= FAILURE_LIMIT_INT) mark_unknown('Update failed ' + failure_count_int + ' times in a row.');
+        else mark_degraded();
+        check_expiry();
       }
     });
   });
   document.addEventListener('htmx:beforeRequest', (event_obj) => {
     if (!overview_event(event_obj)) return;
     request_start_ms = Date.now();
+    request_in_flight_bool = true;
   });
   document.addEventListener('htmx:beforeSwap', (event_obj) => {
     if (!overview_event(event_obj) || event_obj.detail.shouldSwap === false || event_obj.detail.isError) return;
@@ -277,9 +400,15 @@
       start_int: input_obj.selectionStart, end_int: input_obj.selectionEnd} : null;
     allocation_focus_snapshot_obj = capture_allocation_focus(shell_obj);
     if (allocation_focus_snapshot_obj) focus_period_str = '';
+    // Sections the operator opened stay open across the atomic refresh.
+    open_detail_snapshot_obj = shell_obj ? {scope_str: shell_obj.getAttribute('data-selection-scope'),
+      key_list: Array.from(shell_obj.querySelectorAll('details[data-keep-open][open]'))
+        .map((detail_obj) => detail_obj.getAttribute('data-keep-open'))} : null;
   });
   document.addEventListener('htmx:afterSwap', (event_obj) => {
     if (!overview_event(event_obj)) return;
+    request_in_flight_bool = false;
+    failure_count_int = 0;
     observe_snapshot(Math.max(0, Date.now() - request_start_ms));
     const shell_obj = document.getElementById('overview-shell');
     const check_obj = shell_obj && shell_obj.querySelector('.scheduler-check');
@@ -288,6 +417,12 @@
         && shell_obj.getAttribute('data-selection-scope') === scheduler_check_snapshot_obj.scope_str
         && command_obj.textContent === scheduler_check_snapshot_obj.command_str) check_obj.setAttribute('open', '');
     scheduler_check_snapshot_obj = null;
+    if (open_detail_snapshot_obj && shell_obj && shell_obj.getAttribute('data-selection-scope') === open_detail_snapshot_obj.scope_str) {
+      shell_obj.querySelectorAll('details[data-keep-open]').forEach((detail_obj) => {
+        if (open_detail_snapshot_obj.key_list.includes(detail_obj.getAttribute('data-keep-open'))) detail_obj.setAttribute('open', '');
+      });
+    }
+    open_detail_snapshot_obj = null;
     const input_obj = shell_obj && shell_obj.querySelector('[data-positions-search]');
     if (input_obj && positions_search_snapshot_obj
         && shell_obj.getAttribute('data-selection-scope') === positions_search_snapshot_obj.scope_str) {
@@ -305,13 +440,37 @@
   document.addEventListener('htmx:afterRequest', (event_obj) => {
     // hx-swap=none still applies the header/rail out-of-band fragments. Only
     // a newly replaced stamp can renew freshness; errors cannot renew it.
-    if (overview_event(event_obj) && event_obj.detail.successful) {
+    if (!overview_event(event_obj)) return;
+    request_in_flight_bool = false;
+    if (event_obj.detail.successful) {
+      failure_count_int = 0;
       observe_snapshot(Math.max(0, Date.now() - request_start_ms));
     }
   });
   document.addEventListener('selectionchange', () => {
     if (selection_snapshot_obj && selection_snapshot_obj.shell_obj.isConnected
         && !unchanged_selection_bool(window.getSelection(), selection_snapshot_obj)) selection_snapshot_obj = null;
+  });
+  document.addEventListener('htmx:beforeSwap', (event_obj) => {
+    if (!own_event(event_obj) || event_obj.detail.isError) return;
+    const target_obj = event_obj.detail.target;
+    own_open_key_list = Array.from(target_obj.querySelectorAll('details[data-keep-open][open]'))
+      .map((detail_obj) => detail_obj.getAttribute('data-keep-open'));
+  });
+  document.addEventListener('htmx:afterSettle', (event_obj) => {
+    if (own_event(event_obj)) {
+      // A refreshed panel keeps the sections the operator had opened.
+      document.querySelectorAll('[data-own-refresh-ms] details[data-keep-open]').forEach((detail_obj) => {
+        if (own_open_key_list.includes(detail_obj.getAttribute('data-keep-open'))) detail_obj.setAttribute('open', '');
+      });
+      own_open_key_list = [];
+      return;
+    }
+    // A placeholder that found no panel to keep (first load, or the Pod changed
+    // between normal and issue layout) loads at once.
+    if (overview_event(event_obj) && typeof document.querySelectorAll === 'function') {
+      document.querySelectorAll('[data-own-placeholder]').forEach(dispatch_own);
+    }
   });
   document.addEventListener('htmx:afterSettle', (event_obj) => {
     if (!overview_event(event_obj) || !focus_period_str) return;
@@ -334,8 +493,16 @@
   setInterval(() => {
     check_expiry();
     update_clock();
+    maybe_poll();
+    refresh_own();
   }, 1000);
-  document.addEventListener('visibilitychange', check_expiry);
+  document.addEventListener('visibilitychange', () => {
+    check_expiry();
+    if (!document.hidden) {
+      maybe_poll(Date.now() - last_poll_ms >= 1000);
+      refresh_own();
+    }
+  });
   window.addEventListener('pageshow', (event_obj) => {
     if (event_obj.persisted) mark_unknown('Refresh saved status.');
     else check_expiry();

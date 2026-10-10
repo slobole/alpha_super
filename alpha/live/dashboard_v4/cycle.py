@@ -143,7 +143,14 @@ def build_cycle_view_dict(
     data_dict = pod_row_dict.get("norgate_snapshot_status_dict") or {}
     data_stale_bool = data_dict.get("snapshot_fresh_for_cycle_bool") is False
     source_missing_bool = pod_row_dict.get("db_status_str") != "ok" or not data_dict
-    if stale_bool or data_stale_bool or source_missing_bool:
+    release_id_str = str(pod_row_dict.get("release_id_str") or "")
+    past_deadline_obj = data_dict.get("snapshot_stale_past_alert_deadline_bool",
+        pod_row_dict.get("norgate_snapshot_stale_past_alert_deadline_bool"))
+    # Before its alert deadline, a not-yet-delivered session is an expected
+    # wait, not unknown status: keep the saved cycle, show only the Data wait.
+    data_waiting_bool = (data_stale_bool and past_deadline_obj is False
+        and str(data_dict.get("status_str") or "") != "failed")
+    if stale_bool or (data_stale_bool and not data_waiting_bool) or source_missing_bool:
         fact_str = "Status out of date" if stale_bool else "Data not verified"
         step_dict_list = [_step_dict(label_str, "Unknown", fact_str, now_dt) for label_str in STEP_LABEL_TUPLE]
         return _cycle_dict(step_dict_list, stale_bool or data_stale_bool, "unknown")
@@ -175,9 +182,18 @@ def build_cycle_view_dict(
     data_ready_bool = data_status_str == "ready" and bool(data_dict.get("snapshot_date_str")) and data_dict.get("snapshot_fresh_for_cycle_bool") is True
     data_state_str = "Done" if data_ready_bool else "Failed" if data_status_str == "failed" else "Unknown"
     data_fact_str = str(data_dict.get("snapshot_date_str") or "Freshness not verified")
+    data_alert_str = ""
     if previous_unresolved_bool:
         data_state_str, data_fact_str = "Unknown", "Previous cycle data"
+    elif data_waiting_bool:
+        need_str = str((data_dict.get("required_snapshot_date_by_release_dict") or {}).get(release_id_str) or "")
+        deadline_dt = _timestamp_dt((data_dict.get("stale_alert_deadline_by_release_dict")
+            or pod_row_dict.get("norgate_stale_alert_deadline_by_release_dict") or {}).get(release_id_str))
+        data_state_str, data_fact_str = "Now", "Waiting for " + (need_str + " data" if need_str else "new data")
+        data_alert_str = "alert " + _clock_str(deadline_dt, now_dt) + " ET" if deadline_dt is not None else ""
     step_dict_list = [_step_dict("Data", data_state_str, data_fact_str, now_dt)]
+    if data_alert_str:
+        step_dict_list[0]["detail_str"] = "No alert before the data deadline · " + data_alert_str
 
     if previous_unresolved_bool:
         decision_state_str, decision_fact_str = "Unknown", "Previous decision"
@@ -300,7 +316,10 @@ def build_cycle_view_dict(
     if idle_bool:
         step_dict_list = [_step_dict(label_str, "None", "No trade scheduled", now_dt) for label_str in STEP_LABEL_TUPLE[:-1]]
     step_dict_list.append(_eod_step_dict(pod_row_dict.get("eod_snapshot_dict") or {}, now_dt, source_dt))
-    return _cycle_dict(step_dict_list, False, cycle_role_str)
+    cycle_dict = _cycle_dict(step_dict_list, False, cycle_role_str)
+    cycle_dict.update(data_waiting_bool=data_waiting_bool and step_dict_list[0]["state_str"] == "Now",
+        data_alert_str=data_alert_str)
+    return cycle_dict
 
 
 def _cycle_dict(step_dict_list: list[dict[str, str]], stale_bool: bool, cycle_role_str: str) -> dict[str, Any]:

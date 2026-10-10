@@ -246,7 +246,7 @@ def test_real_scope_uses_saved_reader_and_never_demo_provider_override(full_fixt
 
 def test_holdings_full_and_refresh_keep_security_headers_and_existing_routes(full_fixture_tuple):
     app_obj = full_fixture_tuple[3]
-    for path_str in ("/pods/demo_1_0", "/pods/demo_1_0/refresh"):
+    for path_str in ("/pods/demo_1_0", "/pods/demo_1_0/money"):
         response_obj, _ = _render_tuple(app_obj, path_str)
         assert "data-pod-allocation" in response_obj.get_data(as_text=True)
         assert response_obj.headers["Cache-Control"] == "no-store"

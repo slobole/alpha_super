@@ -76,7 +76,7 @@ def test_unknown_scheduler_does_not_downgrade_waiting_pod(fixture_tuple, monkeyp
     view_dict = build_overview_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=DEMO_NOW_TS)
     assert view_dict["system_dict"] == {"state_str": "unk", "label_str": "System unknown", "detail_str": "Scheduler unknown"}
     assert view_dict["pod_list"][0]["pill_str"] == "Waiting"
-    assert view_dict["pod_list"][0]["next_str"] == "EOD"
+    assert view_dict["pod_list"][0]["next_str"] == "Decide"  # A monthly Pod's next trade decision.
     assert view_dict["attention_list"] == []
 
 
@@ -235,3 +235,16 @@ def test_detail_only_current_issue_includes_current_scheduler_explanation(fixtur
     view_dict = build_pod_page_dict(overview_dict, source_dict, {}, pod_id_str="demo_1_2", as_of_ts=DEMO_NOW_TS)
     assert view_dict["attention_dict"]["title_str"] == "Review broker ACK"
     assert view_dict["attention_dict"]["scheduler_note_str"] == "The scheduler is alive. It waits for operator action."
+
+
+def test_worse_cycle_issue_on_pod_page_keeps_the_replaced_scheduler_warning(fixture_tuple):
+    workspace_dict, snapshot_obj, provider_obj = fixture_tuple
+    _set_status(provider_obj, "demo_1_2", "late")
+    overview_dict = build_overview_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=DEMO_NOW_TS)
+    source_dict = provider_obj.get_pod_cycles_dict("demo_1_2", as_of_ts=DEMO_NOW_TS)
+    source_dict["ack_list"][0]["ack_status_str"] = "missing_critical"
+    view_dict = build_pod_page_dict(overview_dict, source_dict, {}, pod_id_str="demo_1_2", as_of_ts=DEMO_NOW_TS)
+    attention_dict = view_dict["attention_dict"]
+    assert attention_dict["title_str"] == "Review broker ACK" and attention_dict["state_str"] == "fail"
+    assert attention_dict["scheduler_note_str"].startswith("Scheduler check overdue. No sign of life since ")
+    assert attention_dict["console_bool"] is True

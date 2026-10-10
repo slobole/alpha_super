@@ -42,7 +42,7 @@ def attach_demo_system(provider_obj):
         return {"checked_timestamp_str": as_of_ts.isoformat(), "scope_verified_bool": True, "release_list": release_list,
             "watchdog_dict": {"state_str": "done", "now_str": "Run completed",
                 "last_timestamp_str": (as_of_ts - timedelta(seconds=64)).isoformat(), "expected_str": "Report within 15 min"},
-            "deadman_dict": {"state_str": "done", "now_str": "Fail signal sent",
+            "deadman_dict": {"state_str": "done", "now_str": "Ping sent",
                 "last_timestamp_str": (as_of_ts - timedelta(seconds=64)).isoformat(), "expected_str": "After each watchdog run"},
             "alerts_dict": {"state_str": "done", "now_str": "No saved undelivered alerts",
                 "last_timestamp_str": (as_of_ts - timedelta(seconds=65)).isoformat(), "expected_str": "When a Pod needs action"},

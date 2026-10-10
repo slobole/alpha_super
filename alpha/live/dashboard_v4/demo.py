@@ -28,7 +28,7 @@ def build_demo_workspace_tuple(*, include_holdings_bool=False):
         row_dict.update(
             as_of_timestamp_str=DEMO_NOW_TS.isoformat(),
             strategy_name_str=client_dict["accounts"][index_int]["display_name"],
-            db_exists_bool=True, health_str="green",
+            db_exists_bool=True, health_str="green", auto_submit_enabled_bool=False,
             next_action_str="wait", reason_code_str="cycle_completed" if daily_bool else "not_month_end_session",
             execution_policy_str="next_open_moo" if daily_bool else "next_month_first_open",
             signal_clock_str="daily_snapshot_ready" if daily_bool else "month_end_snapshot_ready",
@@ -92,6 +92,8 @@ def build_demo_workspace_tuple(*, include_holdings_bool=False):
     attach_demo_activity(provider_obj, as_of_ts=DEMO_NOW_TS)
     from alpha.live.dashboard_v4.system_demo import attach_demo_system
     attach_demo_system(provider_obj)
+    from alpha.live.dashboard_v4.console_demo import attach_demo_console
+    attach_demo_console(provider_obj, as_of_ts=DEMO_NOW_TS)
     summary_dict = provider_obj.get_summary_dict()
     summary_dict["as_of_timestamp_str"] = DEMO_NOW_TS.isoformat()
     workspace_dict = {
@@ -105,7 +107,7 @@ def build_demo_workspace_tuple(*, include_holdings_bool=False):
     return workspace_dict, snapshot_dict[client_dict["client_id"]], provider_obj
 
 
-def create_demo_app(*, demo_tools_bool=False):
+def create_demo_app(*, demo_tools_bool=False, console_appender_bool=False):
     from alpha.live.dashboard_v4.app import create_app
 
     workspace_dict, snapshot_obj, provider_obj = build_demo_workspace_tuple(include_holdings_bool=True)
@@ -125,6 +127,10 @@ def create_demo_app(*, demo_tools_bool=False):
     def workspace_snapshot_tuple():
         return operations_workspace_dict(), snapshot_obj
 
+    if console_appender_bool:
+        # Only the interactive demo grows its console; tests keep a fixed file.
+        from alpha.live.dashboard_v4.console_demo import start_demo_console_appender
+        start_demo_console_appender(provider_obj, demo_now_ts)
     return create_app(provider_obj, demo_bool=True, demo_tools_bool=demo_tools_bool,
                       workspace_snapshot_fn=workspace_snapshot_tuple,
                       operations_workspace_fn=operations_workspace_dict, now_fn=demo_now_ts)

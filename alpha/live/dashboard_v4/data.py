@@ -1,7 +1,10 @@
 """Reuse V3 readers while excluding non-LIVE targets before state acquisition."""
 
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
+import logging
+import threading
+import time
 
 from alpha.live.client_reporting import (
     BrokerReportingSnapshot,
@@ -9,7 +12,8 @@ from alpha.live.client_reporting import (
     load_broker_reporting_snapshot,
 )
 from alpha.live.dashboard import DashboardApp
-from alpha.live.dashboard_v3.data import DashboardDataProvider
+from alpha.live.dashboard_v3 import data as v3_data_module
+from alpha.live.dashboard_v3.data import SUMMARY_CACHE_SECONDS_FLOAT, DashboardDataProvider
 from alpha.live.dashboard_v3.filters import MARKET_TIMEZONE_OBJ
 from alpha.live.dashboard_v3.local_workspace import (
     build_local_workspace_dict,
@@ -19,6 +23,24 @@ from alpha.live.dashboard_v4.evidence import load_cycle_evidence_dict
 from alpha.live.dashboard_v4.pod_data import load_pod_cycles_dict
 from alpha.live.dashboard_v4.scheduler_status import load_scheduler_status_dict
 from alpha.live.dashboard_v4.tools import _arguments_list, powershell_command_str
+
+
+LOGGER_OBJ = logging.getLogger(__name__)
+# A request waits at most this long for a newer summary, then shows the last
+# one. Its own timestamp still ages it out after the 120-second source window.
+SUMMARY_WAIT_SECONDS_FLOAT = 2.0
+# After a rebuild, rest for this multiple of its duration before the next one,
+# so slow logs cannot keep a core busy rebuilding for every poll.
+SUMMARY_REST_FACTOR_FLOAT = 2.0
+_monotonic_float = time.monotonic
+
+
+@dataclass
+class _SummaryRefreshState:
+    lock_obj: threading.Lock = field(default_factory=threading.Lock)
+    first_build_lock_obj: threading.Lock = field(default_factory=threading.Lock)
+    done_event_obj: threading.Event | None = None
+    next_start_float: float = 0.0
 
 
 class LiveReadOnlyApp(DashboardApp):
@@ -34,6 +56,50 @@ class LiveReadOnlyApp(DashboardApp):
 
 
 class LiveDataProvider(DashboardDataProvider):
+    def _summary_state_obj(self) -> _SummaryRefreshState:
+        return self.__dict__.setdefault("_summary_refresh_state_obj", _SummaryRefreshState())
+
+    def get_summary_dict(self):
+        """Serve the last summary while at most one rebuild runs in the background."""
+        state_obj = self._summary_state_obj()
+        if self._summary_cache_dict is None:
+            # Only the first request blocks; concurrent first requests share one build.
+            with state_obj.first_build_lock_obj:
+                if self._summary_cache_dict is None:
+                    start_float = _monotonic_float()
+                    summary_dict = v3_data_module.build_dashboard_summary_dict(self.app_obj())
+                    with state_obj.lock_obj:
+                        self._summary_cache_dict, self._summary_cache_at_float = summary_dict, start_float
+            return self._summary_cache_dict
+        with state_obj.lock_obj:
+            now_float = _monotonic_float()
+            if now_float - self._summary_cache_at_float < SUMMARY_CACHE_SECONDS_FLOAT:
+                return self._summary_cache_dict
+            event_obj = state_obj.done_event_obj
+            if event_obj is None and now_float >= state_obj.next_start_float:
+                event_obj = state_obj.done_event_obj = threading.Event()
+                threading.Thread(target=self._rebuild_summary, args=(state_obj, event_obj),
+                    name="dashboard-v4-summary", daemon=True).start()
+        if event_obj is not None:
+            event_obj.wait(SUMMARY_WAIT_SECONDS_FLOAT)
+        with state_obj.lock_obj:
+            return self._summary_cache_dict
+
+    def _rebuild_summary(self, state_obj, event_obj) -> None:
+        start_float = _monotonic_float()
+        try:
+            summary_dict = v3_data_module.build_dashboard_summary_dict(self.app_obj())
+        except Exception:  # Keep serving the last summary; it expires on its own timestamp.
+            LOGGER_OBJ.warning("Dashboard summary rebuild failed; the last summary stays in use.", exc_info=True)
+            summary_dict = None
+        end_float = _monotonic_float()
+        with state_obj.lock_obj:
+            if summary_dict is not None:
+                self._summary_cache_dict, self._summary_cache_at_float = summary_dict, start_float
+            state_obj.next_start_float = end_float + SUMMARY_REST_FACTOR_FLOAT * max(0.0, end_float - start_float)
+            state_obj.done_event_obj = None
+        event_obj.set()
+
     def get_scheduler_status_dict(self, pod_id_str, *, as_of_ts):
         try:
             target_obj = self.get_target_for_pod(pod_id_str)

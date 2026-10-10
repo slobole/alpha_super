@@ -1,0 +1,5 @@
+{# Money-only response: tiles replace themselves; as-of and panels arrive out of band. #}
+{% from "_icons.html" import icon %}
+{% set money_placeholder_bool = false %}
+{% set money_oob_bool = false %}{% include '_overview_money_tiles.html' %}
+{% set money_oob_bool = true %}{% include '_overview_money_asof.html' %}{% include '_overview_money_panels.html' %}

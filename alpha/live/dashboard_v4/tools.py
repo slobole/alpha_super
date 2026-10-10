@@ -6,6 +6,7 @@ opens state for writing, reads environment secrets, or accepts shell text.
 
 from datetime import UTC, datetime
 from pathlib import Path
+import re
 import sqlite3
 from urllib.parse import quote
 
@@ -13,6 +14,8 @@ from alpha.live.dashboard_v3.client_operations import SOURCE_MAX_AGE_SECONDS_INT
 from alpha.live.ops_report import parse_timestamp_ts
 
 
+# ACTIVE commands that can send broker orders carry that qualifier on their badge.
+ORDER_TOOL_SET = frozenset({"tick", "run_once", "serve", "submit_vplan", "manual_order"})
 EXECUTABLE_ACTION_SET = frozenset({"tick", "submit_vplan", "post_execution_reconcile",
     "eod_snapshot", "compare_reference", "manual_order"})
 
@@ -41,9 +44,19 @@ TOOL_CATALOG_TUPLE = (
 )
 
 
+# PowerShell ends a single-quoted string at ASCII ' and at the typographic
+# quotes U+2018-U+201B; doubling any of them keeps it literal data.
+POWERSHELL_QUOTE_RE = re.compile("['\u2018\u2019\u201a\u201b]")
+
+
+def powershell_literal_str(value_obj):
+    """One single-quoted literal: quotes, dollars and backticks stay data."""
+    return "'" + POWERSHELL_QUOTE_RE.sub(lambda match_obj: match_obj.group(0) * 2, str(value_obj)) + "'"
+
+
 def powershell_command_str(argument_list):
     """Quote each literal argument: apostrophes, dollars and backticks stay data."""
-    return "& " + " ".join("'" + str(argument_str).replace("'", "''") + "'" for argument_str in argument_list)
+    return "& " + " ".join(powershell_literal_str(argument_str) for argument_str in argument_list)
 
 
 def _scope_rows_tuple(workspace_dict):
@@ -283,7 +296,7 @@ def build_tools_page_dict(workspace_dict, provider_obj, *, selected_pod_str="",
         complete_bool = all(not parameter_dict["required_bool"] or parameter_dict["value_str"]
             for parameter_dict in parameter_list)
         row_dict = {"key_str": key_str, "label_str": "Saved watchdog report" if family_str == "saved" else key_str,
-            "class_str": class_str, "effect_str": effect_str,
+            "class_str": class_str, "effect_str": effect_str, "orders_bool": key_str in ORDER_TOOL_SET,
             "scope_str": "Installation · all configured releases" if family_str == "norgate" else
                 "Installation · all LIVE Pods" if scope_str == "system" else "Selected LIVE Pod",
             "command_str": powershell_command_str(command_argument_list) if argument_list and complete_bool else "",

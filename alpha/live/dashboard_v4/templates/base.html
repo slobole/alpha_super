@@ -17,6 +17,7 @@
   {% if activity_page_dict is defined %}<link rel="stylesheet" href="{{ url_for('static', filename='activity.css') }}">{% endif %}
   {% if system_page_dict is defined %}<link rel="stylesheet" href="{{ url_for('static', filename='system.css') }}">{% endif %}
   {% if tools_page_dict is defined %}<link rel="stylesheet" href="{{ url_for('static', filename='tools.css') }}">{% endif %}
+  {% if console_page_dict is defined %}<link rel="stylesheet" href="{{ url_for('static', filename='console.css') }}">{% endif %}
   <script src="{{ url_for('assets', filename='htmx.min.js') }}" defer></script>
   <script src="{{ url_for('static', filename='overview.js') }}" defer></script>
   <script src="{{ url_for('static', filename='chart_interaction.js') }}" defer></script>
@@ -24,6 +25,7 @@
   {% if performance_page_dict is defined %}<script src="{{ url_for('static', filename='performance.js') }}" defer></script>{% endif %}
   {% if activity_page_dict is defined %}<script src="{{ url_for('static', filename='activity.js') }}" defer></script>{% endif %}
   {% if tools_page_dict is defined %}<script src="{{ url_for('static', filename='tools.js') }}" defer></script>{% endif %}
+  {% if console_page_dict is defined %}<script src="{{ url_for('static', filename='console.js') }}" defer></script>{% endif %}
 </head>
 <body hx-history="false">
   {% block content %}{% endblock %}

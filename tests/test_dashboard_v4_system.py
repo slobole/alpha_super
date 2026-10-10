@@ -46,7 +46,11 @@ def test_saved_evidence_never_claims_live_gateway_or_missing_receipts(source_tup
     original_tuple = deepcopy(source_tuple)
     view_dict = _view_dict(source_tuple)
     rows_dict = _rows_dict(view_dict)
-    assert [group_dict["label_str"] for group_dict in view_dict["group_list"]] == ["Runs all the time", "Runs on a schedule", "Data and space"]
+    assert [group_dict["label_str"] for group_dict in view_dict["group_list"]] == [
+        "Runs all the time", "Runs on a schedule", "Data and space", "Not checked by the dashboard"]
+    # Rows the dashboard never checks are grouped last instead of interleaved.
+    assert [row_dict["key_str"] for row_dict in view_dict["group_list"][-1]["row_list"]] == ["gateway", "fred"]
+    assert all(row_dict["checked_bool"] for group_dict in view_dict["group_list"][:-1] for row_dict in group_dict["row_list"])
     assert rows_dict["schedulers"]["state_str"] == "done"
     assert rows_dict["schedulers"]["now_str"] == "1 of 1 alive"
     assert rows_dict["gateway"]["state_str"] == "skip" and rows_dict["gateway"]["checked_bool"] is False
@@ -62,9 +66,9 @@ def test_saved_evidence_never_claims_live_gateway_or_missing_receipts(source_tup
 
 
 @pytest.mark.parametrize("state_str,alive_bool,tone_str,label_str", [
-    ("holding", True, "skip", "Holding · waits for your review"),
+    ("holding", True, "late", "Holding · waits for you"),
     ("running", True, "done", "Running · EOD"),
-    ("error", True, "fail", "Error · check log"),
+    ("error", True, "fail", "Error · see Console"),
     ("late", None, "late", "Wake overdue"),
     ("stopped", False, "fail", "Not responding · check service"),
     ("unknown", None, "unk", "Unknown · recent activity only"),
@@ -76,7 +80,8 @@ def test_scheduler_states_use_saved_actual_state(source_tuple, state_str, alive_
     assert view_dict["pod_list"][0]["scheduler_str"] == label_str
     assert view_dict["pod_list"][0]["wake_str"] == "10:59:30"
     assert _rows_dict(view_dict)["schedulers"]["state_str"] == ("done" if state_str == "holding" else tone_str)
-    if tone_str in {"late", "fail"}:
+    # A hold is the operator's action on the Overview, not a system fault.
+    if tone_str in {"late", "fail"} and state_str != "holding":
         assert view_dict["state_str"] == tone_str
 
 
@@ -85,7 +90,7 @@ def test_real_wait_for_data_flag_and_error_do_not_derive_from_pod_issue(source_t
     scheduler_dict["waiting_for_data_bool"] = True
     assert _view_dict(source_tuple)["pod_list"][0]["scheduler_str"] == "Waiting for data"
     scheduler_dict["state_str"] = "error"
-    assert _view_dict(source_tuple)["pod_list"][0]["scheduler_str"] == "Error · check log"
+    assert _view_dict(source_tuple)["pod_list"][0]["scheduler_str"] == "Error · see Console"
 
 
 @pytest.mark.parametrize("seconds_int,tone_str", [(60, "done"), (61, "late"), (300, "late"), (301, "fail")])

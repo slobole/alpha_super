@@ -1,0 +1,9 @@
+{# The one money element that refreshes itself; frame refreshes send a preserved placeholder.
+   hx-target is explicit: htmx would otherwise inherit the frame's target and replace the frame. #}
+<section class="tiles tiles-4" id="overview-money-tiles" aria-label="Money at last close" data-own-refresh-ms="300000" hx-get="{{ overview_dict.money_url_str }}" hx-trigger="v4own" hx-target="this" hx-swap="outerHTML" hx-request='{"timeout":20000}'{% if money_placeholder_bool %} hx-preserve="true" data-own-placeholder{% endif %}>
+{% if not money_placeholder_bool %}
+          {% for tile_dict in overview_dict.tile_list %}
+          <div class="tile" data-selection-key="money:{{ tile_dict.label_str }}"><div class="l">{{ tile_dict.label_str }}</div><div class="v {{ tile_dict.tone_str if tile_dict.tone_str in ['pos', 'neg'] else '' }}">{{ tile_dict.value_str }}</div><div class="s">{{ tile_dict.detail_str }}</div></div>
+          {% endfor %}
+{% endif %}
+</section>

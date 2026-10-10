@@ -1,17 +1,23 @@
 {% from "_icons.html" import icon %}
 {% set state_label_dict = {'done': 'Done', 'now': 'Now', 'next': 'Planned', 'late': 'Late', 'fail': 'Failed', 'skip': 'None', 'unk': 'Unknown'} %}
 {% set pill_class_dict = {'done': 'ok', 'now': 'work', 'next': 'idle', 'late': 'late', 'fail': 'act', 'skip': 'idle', 'unk': 'unk'} %}
-{% set is_overview_bool = pod_page_dict is not defined and positions_page_dict is not defined and performance_page_dict is not defined and activity_page_dict is not defined and system_page_dict is not defined and tools_page_dict is not defined %}
+{% set is_overview_bool = pod_page_dict is not defined and positions_page_dict is not defined and performance_page_dict is not defined and activity_page_dict is not defined and system_page_dict is not defined and tools_page_dict is not defined and console_page_dict is not defined %}
+{% set status_only_page_bool = performance_page_dict is defined or tools_page_dict is defined or console_page_dict is defined or activity_page_dict is defined %}
 {% from "_state.html" import mark %}
-<div class="frame" id="overview-shell" hx-get="{{ overview_dict.refresh_url_str }}" hx-trigger="every {{ overview_dict.refresh_seconds_int }}s" hx-swap="{{ 'none' if performance_page_dict is defined or tools_page_dict is defined else 'outerHTML' }}" hx-target="this" hx-request='{"timeout":10000}' data-last-update="{{ overview_dict.updated_str }}" data-source-valid-ms="{{ overview_dict.source_valid_ms_int }}" data-clock-timestamp="{{ overview_dict.clock_timestamp_str }}" data-selection-scope="{% if tools_page_dict is defined %}tools:{{ tools_page_dict.selected_pod_str }}:{{ tools_page_dict.selected_tool_str }}{% elif system_page_dict is defined %}system:live{% elif performance_page_dict is defined %}performance:{{ performance_page_dict.level_str }}:{{ performance_page_dict.period_str }}:{{ performance_page_dict.from_date_str }}:{{ performance_page_dict.to_date_str }}:{{ performance_page_dict.unit_str }}{% elif positions_page_dict is defined %}positions:{{ positions_page_dict.view_str }}:{{ positions_page_dict.pod_str }}{% elif pod_page_dict is defined %}pod:{{ pod_page_dict.pod_id_str }}:{{ pod_page_dict.selected_cycle_dict.get('cycle_key_str', 'unavailable') }}:{{ pod_page_dict.tab_str }}:{{ overview_dict.period_str }}{% else %}overview:{{ overview_dict.period_str }}{% endif %}">
-  {% if performance_page_dict is defined or tools_page_dict is defined %}{% include '_status_stamp.html' %}{% endif %}
+{# Frame refreshes keep the money panels already in the page (hx-preserve). #}
+{% set money_placeholder_bool = not overview_dict.get('money_bool', true) %}
+{% set money_oob_bool = false %}
+<div class="frame" id="overview-shell" hx-get="{{ overview_dict.refresh_url_str }}" hx-trigger="v4poll" data-refresh-ms="{{ overview_dict.refresh_seconds_int * 1000 }}" hx-swap="{{ 'none' if status_only_page_bool else 'outerHTML' }}" hx-target="this" hx-request='{"timeout":10000}' data-last-update="{{ overview_dict.updated_str }}" data-source-valid-ms="{{ overview_dict.source_valid_ms_int }}" data-clock-timestamp="{{ overview_dict.clock_timestamp_str }}" data-selection-scope="{% if console_page_dict is defined %}console:{{ console_page_dict.selected_pod_str }}{% elif tools_page_dict is defined %}tools:{{ tools_page_dict.selected_pod_str }}:{{ tools_page_dict.selected_tool_str }}{% elif system_page_dict is defined %}system:live{% elif performance_page_dict is defined %}performance:{{ performance_page_dict.level_str }}:{{ performance_page_dict.period_str }}:{{ performance_page_dict.from_date_str }}:{{ performance_page_dict.to_date_str }}:{{ performance_page_dict.unit_str }}{% elif positions_page_dict is defined %}positions:{{ positions_page_dict.view_str }}:{{ positions_page_dict.pod_str }}{% elif pod_page_dict is defined %}pod:{{ pod_page_dict.pod_id_str }}:{{ pod_page_dict.selected_cycle_dict.get('cycle_key_str', 'unavailable') }}:{{ pod_page_dict.tab_str }}:{{ overview_dict.period_str }}{% else %}overview:{{ overview_dict.period_str }}{% endif %}">
+  {% if status_only_page_bool %}{% include '_status_stamp.html' %}{% endif %}
   <div class="app">
     {% include '_shell_rail.html' %}
     <div class="main">
       {% include '_shell_header.html' %}
-      <main class="page calm{{ ' tools-page' if tools_page_dict is defined else ' system-page' if system_page_dict is defined else ' activity-page' if activity_page_dict is defined else ' performance-page' if performance_page_dict is defined else ' positions-page' if positions_page_dict is defined else ' pod-page' if pod_page_dict is defined else '' }}" id="overview-content">
-        <div class="refresh-error" role="status" hidden>Unknown · <span data-refresh-reason>Update failed.</span> Last successful update <span data-update-time>{{ overview_dict.updated_str }}</span>.</div>
-        {% if tools_page_dict is defined %}
+      <main class="page calm{{ ' console-page' if console_page_dict is defined else ' tools-page' if tools_page_dict is defined else ' system-page' if system_page_dict is defined else ' activity-page' if activity_page_dict is defined else ' performance-page' if performance_page_dict is defined else ' positions-page' if positions_page_dict is defined else ' pod-page' if pod_page_dict is defined else '' }}" id="overview-content">
+        <div class="refresh-error" role="status" hidden><b data-refresh-state>Unknown</b> · <span data-refresh-reason>Update failed.</span> Last successful update <span data-update-time>{{ overview_dict.updated_str }}</span>.</div>
+        {% if console_page_dict is defined %}
+        {% include '_console.html' %}
+        {% elif tools_page_dict is defined %}
         {% include '_tools.html' %}
         {% elif system_page_dict is defined %}
         {% include '_system.html' %}
@@ -24,19 +30,16 @@
         {% elif pod_page_dict is defined %}
         {% include '_pod.html' %}
         {% else %}
-        <div class="page-head"><div><h1 class="h1i">{{ icon('overview') }}Overview</h1><p class="verdict" data-selection-key="overview-verdict"><b data-verdict>{{ overview_dict.verdict_str }}</b>{% if overview_dict.verdict_detail_str %} <span data-verdict-detail>{{ overview_dict.verdict_detail_str }}</span>{% endif %}</p></div><div class="asof" data-selection-key="money-asof">{% if 'Close ' in overview_dict.money_asof_str %}{{ icon('calendar') }}{% endif %}{{ overview_dict.money_asof_str }}</div></div>
+        <div class="page-head"><div><h1 class="h1i">{{ icon('overview') }}Overview</h1><p class="verdict" data-selection-key="overview-verdict"><b data-verdict>{{ overview_dict.verdict_str }}</b>{% if overview_dict.verdict_detail_str %} <span data-verdict-detail>{{ overview_dict.verdict_detail_str }}</span>{% endif %}</p></div>{% include '_overview_money_asof.html' %}</div>
         {% if overview_dict.attention_list %}
         <section class="attn" aria-label="Needs attention">
           {% for attention_dict in overview_dict.attention_list %}
-          <div class="attn-row">{{ mark(attention_dict.state_str) }}<span class="row"><span class="tag tag-live">LIVE</span><span class="sname">{{ attention_dict.pod_name_str }}</span></span><span class="what"><b>{{ attention_dict.title_str }}</b>{% if attention_dict.detail_str %} {{ attention_dict.detail_str }}{% endif %}</span><span class="muted">{{ attention_dict.age_str }}</span><a class="btn btn-sm" href="{{ url_for('pod', pod_id_str=attention_dict.pod_id_str) }}">Open</a></div>
+          {% set attention_url_str = url_for('pod', pod_id_str=attention_dict.pod_id_str) %}
+          <div class="attn-row">{{ mark(attention_dict.state_str) }}<span class="row"><span class="tag tag-live">LIVE</span><a class="sname" href="{{ attention_url_str }}">{{ attention_dict.pod_name_str }}</a></span><span class="what"><a href="{{ attention_url_str }}"><b>{{ attention_dict.title_str }}</b></a>{% if attention_dict.detail_str %} {{ attention_dict.detail_str }}{% endif %}{% if attention_dict.deadline_str %} <span class="deadline{{ ' is-urgent' if attention_dict.deadline_urgent_bool else '' }}">{{ attention_dict.deadline_str }}</span>{% endif %}{% set command_owner_dict = attention_dict %}{% include '_next_commands.html' %}</span><span class="muted" title="Age">{{ attention_dict.age_str }}</span><span class="attn-actions">{% if attention_dict.console_bool %}<a class="btn btn-sm" href="{{ url_for('console', pod=attention_dict.pod_id_str) }}">Console</a>{% endif %}<a class="btn btn-sm" href="{{ attention_url_str }}">Open</a></span></div>
           {% endfor %}
         </section>
         {% endif %}
-        <section class="tiles tiles-4" aria-label="Money at last close">
-          {% for tile_dict in overview_dict.tile_list %}
-          <div class="tile" data-selection-key="money:{{ tile_dict.label_str }}"><div class="l">{{ tile_dict.label_str }}</div><div class="v {{ tile_dict.tone_str if tile_dict.tone_str in ['pos', 'neg'] else '' }}">{{ tile_dict.value_str }}</div><div class="s">{{ tile_dict.detail_str }}</div></div>
-          {% endfor %}
-        </section>
+        {% include '_overview_money_tiles.html' %}
         <section class="panel pods-panel" aria-label="Pod cycles">
           <div class="shead"><span>Pod</span><span>Cycle</span><span>Now</span><span>Next</span></div>
           {% for pod_dict in overview_dict.pod_list %}
@@ -54,38 +57,16 @@
           <div class="empty-state">No LIVE pods found.</div>
           {% endfor %}
         </section>
-        <div class="cols c-6-6 finance-panels">
-          <section class="panel"><div class="panel-h"><span class="panel-t">Portfolio return</span><nav class="seg" aria-label="Portfolio return period">
-            {% for option_dict in overview_dict.period_option_list %}
-            <a href="{{ option_dict.url_str }}" class="{{ 'on' if option_dict.selected_bool else '' }}" data-period="{{ option_dict.label_str }}"{% if option_dict.selected_bool %} aria-current="true"{% endif %}>{{ option_dict.label_str }}</a>
-            {% endfor %}
-          </nav></div>
-          <div class="panel-b">
-            {% set chart_dict = overview_dict.chart_dict %}
-            {% set chart_label_str = 'Portfolio return · ' + overview_dict.period_str %}{% include '_value_chart.html' %}
-          </div>{% if chart_dict.source_str %}<div class="finance-source" title="{{ chart_dict.detail_str }}">{{ chart_dict.source_str }}</div>{% endif %}</section>
-          <section class="panel"><div class="panel-h"><span class="panel-t">Allocation</span></div>
-            {% set allocation_dict = overview_dict.allocation_dict %}
-            {% if allocation_dict.available_bool or allocation_dict.row_list %}
-            <div class="alloc">
-              {% if allocation_dict.available_bool %}{% include '_donut.html' %}
-              {% else %}<div class="empty-state allocation-empty">{{ allocation_dict.empty_str }}</div>{% endif %}
-              <table class="tbl dense"><thead><tr><th scope="col"><span class="sr-only">Pod</span></th><th class="num" scope="col">{{ allocation_dict.invested_heading_str }}</th><th class="num" scope="col">Cash</th></tr></thead><tbody>
-                {% for row_dict in allocation_dict.row_list %}<tr><td><i class="dotk" style="background: {{ row_dict.color_str }}"></i>{{ row_dict.name_str }}</td><td class="num">{{ row_dict.invested_str }}</td><td class="num">{{ row_dict.cash_str }}</td></tr>{% endfor %}
-                <tr class="tot"><td><b>Total</b></td><td class="num">{{ allocation_dict.total_invested_str }}</td><td class="num">{{ allocation_dict.total_cash_str }}</td></tr>
-              </tbody></table>
-            </div>
-            {% else %}<div class="empty-state allocation-empty">{{ allocation_dict.empty_str }}</div>{% endif %}
-          </section>
-        </div>
+        {% include '_overview_money_panels.html' %}
         {% endif %}
       </main>
       {% if overview_dict.demo_bool %}<div class="sample">Sample data. Not a real account.</div>{% endif %}
       <nav class="m-tabs" aria-label="Main on mobile">
         <a{% if is_overview_bool %} class="on" aria-current="page"{% endif %} href="{{ url_for('index') }}">{{ icon('overview') }}Overview</a>
         <a{% if positions_page_dict is defined %} class="on" aria-current="page"{% endif %} href="{{ url_for('positions') }}">{{ icon('positions') }}Positions</a>
-        <a{% if performance_page_dict is defined %} class="on" aria-current="page"{% endif %} href="{{ url_for('performance') }}">{{ icon('performance') }}Results</a>
-        {% for icon_str, label_str in [('activity', 'Activity'), ('system', 'System')] %}<a aria-disabled="true" title="{{ label_str }} is not available yet">{{ icon(icon_str) }}{{ label_str }}</a>{% endfor %}
+        <a{% if performance_page_dict is defined %} class="on" aria-current="page"{% endif %} href="{{ url_for('performance') }}">{{ icon('performance') }}Performance</a>
+        <a{% if activity_page_dict is defined %} class="on" aria-current="page"{% endif %} href="{{ url_for('activity') }}">{{ icon('activity') }}Activity</a>
+        <a{% if system_page_dict is defined %} class="on" aria-current="page"{% endif %} href="{{ url_for('system') }}">{{ icon('system') }}System</a>
       </nav>
     </div>
   </div>

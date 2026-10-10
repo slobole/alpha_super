@@ -32,6 +32,11 @@ def build_next_operation_dict(row_dict, cycle_dict, *, now_ts, action_required_b
         next_time_str = "Time unknown"
     result_dict = {"next_str": next_str, "next_time_str": next_time_str,
         "next_timestamp_str": next_timestamp_str, "next_detail_str": "", "next_forecast_bool": False}
+    if cycle_dict.get("data_waiting_bool") and cycle_dict["next_str"] == "Data" and not cycle_dict["stale_bool"]:
+        # Vendor delivery has no exact time; only its alert deadline is known.
+        result_dict.update(next_time_str="when ready", next_timestamp_str="",
+            next_detail_str=cycle_dict.get("data_alert_str") or "")
+        return result_dict
     if (action_required_bool or cycle_dict["stale_bool"] or cycle_dict["cycle_role_str"] != "current"
             or cycle_dict["pill_str"] not in {"Waiting", "On track"}
             or row_dict.get("next_action_str") != "wait"
@@ -76,10 +81,16 @@ def build_next_operation_dict(row_dict, cycle_dict, *, now_ts, action_required_b
                     "timestamp_str": window_obj.submission_timestamp_str}}
         signal_ts = parse_timestamp_ts(window_obj.signal_timestamp_str) if window_obj and window_obj.has_data_bool else None
         if signal_ts is not None and not window_obj.action_required_bool and window_obj.action_str == "wait":
-            candidate_list.append((signal_ts, {"next_str": "Decide", "next_time_str": "after " + _time_str(signal_ts, now_ts),
+            target_ts = parse_timestamp_ts(window_obj.target_timestamp_str)
+            decide_dict = {"next_str": "Decide", "next_time_str": "after " + _time_str(signal_ts, now_ts),
                 # No exact deadline or countdown: vendor readiness is not known.
                 "next_timestamp_str": "", "next_detail_str": "Scheduled · when data is ready",
-                "next_forecast_bool": True}))
+                "next_forecast_bool": True}
+            if target_ts is not None and target_ts > signal_ts:
+                decide_dict["next_detail_str"] = "Scheduled · trade " + _time_str(target_ts, now_ts)
+            # The next trading decision outranks the routine EOD snapshot, so a
+            # monthly Pod answers "when does it trade next?" on every day.
+            return decide_dict
     except (ValueError, TypeError, KeyError, OverflowError):
         # Keep a verified saved EOD time if calendar metadata is unavailable.
         pass

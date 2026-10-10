@@ -1,8 +1,12 @@
 """LIVE read-only operator views, with isolated synthetic Tools demonstrations."""
 
 from datetime import UTC, date, datetime, timedelta
+import hashlib
+import json
 from pathlib import Path
 import re
+import threading
+import time
 
 from flask import Flask, Response, abort, jsonify, render_template, request, send_from_directory, url_for
 
@@ -17,6 +21,9 @@ from alpha.live.dashboard_v4.status import load_operations_workspace_dict
 from alpha.live.dashboard_v4.activity import build_activity_page_dict
 from alpha.live.dashboard_v4.activity_data import load_activity_source_dict
 from alpha.live.dashboard_v4.activity_cycles import build_activity_cycles_dict
+from alpha.live.dashboard_v4.console import build_console_page_dict, load_console_pod_list, resolve_console_log_path_str
+from alpha.live.dashboard_v4.console_data import build_console_download_str, read_console_tail_dict
+from alpha.live.dashboard_v4.next_commands import attach_next_command_list
 from alpha.live.dashboard_v4.system import build_system_page_dict, system_scope_matches_bool
 from alpha.live.dashboard_v4.system_data import load_system_source_dict
 from alpha.live.dashboard_v4.tools import build_tools_page_dict, resolve_tools_target_obj
@@ -93,8 +100,29 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         return response_obj
 
     register_tools_action_routes(flask_app_obj, tools_service_obj)
+    # Console reads are bounded per request; these caps bound concurrency too.
+    console_tail_semaphore_obj = threading.BoundedSemaphore(4)
+    console_download_semaphore_obj = threading.BoundedSemaphore(1)
+    console_pod_cache_dict = {"at_float": -1e9, "pod_list": []}
+    console_pod_lock_obj = threading.Lock()
 
-    def context_dict(pod_id_str=None, *, positions_bool=False):
+    def console_pod_list():
+        # Enabled release scope changes rarely; re-read it at most once a minute.
+        with console_pod_lock_obj:
+            if time.monotonic() - console_pod_cache_dict["at_float"] >= 60:
+                console_pod_cache_dict.update(at_float=time.monotonic(), pod_list=load_console_pod_list(provider_obj))
+            return console_pod_cache_dict["pod_list"]
+
+    def console_pod_id_str(pod_id_str):
+        if pod_id_str == "all":
+            return None
+        if not any(item_dict["pod_id_str"] == pod_id_str for item_dict in console_pod_list()):
+            abort(404)
+        return pod_id_str
+
+    def context_dict(pod_id_str=None, *, positions_bool=False, money_bool=True):
+        # Frame refreshes pass money_bool=False: money panels change about once a
+        # day, stay in the page (hx-preserve) and refresh on their own cadence.
         allowed_set = {"view", "pod"} if positions_bool else ({"period", "cycle", "tab"} if pod_id_str is not None else {"period"})
         if set(request.args) - allowed_set or any(len(request.args.getlist(key_str)) > 1 for key_str in allowed_set):
             abort(400)
@@ -121,11 +149,12 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         overview_dict = build_overview_dict(
             workspace_dict, snapshot_obj, provider_obj,
             as_of_ts=clock_fn(), period_str=period_str, demo_bool=demo_bool,
-            include_finance_bool=pod_id_str is None and not positions_bool,
+            include_finance_bool=money_bool and pod_id_str is None and not positions_bool,
         )
         overview_dict.update(
             refresh_url_str=url_for("refresh", period=period_str),
-            refresh_seconds_int=15,
+            refresh_seconds_int=15, money_bool=money_bool,
+            money_url_str=url_for("overview_money", period=period_str),
             period_option_list=[{
                 "label_str": option_str, "url_str": url_for("index", period=option_str),
                 "selected_bool": option_str == period_str,
@@ -189,11 +218,14 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             return {"overview_dict": overview_dict, "positions_page_dict": positions_page_dict}
         if pod_id_str is None:
             finalize_system_dict(overview_dict, workspace_dict)
+            attach_next_command_list(overview_dict["attention_list"], workspace_dict, provider_obj,
+                demo_bool=demo_bool, as_of_ts=clock_fn())
             return {"overview_dict": overview_dict}
         if not any(item_dict["pod_id_str"] == pod_id_str for item_dict in overview_dict["pod_list"]):
             abort(404)
         source_dict = {"status_str": "unknown", "reason_str": "Saved cycle unavailable"}
         selected_current_bool = not cycle_str
+        money_key_str = "unverified"
         if overview_dict["source_fresh_bool"]:
             summary_dict = workspace_dict.get("summary_dict") or {}
             matched_list = [item_dict for item_dict in summary_dict.get("pod_row_dict_list") or []
@@ -202,6 +234,12 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             identity_list = [item_dict for item_dict in account_list if item_dict.get("pod_id") == pod_id_str]
             if len(matched_list) == len(identity_list) == 1 and matched_list[0].get("account_route_str") == identity_list[0]["account_route"]:
                 row_dict = matched_list[0]
+                # Saved positions and cash change after fills and reconcile: a new
+                # key gives the kept money block a new id, so it reloads at once.
+                money_key_str = hashlib.sha256(json.dumps([row_dict.get(key_str) for key_str in (
+                    "latest_pod_state_timestamp_str", "latest_reconciliation_timestamp_str",
+                    "latest_vplan_status_str", "latest_vplan_id_int")] + [(row_dict.get("eod_snapshot_dict") or {}).get(
+                    "latest_timestamp_str")], default=str).encode()).hexdigest()[:12]
                 if cycle_match_obj:
                     selected_current_bool = int(cycle_match_obj[2]) == row_dict.get(
                         "latest_decision_plan_id_int" if cycle_match_obj[1] == "decision" else "latest_vplan_id_int")
@@ -230,7 +268,8 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
                     if "reconcile_read_failure_dict" in row_dict:
                         selected_row_dict["reconcile_read_failure_dict"] = row_dict["reconcile_read_failure_dict"]
         pod_finance_dict = build_pod_finance_dict(workspace_dict, snapshot_obj, provider_obj,
-            pod_id_str=pod_id_str, as_of_ts=clock_fn(), period_str=period_str, performance_db_path_str=database_path_str)
+            pod_id_str=pod_id_str, as_of_ts=clock_fn(), period_str=period_str,
+            performance_db_path_str=database_path_str) if money_bool else {}
         render_ts = clock_fn()
         source_ts = parse_timestamp_ts((workspace_dict.get("summary_dict") or {}).get("as_of_timestamp_str"))
         selected_ts = parse_timestamp_ts((source_dict.get("pod_row_dict") or {}).get("as_of_timestamp_str"))
@@ -250,6 +289,9 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         finalize_system_dict(overview_dict, workspace_dict)
         pod_page_dict = build_pod_page_dict(overview_dict, source_dict, pod_finance_dict,
             pod_id_str=pod_id_str, as_of_ts=clock_fn(), tab_str=tab_str)
+        if pod_page_dict["attention_dict"] and not pod_page_dict["historical_bool"]:
+            attach_next_command_list([pod_page_dict["attention_dict"]], workspace_dict, provider_obj,
+                demo_bool=demo_bool, as_of_ts=clock_fn())
         selected_cycle_str = (source_dict.get("selected_cycle_dict") or {}).get("cycle_key_str") or cycle_str
         def pod_url_str(**options_dict):
             return url_for("pod", pod_id_str=pod_id_str, period=options_dict.get("period", period_str),
@@ -272,6 +314,10 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             period_str=period_str, period_option_list=[{"label_str": option_str, "url_str": pod_url_str(period=option_str), "selected_bool": option_str == period_str} for option_str in PERIOD_TUPLE])
         overview_dict["refresh_url_str"] = url_for("pod_refresh", pod_id_str=pod_id_str,
             period=period_str, cycle=cycle_str, tab=tab_str)
+        overview_dict["money_bool"] = money_bool
+        # The money block follows the selected cycle and tab: its layout and links depend on them.
+        pod_page_dict.update(money_key_str=money_key_str, money_url_str=url_for("pod_money", pod_id_str=pod_id_str,
+            period=period_str, cycle=cycle_str or None, tab=tab_str or None))
         return {"overview_dict": overview_dict, "pod_page_dict": pod_page_dict}
 
     @flask_app_obj.get("/")
@@ -281,7 +327,11 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
 
     @flask_app_obj.get("/overview/refresh")
     def refresh():
-        return render_template("_overview.html", **context_dict())
+        return render_template("_overview.html", **context_dict(money_bool=False))
+
+    @flask_app_obj.get("/overview/money")
+    def overview_money():
+        return render_template("_overview_money.html", **context_dict())
 
     @flask_app_obj.get("/pods/<pod_id_str>")
     def pod(pod_id_str):
@@ -290,7 +340,11 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
 
     @flask_app_obj.get("/pods/<pod_id_str>/refresh")
     def pod_refresh(pod_id_str):
-        return render_template("_overview.html", **context_dict(pod_id_str))
+        return render_template("_overview.html", **context_dict(pod_id_str, money_bool=False))
+
+    @flask_app_obj.get("/pods/<pod_id_str>/money")
+    def pod_money(pod_id_str):
+        return render_template("_pod_money.html", **context_dict(pod_id_str))
 
     @flask_app_obj.get("/positions")
     def positions():
@@ -301,8 +355,8 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
     def positions_refresh():
         return render_template("_overview.html", **context_dict(positions_bool=True))
 
-    def activity_response(*, refresh_bool=False):
-        if set(request.args) - {"days"} or len(request.args.getlist("days")) > 1:
+    def activity_response(*, refresh_bool=False, body_bool=False):
+        if set(request.args) - {"days", "pod"} or any(len(request.args.getlist(key_str)) > 1 for key_str in request.args):
             abort(400)
         days_str = request.args.get("days", "7")
         if days_str not in {"7", "14", "30", "90"}:
@@ -313,6 +367,9 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             if operations_workspace_fn is None else operations_workspace_fn())
         overview_dict = build_overview_dict(workspace_dict, None, provider_obj,
             as_of_ts=clock_fn(), demo_bool=demo_bool, include_finance_bool=False)
+        pod_str = request.args.get("pod", "")
+        if pod_str and not any(pod_dict["pod_id_str"] == pod_str for pod_dict in overview_dict["pod_list"]):
+            abort(404)  # Before any log scan.
         from_ts = acquisition_ts.astimezone(MARKET_TIMEZONE_OBJ).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days_int - 1)
         source_dict = (provider_obj.get_activity_source_dict(as_of_ts=acquisition_ts, days_int=days_int)
             if hasattr(provider_obj, "get_activity_source_dict") else load_activity_source_dict(provider_obj, as_of_ts=acquisition_ts, days_int=days_int))
@@ -324,13 +381,20 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         # Reading historical evidence cannot renew live shell health.
         overview_dict = build_overview_dict(workspace_dict, None, provider_obj,
             as_of_ts=render_ts, demo_bool=demo_bool, include_finance_bool=False)
-        overview_dict.update(refresh_url_str=url_for("activity_refresh", days=days_int), refresh_seconds_int=15)
+        # The 15 s poll renews only header status; the timeline refreshes itself.
+        overview_dict.update(refresh_url_str=url_for("activity_status"), refresh_seconds_int=15)
         finalize_system_dict(overview_dict, workspace_dict)
         activity_page_dict = build_activity_page_dict(overview_dict, source_dict, cycle_dict,
             as_of_ts=acquisition_ts, days_int=days_int)
+        activity_page_dict.update(initial_pod_str=pod_str,
+            updated_label_str=acquisition_ts.astimezone(MARKET_TIMEZONE_OBJ).strftime("%H:%M:%S") + " ET",
+            body_url_str=url_for("activity_body", days=days_int, pod=pod_str or None))
         next_days_int = next((value_int for value_int in (14, 30, 90) if value_int > days_int), None)
         if next_days_int is not None:
-            activity_page_dict["load_older_url_str"] = url_for("activity", days=next_days_int)
+            activity_page_dict.update(load_older_days_int=next_days_int,
+                load_older_url_str=url_for("activity", days=next_days_int, pod=pod_str or None))
+        if body_bool:
+            return render_template("_activity_body.html", overview_dict=overview_dict, activity_page_dict=activity_page_dict)
         template_str = "_overview.html" if refresh_bool or request.headers.get("HX-Request") == "true" else "overview.html"
         return render_template(template_str, overview_dict=overview_dict, activity_page_dict=activity_page_dict)
 
@@ -341,6 +405,21 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
     @flask_app_obj.get("/activity/refresh")
     def activity_refresh():
         return activity_response(refresh_bool=True)
+
+    @flask_app_obj.get("/activity/body")
+    def activity_body():
+        return activity_response(body_bool=True)
+
+    @flask_app_obj.get("/activity/status")
+    def activity_status():
+        if request.args:
+            abort(400)
+        workspace_dict = (load_operations_workspace_dict(provider_obj, as_of_ts=clock_fn())
+            if operations_workspace_fn is None else operations_workspace_fn())
+        overview_dict = build_overview_dict(workspace_dict, None, provider_obj,
+            as_of_ts=clock_fn(), demo_bool=demo_bool, include_finance_bool=False)
+        finalize_system_dict(overview_dict, workspace_dict)
+        return render_template("_activity_status.html", overview_dict=overview_dict)
 
     def finalize_system_dict(overview_dict, workspace_dict, source_dict=None):
         """One saved-service assessment for every page and status refresh."""
@@ -563,6 +642,67 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             as_of_ts=clock_fn(), demo_bool=demo_bool, include_finance_bool=False)
         finalize_system_dict(overview_dict, workspace_dict)
         return render_template("_tools_status.html", overview_dict=overview_dict)
+
+    @flask_app_obj.get("/console")
+    def console():
+        if set(request.args) - {"pod"} or len(request.args.getlist("pod")) > 1:
+            abort(400)
+        pod_list = console_pod_list()
+        selected_pod_str = request.args.get("pod") or next(
+            (item_dict["pod_id_str"] for item_dict in pod_list if item_dict["mode_str"] == "live"), "all")
+        console_pod_id_str(selected_pod_str)
+        workspace_dict = (load_operations_workspace_dict(provider_obj, as_of_ts=clock_fn())
+            if operations_workspace_fn is None else operations_workspace_fn())
+        overview_dict = build_overview_dict(workspace_dict, None, provider_obj,
+            as_of_ts=clock_fn(), demo_bool=demo_bool, include_finance_bool=False)
+        overview_dict.update(refresh_url_str=url_for("console_status"), refresh_seconds_int=15)
+        finalize_system_dict(overview_dict, workspace_dict)
+        console_page_dict = build_console_page_dict(pod_list, selected_pod_str, url_for)
+        return render_template("overview.html", overview_dict=overview_dict, console_page_dict=console_page_dict)
+
+    @flask_app_obj.get("/console/status")
+    def console_status():
+        if request.args:
+            abort(400)
+        workspace_dict = (load_operations_workspace_dict(provider_obj, as_of_ts=clock_fn())
+            if operations_workspace_fn is None else operations_workspace_fn())
+        overview_dict = build_overview_dict(workspace_dict, None, provider_obj,
+            as_of_ts=clock_fn(), demo_bool=demo_bool, include_finance_bool=False)
+        finalize_system_dict(overview_dict, workspace_dict)
+        return render_template("_console_status.html", overview_dict=overview_dict)
+
+    @flask_app_obj.get("/console/<pod_id_str>/tail")
+    def console_tail(pod_id_str):
+        # Never touches the summary, SQLite or the shell: only one bounded file read.
+        if set(request.args) - {"cursor", "peek"} or any(len(request.args.getlist(key_str)) > 1 for key_str in request.args):
+            abort(400)
+        cursor_str, peek_str = request.args.get("cursor", ""), request.args.get("peek", "0")
+        if len(cursor_str) > 300 or peek_str not in {"0", "1"}:
+            abort(400)
+        selected_pod_id_str = console_pod_id_str(pod_id_str)
+        if not console_tail_semaphore_obj.acquire(blocking=False):
+            return jsonify(error="busy"), 429, {"Retry-After": "5"}
+        try:
+            tail_dict = read_console_tail_dict(resolve_console_log_path_str(provider_obj), selected_pod_id_str,
+                cursor_str or None, peek_bool=peek_str == "1")
+        finally:
+            console_tail_semaphore_obj.release()
+        return jsonify({**tail_dict, "pod_id_str": pod_id_str, "server_time_utc_str": datetime.now(UTC).isoformat()})
+
+    @flask_app_obj.get("/console/<pod_id_str>/download")
+    def console_download(pod_id_str):
+        if request.args:
+            abort(400)
+        selected_pod_id_str = console_pod_id_str(pod_id_str)
+        if not console_download_semaphore_obj.acquire(blocking=False):
+            return Response("Another download is running. Try again in a few seconds.", status=429, headers={"Retry-After": "5"})
+        try:
+            content_str = build_console_download_str(resolve_console_log_path_str(provider_obj), selected_pod_id_str)
+        finally:
+            console_download_semaphore_obj.release()
+        filename_str = "console-" + re.sub(r"[^A-Za-z0-9._-]", "_", pod_id_str) + ".log"
+        return Response(content_str, mimetype="text/plain; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename_str}"'})
 
     @flask_app_obj.get("/assets/<path:filename>")
     def assets(filename):

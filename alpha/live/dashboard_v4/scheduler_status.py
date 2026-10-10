@@ -6,8 +6,11 @@ import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from alpha.live.dashboard_v4.console_data import open_shared_read_obj, redact_console_text_str
+
 
 TAIL_BYTES_INT = 64 * 1024
+ERROR_REASON_CHARS_INT = 160
 EVENT_BACKUPS_INT = 10
 TRACE_BACKUPS_INT = 5
 LATE_AFTER_SECONDS_INT = 60
@@ -42,6 +45,16 @@ def _unknown_dict(as_of_ts, detail_str="Scheduler evidence unavailable."):
     }
 
 
+def _error_reason_str(value_obj):
+    """One redacted, short line from a scheduler exception (handoff 6.9)."""
+    if not isinstance(value_obj, str) or not value_obj.strip():
+        return ""
+    line_str = " ".join(redact_console_text_str(" ".join(value_obj.split())).split())
+    if len(line_str) > ERROR_REASON_CHARS_INT:
+        line_str = line_str[:ERROR_REASON_CHARS_INT - 1].rstrip() + "…"
+    return line_str
+
+
 def _contained_path_obj(path_obj, root_path_obj):
     resolved_path_obj = path_obj.resolve()
     resolved_path_obj.relative_to(root_path_obj)
@@ -52,7 +65,7 @@ def _tail_record_list(path_obj, root_path_obj):
     """Each file costs at most TAIL_BYTES_INT, including a partial first line."""
     resolved_path_obj = _contained_path_obj(path_obj, root_path_obj)
     try:
-        with resolved_path_obj.open("rb") as source_file_obj:
+        with open_shared_read_obj(resolved_path_obj) as source_file_obj:
             source_file_obj.seek(0, 2)
             size_int = source_file_obj.tell()
             offset_int = max(0, size_int - TAIL_BYTES_INT)
@@ -187,9 +200,10 @@ def _status_dict(event_dict, as_of_ts, event_list):
             return result_dict
     result_dict["alive_bool"] = True
     if error_bool:
-        # Exception strings may include credentials or account data. Never send
-        # arbitrary log content to the browser, even if the writer redacted it.
-        result_dict.update(state_str="error", detail_str="Scheduler reported an error. Check its log.")
+        # Exception strings may include credentials or account data: send only
+        # one redacted, truncated line, as approved for scheduler errors.
+        result_dict.update(state_str="error", detail_str="Scheduler reported an error.",
+            error_reason_str=_error_reason_str(event_dict.get("error_str")))
     elif event_dict["next_phase_str"] == "manual_review_pending":
         result_dict.update(state_str="holding",
             detail_str="The scheduler is alive. It holds this pod and will not retry by itself.")

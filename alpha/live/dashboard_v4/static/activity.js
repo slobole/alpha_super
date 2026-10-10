@@ -114,7 +114,8 @@
       previous_visit_bool = Number.isFinite(saved_ms) && saved_ms <= observed_ms;
       invalid_saved_ms = Number.isFinite(saved_ms) && saved_ms > observed_ms ? saved_ms : NaN;
       baseline_ms = previous_visit_bool ? saved_ms : observed_ms;
-      Object.assign(filter_dict, {pod_str: '', type_str: 'all', search_str: '', late_bool: false, codes_bool: false});
+      // A Pod link (?pod=) opens the timeline already filtered to that Pod.
+      Object.assign(filter_dict, {pod_str: page_obj.getAttribute('data-initial-pod') || '', type_str: 'all', search_str: '', late_bool: false, codes_bool: false});
       cycle_set.clear(); evidence_set.clear(); focus_dict = null;
     }
     const proof_map = new Map([...page_obj.querySelectorAll('[data-activity-proof]')].map(proof_obj => [proof_obj.getAttribute('data-activity-proof'), proof_obj]));
@@ -166,13 +167,16 @@
     }
     render();
   });
+  function page_swap_bool(event_obj) {
+    // The whole shell (Load older) or the timeline's own refresh.
+    const target_obj = event_obj.detail.target;
+    return Boolean(target_obj && (target_obj.id === 'overview-shell' || target_obj.id === 'activity-body'));
+  }
   document.addEventListener('htmx:beforeSwap', event_obj => {
-    if (event_obj.detail.target && event_obj.detail.target.id === 'overview-shell'
-        && event_obj.detail.shouldSwap !== false && !event_obj.detail.isError) remember_focus();
+    if (page_swap_bool(event_obj) && event_obj.detail.shouldSwap !== false && !event_obj.detail.isError) remember_focus();
   });
   document.addEventListener('htmx:afterSwap', event_obj => {
-    if (event_obj.detail.target && event_obj.detail.target.id === 'overview-shell'
-        && !event_obj.detail.isError && (!event_obj.detail.xhr || event_obj.detail.xhr.status < 400)) install_page();
+    if (page_swap_bool(event_obj) && !event_obj.detail.isError && (!event_obj.detail.xhr || event_obj.detail.xhr.status < 400)) install_page();
   });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) save_observation(); });
   install_page();

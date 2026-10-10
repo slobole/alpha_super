@@ -15,8 +15,8 @@
   {% if row_dict.evidence_url_str %}<a href="{{ row_dict.evidence_url_str }}">Open pod evidence →</a>{% endif %}
 </div></td></tr>
 {%- endmacro %}
-<section class="activity-page" data-activity-page data-as-of="{{ activity_dict.as_of_timestamp_str }}" data-storage-key="{{ activity_dict.storage_key_str }}" data-complete="{{ 'true' if activity_dict.history_complete_bool else 'false' }}" data-feed-available="{{ 'true' if activity_dict.get('feed_available_bool', not activity_dict.warning_list) else 'false' }}">
-  <div class="page-head"><div><h1 class="h1i">{{ icon('activity') }}Activity</h1><p class="verdict"><b data-activity-verdict>Recent activity.</b><span data-activity-verdict-detail></span></p></div><div class="asof">LIVE and system · {{ activity_dict.days_int }}-day window · ET{% if activity_dict.get('coverage_label_str') %}<span class="activity-coverage">{{ activity_dict.coverage_label_str }}</span>{% endif %}</div></div>
+<section class="activity-page" id="activity-body" data-activity-page data-own-refresh-ms="60000" hx-get="{{ activity_dict.body_url_str }}" hx-trigger="v4own" hx-target="this" hx-swap="outerHTML" hx-request='{"timeout":20000}' data-initial-pod="{{ activity_dict.get('initial_pod_str', '') }}" data-as-of="{{ activity_dict.as_of_timestamp_str }}" data-storage-key="{{ activity_dict.storage_key_str }}" data-complete="{{ 'true' if activity_dict.history_complete_bool else 'false' }}" data-feed-available="{{ 'true' if activity_dict.get('feed_available_bool', not activity_dict.warning_list) else 'false' }}">
+  <div class="page-head"><div><h1 class="h1i">{{ icon('activity') }}Activity</h1><p class="verdict"><b data-activity-verdict>Recent activity.</b><span data-activity-verdict-detail></span></p></div><div class="asof">LIVE and system · {{ activity_dict.days_int }}-day window · ET{% if activity_dict.get('updated_label_str') %} <span class="own-status" data-own-status data-own-updated="{{ activity_dict.updated_label_str }}">· updated {{ activity_dict.updated_label_str }}</span>{% endif %}{% if activity_dict.get('coverage_label_str') %}<span class="activity-coverage">{{ activity_dict.coverage_label_str }}</span>{% endif %}</div></div>
   <div class="activity-toolbar">
     <div class="activity-filters">
       <label class="activity-field"><span class="muted">Pod</span><select data-activity-pod aria-label="Activity pod"><option value="">All</option>{% for pod_dict in activity_dict.pod_filter_list %}<option value="{{ pod_dict.pod_id_str }}">{{ pod_dict.name_str }}</option>{% endfor %}</select></label>
@@ -35,6 +35,6 @@
       <tr class="activity-marker" data-activity-marker hidden><td colspan="4"><div data-activity-marker-label></div></td></tr>
       <tr class="activity-empty" data-activity-empty{% if activity_dict.row_list %} hidden{% endif %}><td colspan="4">No saved activity for this period.</td></tr>
     </tbody></table>
-    {% if activity_dict.load_older_url_str %}<a class="activity-more" href="{{ activity_dict.load_older_url_str }}" hx-get="{{ activity_dict.load_older_url_str }}" hx-target="#overview-shell" hx-swap="outerHTML" hx-push-url="true">Load older · {{ activity_dict.days_int }}-day window</a>{% endif %}
+    {% if activity_dict.load_older_url_str %}<a class="activity-more" href="{{ activity_dict.load_older_url_str }}" hx-get="{{ activity_dict.load_older_url_str }}" hx-target="#overview-shell" hx-swap="outerHTML" hx-push-url="true">Load {{ activity_dict.load_older_days_int }} days ›</a>{% endif %}
   </section>
 </section>

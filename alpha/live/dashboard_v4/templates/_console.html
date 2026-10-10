@@ -1,0 +1,16 @@
+<div class="page-head"><div><h1 class="h1i">{{ icon('console') }}Console</h1><p class="verdict" data-selection-key="console-verdict"><b>{{ console_page_dict.title_str }}{% if console_page_dict.mode_str == 'paper' %} · PAPER{% endif %}</b> <span class="muted">{{ console_page_dict.source_note_str }}</span></p></div>
+  <div class="row console-head-actions">{% if console_page_dict.pod_url_str %}<a class="btn btn-sm" href="{{ console_page_dict.pod_url_str }}">{{ icon('pods') }}Pod</a>{% endif %}<a class="btn btn-sm" href="{{ console_page_dict.download_url_str }}" download>Download last 2 MB</a></div></div>
+<nav class="console-pods" aria-label="Console Pod">{% for option_dict in console_page_dict.option_list %}<a class="{{ 'on' if option_dict.selected_bool else '' }}" href="{{ option_dict.url_str }}"{% if option_dict.selected_bool %} aria-current="page"{% endif %}>{% if option_dict.mode_str == 'paper' %}<span class="tag">PAPER</span>{% endif %}{{ option_dict.label_str }}</a>{% endfor %}</nav>
+<section class="panel console-panel" id="console-panel" aria-label="Console output" data-console-tail-url="{{ console_page_dict.tail_url_str }}" data-console-pod="{{ console_page_dict.selected_pod_str }}">
+  <div class="console-bar">
+    <div class="seg console-level" role="group" aria-label="Level"><button type="button" class="on" data-console-level="all" aria-pressed="true">All</button><button type="button" data-console-level="warn" aria-pressed="false">Warnings+</button><button type="button" data-console-level="error" aria-pressed="false">Errors</button></div>
+    <label class="console-check" title="Hide routine wait lines. Warnings and errors always show."><input type="checkbox" data-console-quiet checked> Quiet</label>
+    <input class="console-find" type="search" placeholder="Find" aria-label="Find in console" data-console-find autocomplete="off">
+    <span class="grow"></span>
+    <button type="button" class="btn btn-sm" data-console-pause aria-pressed="false">Pause</button>
+    <button type="button" class="btn btn-sm" data-console-copy>Copy</button>
+  </div>
+  <div class="console-status" data-console-status role="status">Connecting…</div>
+  <div class="console-body" data-console-body role="log" aria-label="Console lines" tabindex="0"></div>
+  <button type="button" class="console-new" data-console-new hidden>New lines ↓</button>
+</section>

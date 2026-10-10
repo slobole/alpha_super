@@ -42,17 +42,21 @@ def test_demo_renders_native_d_shell_and_seven_step_rows(fixture_tuple):
     assert 'aria-label="Portfolio return · All"' in html_str
     assert 'Calculated TWR · End-of-day cash flows' in html_str
     assert html_str.count('class="tl"') == 28
-    assert 'title="PAPER is not available in V4 yet"' in html_str
-    assert 'title="INCUBATION is not available in V4 yet"' in html_str
+    # Modes without V4 views are hidden, not shown as dead controls.
+    assert "PAPER is not available" not in html_str and "INCUBATION is not available" not in html_str
     assert "2026-09-08T" not in re.sub(r"<[^>]+>", "", html_str)
     assert '09:41:07 ET' in html_str
     assert 'hx-history="false"' in html_str and '"historyCacheSize":0' in html_str
     assert "hx-push-url" not in html_str
-    assert html_str.count('hx-get="') == 1  # One acquisition, no competing period polls.
+    # One status poll, plus the money panels' own slow refresh; no period polls.
+    assert html_str.count('hx-get="') == 2 and 'hx-get="/overview/money?period=All"' in html_str
     partial_obj = app_obj.test_client().get("/overview/refresh?period=All")
     assert partial_obj.status_code == 200
     assert '<html' not in partial_obj.get_data(as_text=True)
-    assert 'data-period="All" aria-current="true"' in partial_obj.get_data(as_text=True)
+    # The frame refresh keeps the money panels already in the page.
+    assert 'id="overview-money-panels" hx-preserve="true"></div>' in partial_obj.get_data(as_text=True)
+    money_str = app_obj.test_client().get("/overview/money?period=All").get_data(as_text=True)
+    assert 'data-period="All" aria-current="true"' in money_str and '<html' not in money_str
     hx_obj = app_obj.test_client().get("/?period=1M", headers={"HX-Request": "true"})
     assert '<html' not in hx_obj.get_data(as_text=True)
 

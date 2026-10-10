@@ -1,9 +1,30 @@
 """Run V4 beside V3. Default bind is local; this phase is always read-only."""
 
+import os
+
+# The import chain loads numpy/OpenBLAS, which reserves one thread and its
+# buffers per core (about 1.1 GB commit). The dashboard does no heavy math.
+for _thread_env_str in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ.setdefault(_thread_env_str, "1")
+
 import argparse
+import logging
+import re
 
 from alpha.live.dashboard_v4.app import create_app
 from alpha.live.dashboard_v4.data import LiveDataProvider
+
+
+# Successful polls would print a line every few seconds per open tab.
+QUIET_PATH_RE = re.compile(r"^(GET|HEAD) /(?:[^ ?]*/)?(?:refresh|status|tail|money|body)(?:[ ?]|$)")
+
+
+class QuietPollFilter(logging.Filter):
+    def filter(self, record_obj):
+        arg_tuple = record_obj.args if isinstance(record_obj.args, tuple) else ()
+        if len(arg_tuple) >= 2 and str(arg_tuple[1]) in {"200", "304"}:
+            return QUIET_PATH_RE.match(str(arg_tuple[0])) is None
+        return True
 
 
 def main() -> int:
@@ -22,7 +43,7 @@ def main() -> int:
         parser_obj.error("--demo-tools requires --demo; production execution is not connected.")
     if args_obj.demo:
         from alpha.live.dashboard_v4.demo import create_demo_app
-        flask_app_obj = create_demo_app(demo_tools_bool=args_obj.demo_tools)
+        flask_app_obj = create_demo_app(demo_tools_bool=args_obj.demo_tools, console_appender_bool=True)
     else:
         if not args_obj.skip_env_file:
             from scripts.norgate_config_env import load_config_env_file
@@ -34,6 +55,7 @@ def main() -> int:
             provider_kwargs_dict["config_path_str"] = args_obj.config
         flask_app_obj = create_app(
             LiveDataProvider(**provider_kwargs_dict), performance_db_path_str=args_obj.performance_db)
+    logging.getLogger("werkzeug").addFilter(QuietPollFilter())
     flask_app_obj.run(host=args_obj.host, port=args_obj.port, debug=False, use_reloader=False)
     return 0
 

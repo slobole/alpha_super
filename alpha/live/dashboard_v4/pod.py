@@ -13,7 +13,7 @@ from alpha.live.ops_report import parse_timestamp_ts
 
 
 TAB_TUPLE = (("plan", "Plan vs actual"), ("decision", "Decision"), ("orders", "Orders"),
-             ("fills", "Fills"), ("reconcile", "Reconcile"), ("events", "Events"), ("files", "Files"))
+             ("fills", "Fills"), ("reconcile", "Reconcile"), ("events", "Broker events"), ("files", "Files"))
 STEP_TAB_DICT = {"Data": "decision", "Decide": "decision", "Plan": "plan", "Submit": "orders",
                  "Fill": "fills", "Reconcile": "reconcile", "EOD": "events"}
 
@@ -241,10 +241,14 @@ def build_pod_page_dict(overview_dict, source_dict, finance_dict, *, pod_id_str,
             step_dict["class_str"] = _state_str(step_dict["state_str"])
     saved_wording_bool = historical_bool and (source_dict.get("selected_explicit_bool", True) or not selected_dict.get("unresolved_bool", False))
     account_str = str(row_dict.get("account_route_str") or "")
+    # The current summary row carries the release's submit setting.
+    auto_submit_obj = pod_summary_dict.get("auto_submit_enabled_bool")
+    submit_mode_str = "Auto-submit" if auto_submit_obj is True else "You submit" if auto_submit_obj is False else ""
     issue_bool = fresh_bool and cycle_dict["tone_str"] in {"red", "amber"}
     missing_ack_bool = (row_dict.get("missing_ack_count_int") or 0) > 0 or row_dict.get("latest_submit_ack_status_str") == "missing_critical"
     verdict_str = cycle_dict["now_str"] + "."
-    verdict_detail_str = ("Cycle next: " + cycle_dict["next_str"] + " " + cycle_dict["next_time_str"]).strip() if cycle_dict["next_str"] != "—" else ""
+    # The header owns the one current "Next" line; the cycle states its result.
+    verdict_detail_str = ""
     issue_title_str = "Review broker ACK" if missing_ack_bool else cycle_dict["now_str"]
     issue_detail_str = "Check the order plan and the broker connection. Do not resubmit blindly." if missing_ack_bool else "Check the saved evidence before taking action."
     if issue_bool:
@@ -274,14 +278,21 @@ def build_pod_page_dict(overview_dict, source_dict, finance_dict, *, pod_id_str,
         header_dict.update(state_str=cycle_state_str, pill_str=cycle_dict["pill_str"], verdict_str=verdict_str, detail_str=verdict_detail_str)
         header_dict.update(next_str="Review saved evidence" if issue_bool else "Time unknown",
             next_time_str="", next_detail_str="you · now" if issue_bool else "", next_forecast_bool=False)
-        if issue_bool and not attention_dict:
-            attention_dict = {"state_str": cycle_state_str, "title_str": issue_title_str, "detail_str": issue_detail_str}
+        # The worse problem leads; a hold stays visible as the scheduler note.
+        if issue_bool and (not attention_dict or STATE_RANK_DICT[cycle_state_str] < STATE_RANK_DICT.get(attention_dict.get("state_str"), 9)):
+            replaced_dict = attention_dict
+            attention_dict = {"state_str": cycle_state_str, "title_str": issue_title_str, "detail_str": issue_detail_str,
+                "pod_id_str": pod_id_str, "kind_str": "cycle", "step_str": failed_step_dict.get("label_str", "")}
+            if scheduler_attention_dict:
+                attention_dict.update(console_bool=True, scheduler_bool=True,
+                    check_command_str=replaced_dict.get("check_command_str") or "",
+                    scheduler_note_str=scheduler_attention_dict["title_str"] + ". " + scheduler_attention_dict["detail_str"])
     if attention_dict and not scheduler_attention_dict:
         attention_dict["scheduler_note_str"] = scheduler_note_str(scheduler_dict)
     return {
         **finance_dict, "pod_id_str": pod_id_str, "name_str": pod_summary_dict["name_str"],
         "account_str": (account_str[:1] + "···" + account_str[-3:]) if len(account_str) >= 4 else "—",
-        "cadence_str": pod_summary_dict["cadence_str"], "pill_str": header_dict["pill_str"],
+        "cadence_str": pod_summary_dict["cadence_str"], "submit_mode_str": submit_mode_str, "pill_str": header_dict["pill_str"],
         "state_str": header_dict["state_str"], "header_dict": header_dict, "attention_dict": attention_dict,
         "cycle_state_str": cycle_state_str, "cycle_pill_str": cycle_dict["pill_str"], "verdict_str": verdict_str,
         "verdict_detail_str": verdict_detail_str,

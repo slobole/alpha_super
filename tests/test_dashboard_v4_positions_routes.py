@@ -83,8 +83,8 @@ def test_positions_shell_security_and_local_search_contract(positions_fixture_tu
     assert 'data-position-search-empty hidden' in html_str
     assert 'aria-label="Saved portfolio summary"' in html_str
     assert "READ-ONLY" not in html_str and "Free cash" not in html_str and "Show all" not in html_str
-    assert 'title="PAPER is not available in V4 yet"' in html_str
-    assert 'title="INCUBATION is not available in V4 yet"' in html_str
+    # Modes without V4 views are hidden, not shown as dead controls.
+    assert "PAPER is not available" not in html_str and "INCUBATION is not available" not in html_str
     assert len(page_dict["pod_row_list"]) == 4
     assert response_obj.headers["Cache-Control"] == "no-store"
     assert response_obj.headers["X-Content-Type-Options"] == "nosniff"
@@ -141,6 +141,8 @@ def test_rich_demo_routes_connect_money_pnl_and_today_without_inventing_pending_
         assert page_dict["total_dict"]["pnl_str"] != "—"
         assert page_dict["values_asof_str"] in _visible_text_str(html_str)
 
+        # The verdict names both counts, so it agrees with "All" (open + closed today).
+        assert page_dict["verdict_str"] == "8 open positions · 3 closed today" and page_dict["all_count_int"] == 11
         row_by_symbol_dict = {row_dict["symbol_str"]: row_dict for row_dict in page_dict["row_list"]}
         for symbol_str in ("DIS", "NVDA"):
             closed_dict = row_by_symbol_dict[symbol_str]

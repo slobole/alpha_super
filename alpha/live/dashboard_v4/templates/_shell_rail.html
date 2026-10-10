@@ -10,6 +10,7 @@
     <a class="{{ 'on' if positions_page_dict is defined else '' }}" href="{{ url_for('positions') }}"{% if positions_page_dict is defined %} aria-current="page"{% endif %}>{{ icon('positions') }}Positions</a>
     <a class="{{ 'on' if performance_page_dict is defined else '' }}" href="{{ url_for('performance') }}"{% if performance_page_dict is defined %} aria-current="page"{% endif %}>{{ icon('performance') }}Performance</a>
     <a class="{{ 'on' if activity_page_dict is defined else '' }}" href="{{ url_for('activity') }}"{% if activity_page_dict is defined %} aria-current="page"{% endif %}>{{ icon('activity') }}Activity</a>
+    <a class="{{ 'on' if console_page_dict is defined else '' }}" href="{{ url_for('console') }}"{% if console_page_dict is defined %} aria-current="page"{% endif %}>{{ icon('console') }}Console</a>
     <a class="{{ 'on' if system_page_dict is defined else '' }}" href="{{ url_for('system') }}"{% if system_page_dict is defined %} aria-current="page"{% endif %}>{{ icon('system') }}System health</a>
     <a class="{{ 'on' if tools_page_dict is defined else '' }}" href="{{ url_for('tools') }}"{% if tools_page_dict is defined %} aria-current="page"{% endif %}>{{ icon('tools') }}Tools</a>
   </nav>

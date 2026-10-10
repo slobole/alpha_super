@@ -12,20 +12,20 @@ from alpha.live.dashboard_v4.market import build_market_view_dict
 
 @pytest.mark.parametrize("local_str,label_str,detail_str", [
     ("2026-09-21T03:59:59", "Market closed", "Premarket at 04:00 ET"),
-    ("2026-09-21T04:00:00", "Premarket", "opens in 05:30:00"),
-    ("2026-09-21T09:29:59", "Premarket", "opens in 00:00:01"),
-    ("2026-09-21T09:30:00", "Market open", "closes in 06:30:00"),
-    ("2026-09-21T15:59:59", "Market open", "closes in 00:00:01"),
-    ("2026-09-21T16:00:00", "Post-market", "ends in 04:00:00"),
-    ("2026-09-21T19:59:59", "Post-market", "ends in 00:00:01"),
+    ("2026-09-21T04:00:00", "Premarket", "opens in 5 h 30 min"),
+    ("2026-09-21T09:29:59", "Premarket", "opens in under 1 min"),
+    ("2026-09-21T09:30:00", "Market open", "closes in 6 h 30 min"),
+    ("2026-09-21T15:59:59", "Market open", "closes in under 1 min"),
+    ("2026-09-21T16:00:00", "Post-market", "ends in 4 h"),
+    ("2026-09-21T19:59:59", "Post-market", "ends in under 1 min"),
     ("2026-09-21T20:00:00", "Market closed", "Session completed"),
     ("2026-09-21T23:59:59", "Market closed", "Session completed"),
     ("2026-09-22T00:00:00", "Market closed", "Premarket at 04:00 ET"),
-    ("2026-11-27T12:59:59", "Market open", "closes in 00:00:01"),
-    ("2026-11-27T13:00:00", "Post-market", "ends in 04:00:00"),
-    ("2026-11-27T16:59:59", "Post-market", "ends in 00:00:01"),
+    ("2026-11-27T12:59:59", "Market open", "closes in under 1 min"),
+    ("2026-11-27T13:00:00", "Post-market", "ends in 4 h"),
+    ("2026-11-27T16:59:59", "Post-market", "ends in under 1 min"),
     ("2026-11-27T17:00:00", "Market closed", "Early close completed"),
-    ("2026-12-24T13:00:00", "Post-market", "ends in 04:00:00"),
+    ("2026-12-24T13:00:00", "Post-market", "ends in 4 h"),
     ("2026-09-19T08:00:00", "Market closed", "Weekend"),
     ("2026-09-20T17:00:00", "Market closed", "Weekend"),
     ("2026-09-07T08:00:00", "Market closed", "Exchange holiday"),
@@ -40,12 +40,12 @@ def test_exact_session_boundaries(local_str, label_str, detail_str):
 
 
 @pytest.mark.parametrize("timestamp_str,label_str,detail_str", [
-    ("2026-03-06T14:00:00+00:00", "Premarket", "opens in 00:30:00"),
-    ("2026-03-09T13:00:00+00:00", "Premarket", "opens in 00:30:00"),
-    ("2026-10-30T20:30:00+00:00", "Post-market", "ends in 03:30:00"),
-    ("2026-11-02T21:30:00+00:00", "Post-market", "ends in 03:30:00"),
+    ("2026-03-06T14:00:00+00:00", "Premarket", "opens in 30 min"),
+    ("2026-03-09T13:00:00+00:00", "Premarket", "opens in 30 min"),
+    ("2026-10-30T20:30:00+00:00", "Post-market", "ends in 3 h 30 min"),
+    ("2026-11-02T21:30:00+00:00", "Post-market", "ends in 3 h 30 min"),
     ("2026-09-22T00:30:00+00:00", "Market closed", "Session completed"),
-    ("2026-09-21T08:00:00", "Premarket", "opens in 05:30:00"),
+    ("2026-09-21T08:00:00", "Premarket", "opens in 5 h 30 min"),
 ])
 def test_utc_dst_and_naive_convention(timestamp_str, label_str, detail_str):
     result_dict = build_market_view_dict(now_ts=datetime.fromisoformat(timestamp_str))
