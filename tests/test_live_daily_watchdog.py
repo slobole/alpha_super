@@ -245,7 +245,7 @@ def test_undispatched_open_alerts_five_minutes_after_the_open(daily_case, monkey
     assert _alerts(monkeypatch, daily_case, tmp_path, OPEN_TS + timedelta(minutes=5)) == []
 
 
-def test_pod_is_checked_only_for_sessions_closed_after_it_was_first_seen_enabled(daily_case, monkeypatch, tmp_path):
+def test_pod_owes_every_decision_whose_cutoff_follows_first_enabled_sighting(daily_case, monkeypatch, tmp_path):
     store_obj, release_obj, decision_obj, _, _ = daily_case
     store_obj.mark_decision_plan_status(decision_obj.decision_plan_id_int, "blocked")
     key_tuple = (release_obj.mode_str, release_obj.pod_id_str, release_obj.release_id_str)
@@ -256,10 +256,12 @@ def test_pod_is_checked_only_for_sessions_closed_after_it_was_first_seen_enabled
         return daily_watchdog.daily_heartbeat_alert_list(str(tmp_path), str(tmp_path / "none.yaml"),
             str(tmp_path / "events.jsonl"), OPEN_TS - timedelta(minutes=2), "paper",
             enabled_since_dict={key_tuple: enabled_since_ts})
-    friday_close_ts = OPEN_TS.replace(day=2, hour=16, minute=0)
-    assert alerts_for(friday_close_ts) == []  # first seen at the close: launch day
-    assert [alert_dict["kind_str"] for alert_dict in alerts_for(friday_close_ts - timedelta(minutes=1))] == [
-        "decision_incomplete"]
+    cutoff_ts = OPEN_TS - timedelta(minutes=2)
+    # An evening (or weekend) launch still owes Monday's open.
+    friday_evening_ts = OPEN_TS.replace(day=2, hour=20, minute=0)
+    assert [alert_dict["kind_str"] for alert_dict in alerts_for(friday_evening_ts)] == ["decision_incomplete"]
+    # Enabled at or after the cutoff: that session was never owed.
+    assert alerts_for(cutoff_ts) == []
     assert daily_watchdog.daily_heartbeat_alert_list(str(tmp_path), str(tmp_path / "none.yaml"),
         str(tmp_path / "events.jsonl"), OPEN_TS - timedelta(minutes=2), "paper", enabled_since_dict={}) == []
 
@@ -279,8 +281,12 @@ def test_enabled_since_resets_when_a_release_is_disabled_or_removed(daily_case, 
     release_list[:] = [release_obj]
     assert daily_watchdog.refresh_enabled_since_dict(state_path_str, "root", "paper",
         OPEN_TS + timedelta(days=3)) == {key_tuple: OPEN_TS + timedelta(days=3)}
+    # A root that reads empty (missing, mid-swap) forgets nothing.
     release_list[:] = []
-    assert daily_watchdog.refresh_enabled_since_dict(state_path_str, "root", "paper", OPEN_TS + timedelta(days=4)) == {}
+    daily_watchdog.refresh_enabled_since_dict(state_path_str, "root", "paper", OPEN_TS + timedelta(days=4))
+    release_list[:] = [release_obj]
+    assert daily_watchdog.refresh_enabled_since_dict(state_path_str, "root", "paper",
+        OPEN_TS + timedelta(days=5)) == {key_tuple: OPEN_TS + timedelta(days=3)}
 
 
 def test_one_broken_pod_check_never_blinds_the_other_pods(daily_case, monkeypatch, tmp_path):

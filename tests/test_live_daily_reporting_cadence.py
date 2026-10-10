@@ -263,3 +263,16 @@ def test_failed_report_retries_stop_after_retry_window(daily_case):
     expired_ts = CLOSE_TS + daily_reporting.REPORT_RETRY_WINDOW
     assert retry_ids(store_obj, expired_ts, env_mode_str="paper") == []
     assert not claim_post_close_report_attempt(store_obj, release_obj, decision_obj, expired_ts)
+
+
+def test_unreadable_retry_row_is_skipped_and_late_worker_cannot_reopen_a_final_report(daily_case):
+    store_obj, release_obj, decision_obj, _, _ = daily_case
+    assert claim_post_close_report_attempt(store_obj, release_obj, decision_obj, CLOSE_TS)
+    daily_reporting.finish_post_close_report_attempt(store_obj, decision_obj)
+    # A worker whose lease was taken over finishes late with an error.
+    daily_reporting.finish_post_close_report_attempt(store_obj, decision_obj, "late failure")
+    with store_obj._connect() as connection_obj:
+        assert connection_obj.execute("SELECT status_str FROM daily_post_close_report").fetchone()[0] == "reported"
+        connection_obj.execute("UPDATE daily_post_close_report SET status_str='failed'")
+        connection_obj.execute("UPDATE decision_plan SET target_execution_timestamp_str='not-a-time'")
+    assert daily_reporting.get_retry_post_close_report_decision_id_list(store_obj, CLOSE_TS, env_mode_str="paper") == []

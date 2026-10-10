@@ -61,7 +61,7 @@ $repo_root_path_str = Split-Path -Parent $script_dir_path_str
 $bound_parameter_dict = $PSBoundParameters
 $daily_option_list = @("DailyHeartbeat", "ReleasesRoot", "OutputPath", "NotificationStatePath", "HeartbeatUrl",
     "EventLogPath", "DashboardConfig", "Json") | Where-Object { $bound_parameter_dict.ContainsKey($_) }
-if ($TaskName -eq "AlphaLiveOpsWatchdog" -and $daily_option_list) {
+if ($TaskName.Trim() -eq "AlphaLiveOpsWatchdog" -and $daily_option_list) {
     throw ("Refusing to change the NDX/TAA task 'AlphaLiveOpsWatchdog' with daily-only option(s): " +
         ($daily_option_list -join ", ") + ". Use -DailyHeartbeat with its own task name.")
 }
@@ -70,7 +70,10 @@ if ($DailyHeartbeat -and -not $Unregister) {
         throw "-DailyHeartbeat requires -ReleasesRoot: the daily pods' own release root."
     }
     $legacy_root_path_str = [IO.Path]::GetFullPath((Join-Path $repo_root_path_str "alpha\live\releases")).TrimEnd('\')
-    $daily_root_path_str = [IO.Path]::GetFullPath($ReleasesRoot).TrimEnd('\')
+    # The task runs from the repo root, so resolve a relative root the same way
+    # (.NET's own current directory is not the PowerShell location).
+    $daily_root_input_str = if ([IO.Path]::IsPathRooted($ReleasesRoot)) { $ReleasesRoot } else { Join-Path $repo_root_path_str $ReleasesRoot }
+    $daily_root_path_str = [IO.Path]::GetFullPath($daily_root_input_str).TrimEnd('\')
     if ($daily_root_path_str -eq $legacy_root_path_str -or
             $daily_root_path_str.StartsWith($legacy_root_path_str + "\", [StringComparison]::OrdinalIgnoreCase)) {
         throw "The daily release root must be outside alpha\live\releases (the NDX/TAA root reads every subfolder)."

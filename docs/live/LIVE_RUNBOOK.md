@@ -154,9 +154,12 @@ roots. This includes disabled daily releases: `54b417f` parses the whole root
 and can reject a daily YAML before an NDX/TAA serve starts. Its MR capsule
 strategy imports are unsupported. Preserve the YAMLs in the saved
 configuration backup outside all active roots; do not delete the backup.
-Also stop every daily serve, unregister the daily watchdog task
-(`setup_live_ops_watchdog_task.ps1 -DailyHeartbeat -Unregister`) and pause the
-daily external heartbeat check.
+Also, **before checking out the old revision**, stop every daily serve,
+unregister the daily watchdog task with
+`setup_live_ops_watchdog_task.ps1 -TaskName AlphaDailyOpsWatchdog -Unregister`
+(this form works with both the old and the new script; never run a plain
+`-Unregister`, which removes the NDX/TAA task) and pause the daily external
+heartbeat check.
 
 Decide the databases **per pod**, never for the deployment as a whole:
 
@@ -730,9 +733,9 @@ db_overrides:
   <daily_pod_id>: C:\alpha\daily_state\<daily_pod_id>.sqlite3
 ```
 
-During the paper phase run the daily watchdog with `-Mode paper`; a `-Mode live`
-task never watches paper pods. Switch it to `-Mode live` together with the first
-LIVE daily release.
+Run the daily watchdog **without `-Mode`**, so one task watches every daily pod in
+the daily root, paper and live alike. A `-Mode live` task never watches paper
+pods, and changing its mode later restarts the watch window of every pod.
 
 For a daily-root deployment, use its own scheduled task, report and notification
 state paths. Set `ALPHA_DAILY_HEARTBEAT_URL` in `config.env` to a separate external
@@ -741,15 +744,18 @@ never falls back to the NDX/TAA `ALPHA_INSPECTOR_HEARTBEAT_URL`. An explicit
 `--heartbeat-url=` (or PowerShell `-HeartbeatUrl ''`) disables the heartbeat even
 when the environment URL is set. Daily mode rejects an environment or explicit URL
 that points at the `ALPHA_INSPECTOR_HEARTBEAT_URL` check (same host, port and path,
-ignoring scheme, case, default ports, trailing slashes, `/fail`-style suffixes,
-query and fragment), reports a configuration failure, and sends neither success
-nor `/fail` to it.
+ignoring scheme, host case, default ports, trailing slashes, `/fail`-style
+suffixes, query and fragment), reports a configuration failure, and sends neither
+success nor `/fail` to it.
 
 `config.env` is shared with the NDX/TAA watchdog and serves: a malformed line
-stops them. Keep a copy before editing and check that it still parses:
+stops them, and a UTF-8 byte-order mark (Windows PowerShell `Set-Content
+-Encoding utf8` writes one) silently renames the first key. Keep a copy before
+editing, then check that it parses and that every expected key name is listed
+(values are not printed):
 
 ```powershell
-.\.venv\Scripts\python.exe -c "from scripts.norgate_config_env import load_config_env_file; load_config_env_file(); print('config.env OK')"
+.\.venv\Scripts\python.exe -c "import pathlib,sys; from scripts.norgate_config_env import default_config_env_path_obj, load_config_env_file; p=default_config_env_path_obj(); sys.exit('config.env starts with a BOM; save it as UTF-8 without BOM') if p.read_bytes().startswith(b'\xef\xbb\xbf') else None; print(sorted(load_config_env_file(p)))"
 ```
 
 The daily task treats each of these as a configuration failure (red report, exit
@@ -760,25 +766,29 @@ example a mistyped `-ReleasesRoot`). A failure that persists is reposted once a
 day, not on every run.
 
 It alerts once per pod, alert kind and session: `decision_incomplete` (no usable
-decision by the 09:28 cutoff), `opening_not_dispatched` (the opening batch was
-still not sent five minutes after the open), `cycle_open_after_close` (the cycle
-is still open one hour after the exchange close) and `heartbeat_check_failed`
-(that pod could not be checked; the other pods still are). A pod is checked only
-for sessions that closed after the watchdog first saw it enabled, so a launch or
-re-enable does not page for earlier days. These alerts never suppress the serve's
-own detailed alerts (owned orders with symbol, quantity, side and client ID;
-capsule holding halts).
+decision by the 09:28 cutoff), `opening_not_dispatched` (five minutes after the
+open the opening batch has still not been dispatched: serve down, crash after the
+claim, or auto-submit off), `cycle_open_after_close` (the cycle is still open one
+hour after the exchange close) and `heartbeat_check_failed` (that pod could not be
+checked; the other pods still are). A dispatch that the broker preflight refused
+is recorded as dispatched; it appears in that day's close-of-day exceptions. A pod
+deployed with `auto_submit_enabled_bool: false` raises `opening_not_dispatched`
+on every session until its batch is submitted. A pod is checked for every decision
+whose 09:28 cutoff falls after the watchdog first saw it enabled: an evening
+launch is watched from the next open, and a launch or re-enable never pages for
+earlier days. These alerts never suppress the serve's own detailed alerts (owned
+orders with symbol, quantity, side and client ID; capsule holding halts).
 Verify its command before scheduling it (replace the example paths, including
 the event log used by the daily serves and the dashboard DB mapping file):
 
 ```powershell
-.\scripts\run_live_ops_watchdog.ps1 -Mode paper -DailyHeartbeat -ReleasesRoot 'C:\alpha\daily_releases' -OutputPath 'C:\alpha\daily_watchdog\ops_report_latest.json' -NotificationStatePath 'C:\alpha\daily_watchdog\notification_state.json' -EventLogPath 'C:\alpha\daily_logs\events.jsonl' -DashboardConfig 'C:\alpha\daily_dashboard.yaml' -Json
+.\scripts\run_live_ops_watchdog.ps1 -DailyHeartbeat -ReleasesRoot 'C:\alpha\daily_releases' -OutputPath 'C:\alpha\daily_watchdog\ops_report_latest.json' -NotificationStatePath 'C:\alpha\daily_watchdog\notification_state.json' -EventLogPath 'C:\alpha\daily_logs\events.jsonl' -DashboardConfig 'C:\alpha\daily_dashboard.yaml' -Json
 ```
 
 After the approved deployment's manual check succeeds, register the same scope:
 
 ```powershell
-.\scripts\setup_live_ops_watchdog_task.ps1 -TaskName 'AlphaDailyOpsWatchdog' -Mode paper -DailyHeartbeat -ReleasesRoot 'C:\alpha\daily_releases' -OutputPath 'C:\alpha\daily_watchdog\ops_report_latest.json' -NotificationStatePath 'C:\alpha\daily_watchdog\notification_state.json' -EventLogPath 'C:\alpha\daily_logs\events.jsonl' -DashboardConfig 'C:\alpha\daily_dashboard.yaml' -Json
+.\scripts\setup_live_ops_watchdog_task.ps1 -TaskName 'AlphaDailyOpsWatchdog' -DailyHeartbeat -ReleasesRoot 'C:\alpha\daily_releases' -OutputPath 'C:\alpha\daily_watchdog\ops_report_latest.json' -NotificationStatePath 'C:\alpha\daily_watchdog\notification_state.json' -EventLogPath 'C:\alpha\daily_logs\events.jsonl' -DashboardConfig 'C:\alpha\daily_dashboard.yaml' -Json
 ```
 
 The existing NDX/TAA watchdog keeps its current root and state paths. Do not
@@ -787,8 +797,8 @@ heartbeat check. `-DailyHeartbeat` defaults to task name `AlphaDailyOpsWatchdog`
 and report/state files under `alpha/live/logs/daily_watchdog/`; explicit paths
 above make the deployed scope reviewable. Mode-only setup retains
 `AlphaLiveOpsWatchdog` and its existing defaults. To remove only the daily task,
-use `setup_live_ops_watchdog_task.ps1 -DailyHeartbeat -Unregister` (include the
-same `-TaskName` when a custom name was used). These commands are operator
+use `setup_live_ops_watchdog_task.ps1 -TaskName AlphaDailyOpsWatchdog -Unregister`
+(use the custom name when one was used). These commands are operator
 instructions, not authorization to register a task or deploy.
 
 The setup script refuses every daily-only option (`-DailyHeartbeat`,

@@ -185,6 +185,11 @@ def test_wrapper_keeps_a_drive_root_separator(tmp_path):
     ({"Mode": "paper", "DailyHeartbeat": True}, "requires -ReleasesRoot"),
     ({"Mode": "paper", "DailyHeartbeat": True, "ReleasesRoot": "<repo>\\alpha\\live\\releases\\daily"},
         "must be outside alpha\\live\\releases"),
+    # A relative root resolves against the repo root, as the task's wrapper does.
+    ({"Mode": "paper", "DailyHeartbeat": True, "ReleasesRoot": "alpha\\live\\releases\\daily"},
+        "must be outside alpha\\live\\releases"),
+    ({"TaskName": "AlphaLiveOpsWatchdog ", "DailyHeartbeat": True, "ReleasesRoot": "C:\\alpha\\daily_releases"},
+        "Refusing to change the NDX/TAA task"),
 ])
 def test_setup_refuses_daily_options_that_would_touch_the_ndx_taa_task(tmp_path, parameter_dict, message_str):
     repository_path_obj, environment_dict = _script_case(tmp_path, {})

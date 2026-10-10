@@ -76,10 +76,15 @@ def get_retry_post_close_report_decision_id_list(state_store_obj, as_of_ts, pod_
             (pod_id_str, pod_id_str, env_mode_str, env_mode_str)).fetchall()
     retry_id_list = []
     for decision_id_int, status_str, attempted_timestamp_str, target_timestamp_str, calendar_id_str in row_list:
-        target_ts = datetime.fromisoformat(target_timestamp_str)
-        if target_ts.tzinfo is None:
-            target_ts = target_ts.replace(tzinfo=timezone.utc)
-        close_ts = _session_close_ts(target_ts, calendar_id_str)
+        try:
+            target_ts = datetime.fromisoformat(target_timestamp_str)
+            if target_ts.tzinfo is None:
+                target_ts = target_ts.replace(tzinfo=timezone.utc)
+            close_ts = _session_close_ts(target_ts, calendar_id_str)
+        except Exception:
+            # Optional reporting: an unreadable row is skipped, never allowed
+            # to stop the pod's reconcile pass.
+            continue
         if _retry_due_bool(status_str, attempted_timestamp_str, close_ts, as_of_ts):
             retry_id_list.append(int(decision_id_int))
     return retry_id_list
@@ -88,6 +93,9 @@ def get_retry_post_close_report_decision_id_list(state_store_obj, as_of_ts, pod_
 def finish_post_close_report_attempt(state_store_obj, decision_plan_obj, error_str=None, *, retryable_bool=True):
     """A non-retryable error is recorded but final: the report is done."""
     with state_store_obj._connect() as connection_obj:
+        # Only an open attempt is finished: a worker whose lease was taken over
+        # cannot turn another worker's final report back into a failure.
         connection_obj.execute("""UPDATE daily_post_close_report SET status_str=?,error_str=?
-            WHERE decision_plan_id_int=?""", ("failed" if error_str and retryable_bool else "reported", error_str,
+            WHERE decision_plan_id_int=? AND status_str='attempted'""",
+            ("failed" if error_str and retryable_bool else "reported", error_str,
                 decision_plan_obj.decision_plan_id_int))

@@ -130,13 +130,14 @@ def _release_alert_list(release_obj, config_obj, event_log_path_str, as_of_ts, e
             candidate_label_list.append(prior_label_ts)
     for candidate_label_ts in candidate_label_list:
         candidate_close_ts = scheduler_utils.get_session_close_timestamp_ts(candidate_label_ts, calendar_id_str)
-        # A pod is owed a decision only for signal sessions that closed after
-        # the watchdog first saw it enabled (launch, enable, re-enable).
-        if enabled_since_ts is not None and candidate_close_ts <= enabled_since_ts:
-            continue
         next_candidate_label_ts = scheduler_utils.get_next_session_label_ts(candidate_label_ts, calendar_id_str)
         next_open_ts = scheduler_utils.get_session_open_timestamp_ts(next_candidate_label_ts, calendar_id_str)
-        if as_of_ts < next_open_ts - timedelta(minutes=2):
+        cutoff_ts = next_open_ts - timedelta(minutes=2)
+        # A pod owes every decision whose 09:28 cutoff comes after the watchdog
+        # first saw it enabled: an evening launch still owes the next open.
+        if enabled_since_ts is not None and cutoff_ts <= enabled_since_ts:
+            continue
+        if as_of_ts < cutoff_ts:
             continue
         matching_row_dict = next((row_dict for row_dict in decision_row_list
             if scheduler_utils.to_market_timestamp_ts(
@@ -215,7 +216,8 @@ def refresh_enabled_since_dict(state_path_str, releases_root_path_str, mode_str,
     """Remember when this watchdog first saw each daily release enabled.
 
     Disabled or removed releases are forgotten, so a re-enable starts a new
-    window instead of alerting for sessions skipped while it was off.
+    window instead of alerting for sessions skipped while it was off. A root
+    that reads empty (missing, mid-swap) forgets nothing.
     """
     release_list = [release_obj for release_obj in load_release_list(releases_root_path_str)
         if is_daily_reconcile_release_bool(release_obj) and mode_str in (None, "all", release_obj.mode_str)]
@@ -239,6 +241,8 @@ def refresh_enabled_since_dict(state_path_str, releases_root_path_str, mode_str,
             if mode_str not in (None, "all", key_tuple[0]):
                 continue
             if key_tuple not in enabled_key_set:
+                if not release_list:
+                    continue
                 connection_obj.execute("""DELETE FROM daily_watchdog_enabled_since
                     WHERE mode_str=? AND pod_id_str=? AND release_id_str=?""", key_tuple)
                 continue
