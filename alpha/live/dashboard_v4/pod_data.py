@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 from alpha.live import scheduler_utils
 from alpha.live.dashboard_v3.filters import MARKET_TIMEZONE_OBJ
+from alpha.live.dashboard_v4.daily_data import is_daily_release_bool, read_daily_cycle_dict
 from alpha.live.execution_engine import build_broker_order_request_list_from_vplan
 from alpha.live.ops_report import parse_timestamp_ts
 from alpha.live.runner import DEFAULT_EOD_SNAPSHOT_BUFFER_MINUTES_INT
@@ -319,6 +320,10 @@ def load_pod_cycles_dict(target_obj, *, as_of_ts: datetime, decision_plan_id_int
             target_ts = parse_timestamp_ts(selected_cycle_dict["target_execution_timestamp_str"])
             eod_dict = _eod_dict(connection_obj, selected_release_obj, target_ts, as_of_ts)
             pod_row_dict["eod_snapshot_dict"] = eod_dict
+            if is_daily_release_bool(release_obj):
+                # Same read snapshot: the daily close facts for the selected decision.
+                pod_row_dict["daily_cycle_dict"] = read_daily_cycle_dict(connection_obj, release_obj,
+                    decision_plan_id_int=decision_plan_id_int, as_of_ts=as_of_ts)
         result_dict.update(detail_dict)
         result_dict.update(status_str="ok", reason_str="", cycle_list=cycle_list, selected_cycle_dict=selected_cycle_dict, selected_release_dict=selected_release_dict, pod_row_dict=pod_row_dict, eod_dict=eod_dict)
     except (AttributeError, IndexError, KeyError, TypeError, ValueError, OverflowError, OSError, sqlite3.Error):

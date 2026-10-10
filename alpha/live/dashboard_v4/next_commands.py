@@ -23,6 +23,16 @@ HOLD_KEY_DICT = {
     "manual_review_required": ("show_vplan", "submit_vplan"),
     "mr_capsule_eod_snapshot_untrusted": ("status", "show_vplan"),
 }
+# Daily pods (CORE5, MR capsule) by daily status. READ/INSPECT only: a daily
+# red state is never fixed by sending orders; the close reconciles from holdings.
+DAILY_KEY_DICT = {
+    "open_after_close": ("status", "execution_report", "show_vplan"),
+    "dispatch_unconfirmed": ("show_vplan", "execution_report", "status"),
+    "partly_sent": ("show_vplan", "execution_report", "status"),
+    "not_sent": ("show_vplan", "status", "next_due"),
+    "no_decision": ("next_due", "status", "show_decision_plan"),
+    "closed_with_exceptions": ("execution_report", "show_vplan", "show_decision_plan"),
+}
 ACTION_KEY_DICT = {
     "review_vplan": ("show_vplan", "submit_vplan"), "submit_vplan": ("show_vplan",),
     "build_vplan": ("show_decision_plan",), "missed_decision_cycle": ("next_due", "status"),
@@ -53,6 +63,8 @@ def next_command_key_list(attention_dict):
     elif kind_str == "database":
         # runner commands open (and so create) the state DB: never offer them for a missing one.
         key_tuple = ("db_path_check",) if attention_dict.get("db_status_str") == "missing" else ("status",)
+    elif kind_str in {"action", "cycle"} and attention_dict.get("daily_status_key_str") in DAILY_KEY_DICT:
+        key_tuple = DAILY_KEY_DICT[attention_dict["daily_status_key_str"]]
     elif kind_str in {"action", "cycle"}:
         key_tuple = ((attention_dict.get("inspect_str") or "",)
             + ACTION_KEY_DICT.get(attention_dict.get("next_action_str") or "", ())
@@ -100,6 +112,9 @@ def attach_next_command_list(attention_list, workspace_dict, provider_obj, *, de
                 if row_dict and row_dict["command_str"]:
                     command_list.append({key_name_str: row_dict[key_name_str] for key_name_str in
                         ("key_str", "class_str", "orders_bool", "command_str", "effect_str")})
+        if attention_dict.get("daily_status_key_str"):
+            # Never suggest an order-sending command for a daily pod's problem.
+            command_list = [command_dict for command_dict in command_list if not command_dict["orders_bool"]]
         # Stable sort: within a class, the most relevant command stays first.
         command_list.sort(key=lambda command_dict: CLASS_RANK_DICT.get(command_dict["class_str"], 9))
         attention_dict["next_command_list"] = command_list[:LIMIT_INT]

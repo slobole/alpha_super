@@ -216,7 +216,7 @@ def build_pod_page_dict(overview_dict, source_dict, finance_dict, *, pod_id_str,
                 time_str = _time_str((source_dict.get(source_key_str) or {}).get("created_timestamp_str"), as_of_ts)
                 if time_str != "—":
                     step_list[index_int]["actual_time_str"] = time_str
-        if step_list[3]["state_str"] == "Done" and source_dict.get("ack_list"):
+        if step_list[3]["state_str"] == "Done" and source_dict.get("ack_list") and "daily_cycle_dict" not in row_dict:
             # This proves broker acknowledgement completion, not when the
             # request was transmitted. Order submitted timestamps are mutable.
             ack_time_list = [parse_timestamp_ts(item_dict["response_timestamp_str"]) for item_dict in source_dict["ack_list"]]
@@ -246,11 +246,18 @@ def build_pod_page_dict(overview_dict, source_dict, finance_dict, *, pod_id_str,
     submit_mode_str = "Auto-submit" if auto_submit_obj is True else "You submit" if auto_submit_obj is False else ""
     issue_bool = fresh_bool and cycle_dict["tone_str"] in {"red", "amber"}
     missing_ack_bool = (row_dict.get("missing_ack_count_int") or 0) > 0 or row_dict.get("latest_submit_ack_status_str") == "missing_critical"
+    daily_status_dict = cycle_dict.get("daily_status_dict")
+    if daily_status_dict is not None:
+        # The daily projection names the issue; only a counted missing ACK in the
+        # saved daily plan replaces it.
+        missing_ack_bool = bool(((row_dict.get("daily_cycle_dict") or {}).get("vplan_dict") or {}).get("missing_ack_count_int"))
     verdict_str = cycle_dict["now_str"] + "."
     # The header owns the one current "Next" line; the cycle states its result.
     verdict_detail_str = ""
     issue_title_str = "Review broker ACK" if missing_ack_bool else cycle_dict["now_str"]
     issue_detail_str = "Check the order plan and the broker connection. Do not resubmit blindly." if missing_ack_bool else "Check the saved evidence before taking action."
+    if daily_status_dict is not None and not missing_ack_bool:
+        issue_detail_str = cycle_dict["now_detail_str"] or issue_detail_str
     if issue_bool:
         verdict_detail_str = "Next: Review broker ACK" if missing_ack_bool else "Next: Check saved evidence"
     if saved_wording_bool:
@@ -283,6 +290,8 @@ def build_pod_page_dict(overview_dict, source_dict, finance_dict, *, pod_id_str,
             replaced_dict = attention_dict
             attention_dict = {"state_str": cycle_state_str, "title_str": issue_title_str, "detail_str": issue_detail_str,
                 "pod_id_str": pod_id_str, "kind_str": "cycle", "step_str": failed_step_dict.get("label_str", "")}
+            if daily_status_dict is not None:
+                attention_dict.update(daily_status_key_str=daily_status_dict["key_str"], daily_red_bool=daily_status_dict["red_bool"])
             if scheduler_attention_dict:
                 attention_dict.update(console_bool=True, scheduler_bool=True,
                     check_command_str=replaced_dict.get("check_command_str") or "",

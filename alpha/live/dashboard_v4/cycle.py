@@ -123,7 +123,8 @@ def _eod_step_dict(eod_dict: dict[str, Any], now_dt: datetime, source_dt: dateti
 
 
 def build_cycle_view_dict(
-    pod_row_dict: dict[str, Any], *, now_ts: datetime | None = None
+    pod_row_dict: dict[str, Any], *, now_ts: datetime | None = None,
+    allowed_mode_set: frozenset[str] = frozenset({"live"}),
 ) -> dict[str, Any]:
     """Project saved facts without reading files, changing state, or running jobs.
 
@@ -132,8 +133,10 @@ def build_cycle_view_dict(
     An earlier unresolved VPlan remains visible; its steps never borrow the
     newer DecisionPlan's evidence. No-order intent is absent from V3 summary
     rows, so zero broker orders alone does not produce a no-trade claim.
+    A row carrying ``daily_cycle_dict`` (CORE5, MR capsule) takes the daily
+    projection after its Data step and never falls back to the monthly path.
     """
-    if str(pod_row_dict.get("mode_str") or "").lower() != "live":
+    if str(pod_row_dict.get("mode_str") or "").lower() not in allowed_mode_set:
         raise ValueError("Dashboard V4 cycle views support LIVE only.")
     now_dt = _timestamp_dt(now_ts or datetime.now(UTC))
     assert now_dt is not None
@@ -194,6 +197,9 @@ def build_cycle_view_dict(
     step_dict_list = [_step_dict("Data", data_state_str, data_fact_str, now_dt)]
     if data_alert_str:
         step_dict_list[0]["detail_str"] = "No alert before the data deadline · " + data_alert_str
+    if "daily_cycle_dict" in pod_row_dict:
+        return _daily_cycle_view_dict(pod_row_dict, step_dict_list, now_dt, source_dt,
+            data_waiting_bool=data_waiting_bool, data_alert_str=data_alert_str)
 
     if previous_unresolved_bool:
         decision_state_str, decision_fact_str = "Unknown", "Previous decision"
@@ -319,6 +325,23 @@ def build_cycle_view_dict(
     cycle_dict = _cycle_dict(step_dict_list, False, cycle_role_str)
     cycle_dict.update(data_waiting_bool=data_waiting_bool and step_dict_list[0]["state_str"] == "Now",
         data_alert_str=data_alert_str)
+    return cycle_dict
+
+
+def _daily_cycle_view_dict(pod_row_dict, step_dict_list, now_dt, source_dt, *, data_waiting_bool, data_alert_str):
+    """Daily pods close from holdings: their status comes from the daily vocabulary."""
+    from alpha.live.dashboard_v4.daily_cycle import build_daily_steps_and_status
+
+    daily_dict = build_daily_steps_and_status(pod_row_dict, step_dict_list[0], now_dt=now_dt, source_dt=source_dt)
+    step_dict_list = step_dict_list + daily_dict["step_dict_list"]
+    step_dict_list.append(_eod_step_dict(pod_row_dict.get("eod_snapshot_dict") or {}, now_dt, source_dt))
+    status_dict = daily_dict["status_dict"]
+    cycle_dict = _cycle_dict(step_dict_list, False, "current")
+    # One sub-line: the status detail, then the last close's exceptions while a new cycle runs.
+    detail_str = " · ".join(part_str for part_str in (status_dict["detail_str"], status_dict.get("last_close_str", "")) if part_str)
+    cycle_dict.update(pill_str=status_dict["pill_str"], tone_str=status_dict["tone_str"],
+        now_str=status_dict["label_str"], now_detail_str=detail_str, daily_status_dict=status_dict,
+        data_waiting_bool=data_waiting_bool and step_dict_list[0]["state_str"] == "Now", data_alert_str=data_alert_str)
     return cycle_dict
 
 

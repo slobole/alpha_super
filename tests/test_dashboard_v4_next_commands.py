@@ -6,6 +6,7 @@ import pytest
 
 from alpha.live.dashboard_v4 import next_commands as next_commands_module
 from alpha.live.dashboard_v4.demo import DEMO_NOW_TS, build_demo_workspace_tuple, create_demo_app
+from alpha.live.dashboard_v4.tools import ORDER_TOOL_SET
 from alpha.live.dashboard_v4.next_commands import (
     attach_next_command_list, next_command_key_list, serve_running_command_str)
 
@@ -118,3 +119,38 @@ def test_powershell_quoting_doubles_typographic_quotes():
     assert powershell_literal_str("O\u2019Brien; Write-Output X") == "'O\u2019\u2019Brien; Write-Output X'"
     assert powershell_literal_str("\u2018a\u201ab\u201b") == "'\u2018\u2018a\u201a\u201ab\u201b\u201b'"
     assert powershell_command_str(["uv", "$env:x", "a`b"]) == "& 'uv' '$env:x' 'a`b'"
+
+
+@pytest.mark.parametrize("daily_key_str,expected_list", [
+    ("open_after_close", ["status", "execution_report", "show_vplan"]),
+    ("dispatch_unconfirmed", ["show_vplan", "execution_report", "status"]),
+    ("partly_sent", ["show_vplan", "execution_report", "status"]),
+    ("not_sent", ["show_vplan", "status", "next_due"]),
+    ("no_decision", ["next_due", "status", "show_decision_plan"]),
+    ("closed_with_exceptions", ["execution_report", "show_vplan", "show_decision_plan"]),
+])
+def test_daily_states_use_the_daily_key_map(daily_key_str, expected_list):
+    attention_dict = {"kind_str": "cycle", "step_str": "Submit", "next_action_str": "review_vplan",
+        "inspect_str": "show_vplan", "daily_status_key_str": daily_key_str, "daily_red_bool": True}
+    assert next_command_key_list(attention_dict) == expected_list
+    assert all(key_str not in ORDER_TOOL_SET for key_str in expected_list)
+    # The scheduler process check still comes first when the scheduler is involved.
+    assert next_command_key_list({**attention_dict, "scheduler_bool": True})[:2] == ["serve_running", "next_due"]
+
+
+def test_daily_red_state_never_gets_an_order_sending_command(workspace_tuple, monkeypatch):
+    workspace_dict, provider_obj = workspace_tuple
+    monkeypatch.setitem(next_commands_module.DAILY_KEY_DICT, "not_sent", ("tick", "run_once", "show_vplan"))
+    monkeypatch.setitem(next_commands_module.STEP_KEY_DICT, "Submit", ("tick", "show_vplan"))
+    daily_list = [{"pod_id_str": "demo_1_1", "kind_str": "cycle", "step_str": "Submit",
+        "daily_status_key_str": "not_sent", "daily_red_bool": True}]
+    monthly_list = [{"pod_id_str": "demo_1_1", "kind_str": "cycle", "step_str": "Submit"}]
+    for attention_list in (daily_list, monthly_list):
+        attach_next_command_list(attention_list, workspace_dict, provider_obj, demo_bool=True, as_of_ts=DEMO_NOW_TS)
+    assert [command_dict["key_str"] for command_dict in daily_list[0]["next_command_list"]] == ["show_vplan"]
+    # The same catalog row is still offered for a monthly item: only the daily gate removes it.
+    assert "tick" in [command_dict["key_str"] for command_dict in monthly_list[0]["next_command_list"]]
+    # A daily key outside the map falls back to the monthly keys, still without order commands.
+    other_list = [{"pod_id_str": "demo_1_1", "kind_str": "cycle", "step_str": "Submit", "daily_status_key_str": "trading"}]
+    attach_next_command_list(other_list, workspace_dict, provider_obj, demo_bool=True, as_of_ts=DEMO_NOW_TS)
+    assert [command_dict["key_str"] for command_dict in other_list[0]["next_command_list"]] == ["show_vplan"]

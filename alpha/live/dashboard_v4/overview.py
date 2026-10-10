@@ -8,6 +8,7 @@ from alpha.live.dashboard_v3.filters import MARKET_TIMEZONE_OBJ
 from alpha.live.dashboard_v3.health import build_health_rollup
 from alpha.live.dashboard_v3.operator_tools import strategy_display_name_str
 from alpha.live.dashboard_v3.schedule import _operator_action_required_bool
+from alpha.live.daily_reconcile import DAILY_STRATEGY_IMPORT_TUPLE
 from alpha.live.dashboard_v4.cycle import build_cycle_view_dict
 from alpha.live.dashboard_v4.durations import human_duration_str
 from alpha.live.dashboard_v4.finance import build_financial_overview_dict
@@ -27,6 +28,15 @@ STATE_CLASS_DICT = {
 STATE_RANK_DICT = {"fail": 0, "late": 1, "unk": 2, "now": 3, "next": 4, "done": 5, "skip": 6}
 # A manual submit becomes urgent this close to the planned trade.
 DEADLINE_URGENT_SECONDS_INT = 600
+# Routine V3 steps of a daily pod (evening decision, morning plan and send,
+# waiting for the close). The daily projection owns their urgency instead.
+DAILY_ROUTINE_ACTION_LABEL_SET = frozenset({
+    "Build DecisionPlan", "Build VPlan", "VPlan ready", "Wait submission window", "Waiting reconcile"})
+
+
+def is_daily_row_bool(row_dict):
+    """The one daily gate: a CORE5/capsule strategy or attached daily facts."""
+    return row_dict.get("strategy_import_str") in DAILY_STRATEGY_IMPORT_TUPLE or "daily_cycle_dict" in row_dict
 
 
 def _state_str(value_str):
@@ -70,6 +80,9 @@ def _data_time_str(value_str):
 
 def _action_required_bool(row_dict, cycle_dict):
     required_dict = row_dict.get("required_action_dict") or {}
+    if (cycle_dict.get("daily_status_dict") is not None and required_dict.get("severity_str") == "yellow"
+            and required_dict.get("label_str") in DAILY_ROUTINE_ACTION_LABEL_SET):
+        return False
     if (required_dict.get("severity_str") == "yellow"
         and (row_dict.get("next_action_str"), required_dict.get("label_str")) in {
             ("submit_vplan", "VPlan ready"), ("build_vplan", "Build VPlan"),
@@ -104,6 +117,10 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
         row_dict.setdefault("as_of_timestamp_str", source_dict.get("as_of_timestamp_str"))
         if fresh_bool and matched_bool and hasattr(provider_obj, "get_cycle_evidence_dict"):
             row_dict["cycle_evidence_dict"] = provider_obj.get_cycle_evidence_dict(row_dict, as_of_ts=source_ts)
+        if is_daily_row_bool(row_dict) and "daily_cycle_dict" not in row_dict:
+            # A daily row never takes the monthly path: unknown facts stay unknown.
+            row_dict["daily_cycle_dict"] = (provider_obj.get_daily_cycle_dict(row_dict, as_of_ts=as_of_ts)
+                if fresh_bool and matched_bool and hasattr(provider_obj, "get_daily_cycle_dict") else {"status_str": "unknown"})
         scheduler_dict = {"state_str": "unknown", "alive_bool": None}
         if fresh_bool and matched_bool and hasattr(provider_obj, "get_scheduler_status_dict"):
             scheduler_dict = provider_obj.get_scheduler_status_dict(pod_id_str, as_of_ts=as_of_ts)
@@ -145,8 +162,13 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
             next_detail_str = (next_detail_str + " · " if next_detail_str else "") + "in " + _duration_str((next_ts - as_of_ts).total_seconds())
         next_str = next_dict["next_str"]
         now_str, now_detail_str = cycle_dict.get("now_str") or "Unknown", cycle_dict.get("now_detail_str") or ""
+        daily_status_dict = cycle_dict.get("daily_status_dict")
         if pod_state_str in {"fail", "late"}:
-            if row_dict.get("latest_submit_ack_status_str") == "missing_critical" or (row_dict.get("missing_ack_count_int") or 0) > 0:
+            if daily_status_dict is not None:
+                # Keep the daily status unless the saved daily plan counts a missing ACK.
+                if ((row_dict.get("daily_cycle_dict") or {}).get("vplan_dict") or {}).get("missing_ack_count_int"):
+                    now_str, now_detail_str = "ACK missing", cycle_dict["now_str"]
+            elif row_dict.get("latest_submit_ack_status_str") == "missing_critical" or (row_dict.get("missing_ack_count_int") or 0) > 0:
                 now_str, now_detail_str = "ACK missing", cycle_dict["now_str"]
             next_str = required_dict.get("label_str") if action_required_bool else "Review " + next_str
             next_time_str, next_detail_str = "", "you · now"
@@ -181,6 +203,9 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
                 "inspect_str": required_dict.get("inspect_command_name_str") or "",
                 "next_action_str": row_dict.get("next_action_str") or "",
             })
+            if daily_status_dict is not None:
+                attention_list[-1].update(daily_status_key_str=daily_status_dict["key_str"],
+                    daily_red_bool=daily_status_dict["red_bool"])
             if action_required_bool and not database_failed_bool:
                 attention_list[-1].update(_deadline_dict(row_dict, as_of_ts))
                 if attention_list[-1].get("deadline_urgent_bool"):

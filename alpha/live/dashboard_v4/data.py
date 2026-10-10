@@ -19,6 +19,7 @@ from alpha.live.dashboard_v3.local_workspace import (
     build_local_workspace_dict,
     validate_local_bindings_unchanged,
 )
+from alpha.live.dashboard_v4.daily_data import load_daily_cycle_dict
 from alpha.live.dashboard_v4.evidence import load_cycle_evidence_dict
 from alpha.live.dashboard_v4.pod_data import load_pod_cycles_dict
 from alpha.live.dashboard_v4.scheduler_status import load_scheduler_status_dict
@@ -143,6 +144,16 @@ class LiveDataProvider(DashboardDataProvider):
         except (ValueError, OSError):
             return {"state_str": "unknown", "reason_str": "Fill source unavailable"}
         return load_cycle_evidence_dict(target_obj, pod_row_dict, as_of_ts=as_of_ts)
+
+    def get_daily_cycle_dict(self, pod_row_dict, *, as_of_ts):
+        """Current daily cycle facts for a CORE5/capsule row; unknown otherwise."""
+        try:
+            target_obj = self.get_target_for_pod(pod_row_dict["pod_id_str"])
+        except (KeyError, ValueError, OSError):
+            target_obj = None
+        if target_obj is None or target_obj.release_obj.account_route_str != pod_row_dict.get("account_route_str"):
+            return {"status_str": "unknown"}
+        return load_daily_cycle_dict(target_obj, as_of_ts=as_of_ts)
 
     def app_obj(self) -> LiveReadOnlyApp:
         if self._app_obj is None:

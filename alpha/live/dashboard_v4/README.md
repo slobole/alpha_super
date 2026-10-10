@@ -171,6 +171,31 @@ availability check, or permission to trade. It changes no scheduler or order gat
   Same-scope refreshes preserve a focused date using the newly returned values.
   Allocation donuts expose their existing slice labels, including cash, on
   hover, tap or focus. These interactions do not fetch prices or calculate returns.
+- Daily pods (CORE5, MR capsule) close each cycle after the session from actual
+  holdings. One gate marks a row daily: its `strategy_import_str` is in
+  `DAILY_STRATEGY_IMPORT_TUPLE`, or it carries `daily_cycle_dict`; the
+  `next_open_moo` policy alone never does. `daily_data.py` reads the cycle in one
+  SQLite `mode=ro` snapshot: the decision (status, signal/target times, opening
+  dispatch result as counts, close result with its exception rows, funding
+  drop), the latest VPlan with opening order/ACK/fill counts, completion claims,
+  daily and capsule alerts, the post-close report, older open decisions, the last
+  close and the owed decision for the latest completed session. Optional tables
+  are checked first, so older DBs read. Reads are bounded; error text, request
+  keys, alert reasons and client IDs are never kept. `daily_cycle.py` projects
+  those facts onto Decide..Reconcile and one status, first match wins: Closed;
+  Closed with exceptions (n); Superseded; Open after close; Dispatch unconfirmed
+  (do not resend); Partly sent; Not sent; Retrying send; No decision for a date;
+  Closing; Trading (with any same-day completion exit); Ready · sends 09:28;
+  Deciding. Close times use the exchange calendar, early closes included. The
+  red states use the watchdog's own boundaries (close + 1 h, open + 5 min, open
+  minus 2 min) and are checked at the oldest of now, the summary time and the
+  daily read time. A newer close never hides an older cycle still open after
+  its close. Routine daily steps (evening decision, morning plan and send) are
+  not amber; only a counted missing ACK in the daily plan replaces the daily
+  status with `ACK missing`. A daily row without readable facts is Unknown, never
+  the monthly projection. Monthly pods render byte-identically
+  (`tests/test_dashboard_v4_monthly_golden.py`). `daily_demo.py` seeds owned
+  synthetic daily pods through the real writers; it is not wired into the app.
 - Production has no executable action or export routes. Non-read methods return
   403 before acquisition; only the explicitly enabled synthetic demo allows
   its fixed preview, confirmation and cancellation requests.
@@ -246,6 +271,15 @@ and database failures. The selected cycle has a separate badge and verdict.
 - Positions show saved quantities and their own timestamp. Cash has its own
   financial date. Existing sources do not prove closing marks for every symbol,
   so symbol values, weights, target/New markers are omitted.
+- A daily Pod reads its daily facts inside the same snapshot as the selected
+  cycle. Its Reconcile step carries the close (`Closes 16:00`, `Closing`,
+  `Closed from holdings`, `Closed · n exceptions`, `Open after close`); Fill is
+  informational, since fills never decide a daily close. Submit shows
+  `n sent · n ack` or fails as Not sent, Partly sent or Unconfirmed; Unconfirmed
+  says not to resend. The issue title and detail are the daily status. While a
+  new cycle runs, a last close with exceptions adds `Last close <date>: n
+  exceptions`. Do-next commands for a daily problem come from a daily key map of
+  READ/INSPECT commands and never include a command that can send orders.
 - Unconnected Slip bps, Files, Trade sheet and Live vs backtest
   controls are hidden. The V3 exporter writes state and is not used. Events
   shows the selected VPlan's broker order events, with symbols and newest first.
