@@ -2,7 +2,7 @@
 
 Real-data evidence lives in results/research/strategy_readiness_audit_20260928/core5/. These tests only lock the
 code properties the audit relied on: scale-free signals, causal prefixes, calendar month-end on partial data,
-the target-book contract, the unqualified LIVE block, deterministic session-gap replay, and that the harness catches a leak.
+the target-book contract, LIVE and incubation validation, deterministic session-gap replay, and that the harness catches a leak.
 """
 from __future__ import annotations
 
@@ -105,9 +105,9 @@ def _release(mode_str):
     )
 
 
-def test_unqualified_live_is_blocked_incubation_allowed():
-    with pytest.raises(ValueError, match="LIVE"):
-        adapter_module.validate_core5_release(replace(_release("live"), enabled_bool=True))
+def test_enabled_live_and_incubation_are_allowed():
+    # Owner decisions 2026-10-10/11: no LIVE qualification or margin attestation.
+    adapter_module.validate_core5_release(replace(_release("live"), enabled_bool=True))
     adapter_module.validate_core5_release(_release("incubation"))
 
 

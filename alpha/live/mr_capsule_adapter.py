@@ -45,8 +45,9 @@ class CapsuleHoldingMismatchError(ValueError):
 def validate_mr_capsule_release(release_obj: LiveRelease) -> None:
     if release_obj.strategy_import_str not in MR_CAPSULE_STRATEGY_IMPORT_TUPLE:
         raise ValueError("Unsupported MR capsule strategy identity.")
-    # LIVE is allowed (owner decision 2026-10-10). An enabled paper or LIVE
-    # release still needs its margin-account attestation below.
+    # LIVE is allowed (owner decision 2026-10-10) and needs no margin
+    # attestation (2026-10-11: accounts are margin accounts). Older YAMLs may
+    # still carry margin_account_confirmed_bool; it is ignored.
     hpi_bool = "hpi_vote" in release_obj.strategy_import_str
     required_field_dict = {
         "data_profile_str": MR_CAPSULE_PROFILE_TUPLE[int(hpi_bool)],
@@ -60,10 +61,6 @@ def validate_mr_capsule_release(release_obj: LiveRelease) -> None:
             raise ValueError(f"MR capsule requires {field_str}={expected_value_obj!r}.")
     if set(release_obj.params_dict) - {"capital_base_float", "margin_account_confirmed_bool"}:
         raise ValueError("MR capsule uses its frozen strategy parameters; overrides require parity qualification.")
-    if release_obj.enabled_bool and release_obj.mode_str != "incubation" and (
-        release_obj.params_dict.get("margin_account_confirmed_bool") is not True
-    ):
-        raise ValueError("MR capsule same-auction funding requires an explicitly confirmed margin account.")
 
 
 def _validate_vix_history(vix_close_ser: pd.Series, pricing_index: pd.DatetimeIndex, signal_date_ts: pd.Timestamp) -> None:

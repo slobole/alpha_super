@@ -19,8 +19,7 @@ broker:
 strategy:
   strategy_import_str: strategies.mr_capsule.strategy_mr_dv2_vix_gated_cash
   data_profile_str: norgate_eod_sp500_mr_capsule_pit
-  params:
-    margin_account_confirmed_bool: false
+  params: {}
 
 market:
   session_calendar_id_str: XNYS

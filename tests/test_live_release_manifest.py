@@ -215,8 +215,7 @@ def test_release_template_parses_and_starts_disabled(template_path_obj: Path):
     expected_budget_float = 1.0 if release_obj.strategy_import_str == "strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5" or release_obj.strategy_import_str.startswith("strategies.mr_capsule.") else 0.03
     assert release_obj.pod_budget_fraction_float == expected_budget_float
     if core5_template_bool:
-        assert "capital_base_float" not in release_obj.params_dict
-        assert release_obj.params_dict["margin_account_confirmed_bool"] is False
+        assert release_obj.params_dict == {}
     else:
         assert release_obj.params_dict["capital_base_float"] == 100000.0
 

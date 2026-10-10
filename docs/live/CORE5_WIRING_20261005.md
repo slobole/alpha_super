@@ -99,18 +99,13 @@ was replaced only after implementing the following checks:
 ## Deployment record and physical prerequisites
 
 Use the [disabled template](release_templates/pod_taa_adaptive_macro_core5_daily_moo.yaml.example).
-An enabled live release requires `params.margin_account_confirmed_bool: true`
-(owner decision 2026-10-10 removed the earlier qualification record with its
-expiry and forward-execution fields; a legacy `core5_live_qualification_dict`
-with `margin_account_confirmed_bool: true` is still accepted). The flag is
-rechecked before submission; withdrawing it does not prevent loading the release
-or reconciling orders that were already sent.
-
-This is an operator attestation, not automatically verified evidence content.
-Do not populate them from the synthetic tests. The evidence should cover the
-intended account/route, natural forward cycles, DBC entry/cover/reversal and
-reject/reconnect behavior, observed costs, actual borrow-rate/recall procedures
-and the approved deployment. No account has been qualified by this change.
+An enabled live release needs no extra YAML attestation. Owner decisions:
+2026-10-10 removed the qualification record (expiry, forward-execution and
+approval fields), and 2026-10-11 removed the margin-account flag because the
+accounts are margin accounts. Older YAMLs that still carry
+`core5_live_qualification_dict` or `margin_account_confirmed_bool` keep working;
+both keys are ignored. Each submission still runs the account, margin-preview
+and DBC shortability checks described above.
 
 Previews cannot reserve borrow or margin, guarantee basket margin or auction
 acceptance, or prevent conditions changing after the check. Portfolio-margin

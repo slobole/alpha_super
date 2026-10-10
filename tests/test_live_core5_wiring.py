@@ -32,11 +32,9 @@ def core5_price_df():
 
 @pytest.fixture
 def qualified_release_obj():
-    # Enabled LIVE needs only the margin-account attestation (owner decision
-    # 2026-10-10); the old qualification record and its expiry are gone.
+    # Enabled LIVE needs no YAML attestation (owner decisions 2026-10-10/11).
     return replace(core5_helper.release_obj.__wrapped__(),
-        mode_str="live", account_route_str="U_CORE5_TEST", broker_port_int=7496,
-        params_dict={"margin_account_confirmed_bool": True})
+        mode_str="live", account_route_str="U_CORE5_TEST", broker_port_int=7496, params_dict={})
 
 
 def _release_for_mode(release_obj, mode_str):
@@ -54,11 +52,6 @@ def _write_release_yaml(tmp_path, release_obj):
         payload_dict[target_str] = payload_dict.pop(source_str)
     (release_dir_path / "core5.yaml").write_text(yaml.safe_dump(payload_dict), encoding="utf-8")
     return release_dir_path
-
-
-def _unattested_release(release_obj, attestation_state_str):
-    return replace(release_obj, params_dict={} if attestation_state_str == "missing"
-        else {"margin_account_confirmed_bool": False})
 
 
 def _prepared_cycle(tmp_path, monkeypatch, release_obj, price_df, cycle_str="initialization"):
@@ -103,28 +96,19 @@ def test_disabled_live_template_is_reviewable_but_cannot_build(qualified_release
             core5_helper._state(disabled_release_obj, "2026-09-11"))
 
 
-def test_enabled_live_requires_margin_attestation(qualified_release_obj):
-    validate_release_manifest(qualified_release_obj)
-    with pytest.raises(ValueError, match="margin_account_confirmed_bool"):
-        validate_release_manifest(replace(qualified_release_obj, params_dict={}))
+@pytest.mark.parametrize("params_dict", [
+    {}, {"margin_account_confirmed_bool": False}, {"margin_account_confirmed_bool": True},
+    {"core5_live_qualification_dict": {"operator_approved_bool": False, "expires_at_str": "2000-01-01T00:00:00+00:00"}},
+])
+def test_enabled_live_needs_no_attestation_and_old_keys_are_ignored(qualified_release_obj, core5_price_df, params_dict):
+    release_obj = replace(qualified_release_obj, params_dict=params_dict)
+    validate_release_manifest(release_obj)
+    core5_helper._build(release_obj, core5_price_df, "2026-09-11", core5_helper._state(release_obj, "2026-09-11"))
 
 
-@pytest.mark.parametrize("value_obj", [False, "true", 1, None])
-def test_live_margin_attestation_fails_closed(qualified_release_obj, value_obj):
-    with pytest.raises(ValueError, match="margin_account_confirmed_bool"):
-        validate_release_manifest(replace(qualified_release_obj,
-            params_dict={"margin_account_confirmed_bool": value_obj}))
-
-
-def test_legacy_qualification_record_counts_only_its_margin_flag(qualified_release_obj):
-    # Approval, evidence and expiry fields no longer gate LIVE.
-    legacy_dict = {"margin_account_confirmed_bool": True, "operator_approved_bool": False,
-        "expires_at_str": "2000-01-01T00:00:00+00:00"}
-    validate_release_manifest(replace(qualified_release_obj,
-        params_dict={"core5_live_qualification_dict": legacy_dict}))
-    with pytest.raises(ValueError, match="margin_account_confirmed_bool"):
-        validate_release_manifest(replace(qualified_release_obj, params_dict={
-            "core5_live_qualification_dict": {**legacy_dict, "margin_account_confirmed_bool": False}}))
+def test_enabled_live_still_refuses_strategy_overrides(qualified_release_obj):
+    with pytest.raises(ValueError, match="approved default strategy parameters"):
+        validate_release_manifest(replace(qualified_release_obj, params_dict={"allow_live_bool": True}))
 
 
 def test_live_release_does_not_admit_wrong_account_state(qualified_release_obj, core5_price_df):
@@ -322,23 +306,18 @@ def test_paper_submit_at_cutoff_never_requests_funding_or_claims(
     assert not broker_obj.submitted_order_request_list
 
 
-@pytest.mark.parametrize("attestation_state_str", ["withdrawn", "missing"])
-def test_actual_yaml_without_margin_attestation_still_recovers_sent_cycle(
-        qualified_release_obj, core5_price_df, tmp_path, monkeypatch, attestation_state_str):
+@pytest.mark.parametrize("params_dict", [{}, {"margin_account_confirmed_bool": False}])
+def test_actual_yaml_live_release_recovers_sent_cycle(
+        qualified_release_obj, core5_price_df, tmp_path, monkeypatch, params_dict):
     store_obj, broker_obj, decision_obj, vplan_obj, runner_kwarg_dict = _prepared_cycle(
         tmp_path, monkeypatch, qualified_release_obj, core5_price_df)
     result_dict = runner.submit_ready_vplans(store_obj, broker_obj, decision_obj.submission_timestamp_ts,
         "live", False, vplan_id_int=vplan_obj.vplan_id_int, **runner_kwarg_dict)
     assert result_dict["submitted_vplan_count_int"] == 1
-    release_dir_path = _write_release_yaml(tmp_path,
-        _unattested_release(qualified_release_obj, attestation_state_str))
+    release_dir_path = _write_release_yaml(tmp_path, replace(qualified_release_obj, params_dict=params_dict))
     loaded_release_obj = load_release_list(str(release_dir_path))[0]
     assert loaded_release_obj.enabled_bool and loaded_release_obj.mode_str == "live"
-    with pytest.raises(ValueError):
-        validate_release_manifest(loaded_release_obj)
-    with pytest.raises(ValueError):
-        core5_helper._build(loaded_release_obj, core5_price_df, "2026-09-11",
-            core5_helper._state(loaded_release_obj, "2026-09-11"))
+    validate_release_manifest(loaded_release_obj)
     monkeypatch.setattr(scheduler_utils, "evaluate_build_gate_dict",
         lambda *_argument_tuple, **_argument_dict: {"due_bool": True})
     after_open_ts = decision_obj.target_execution_timestamp_ts + timedelta(minutes=10)
@@ -359,24 +338,6 @@ def test_actual_yaml_without_margin_attestation_still_recovers_sent_cycle(
     assert result_dict["completed_vplan_count_int"] == 1
     assert restarted_store_obj.get_pod_state(loaded_release_obj.pod_id_str).strategy_state_dict == core5_helper._committed_state_dict(decision_obj)
     assert restarted_store_obj.get_latest_decision_plan_for_pod(loaded_release_obj.pod_id_str).status_str == "completed"
-
-
-@pytest.mark.parametrize("attestation_state_str", ["withdrawn", "missing"])
-def test_actual_yaml_without_margin_attestation_cannot_submit_ready_plan(
-        qualified_release_obj, core5_price_df, tmp_path, monkeypatch, attestation_state_str):
-    store_obj, broker_obj, decision_obj, vplan_obj, runner_kwarg_dict = _prepared_cycle(
-        tmp_path, monkeypatch, qualified_release_obj, core5_price_df)
-    release_dir_path = _write_release_yaml(tmp_path,
-        _unattested_release(qualified_release_obj, attestation_state_str))
-    monkeypatch.setattr(broker_obj, "get_core5_account_snapshot",
-        lambda *_argument_tuple: pytest.fail("Missing margin attestation reached account preflight"))
-    result_dict = runner.submit_ready_vplans(store_obj, broker_obj, decision_obj.submission_timestamp_ts,
-        "live", False, vplan_id_int=vplan_obj.vplan_id_int,
-        releases_root_path_str=str(release_dir_path), **runner_kwarg_dict)
-    assert result_dict["submitted_vplan_count_int"] == 0
-    assert not broker_obj.submitted_order_request_list
-    assert store_obj.get_vplan_by_id(vplan_obj.vplan_id_int).status_str == "submitted"
-    assert store_obj.get_pending_daily_decision_plan_list()
 
 
 @pytest.mark.parametrize("cutoff_phase_str", ["after_qualification", "between_dbc_legs"])

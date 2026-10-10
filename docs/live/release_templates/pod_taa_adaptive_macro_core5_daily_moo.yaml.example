@@ -1,5 +1,5 @@
 # Disabled deployment template. This is not a deployed release.
-# Dedicated USD margin account only; set margin_account_confirmed_bool: true once confirmed.
+# Dedicated USD margin account only (the DBC short needs margin).
 identity:
   release_id: your_user.core5.daily_moo.v1
   user_id: your_user
@@ -16,8 +16,7 @@ broker:
 strategy:
   strategy_import_str: strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5
   data_profile_str: norgate_eod_core5
-  params:
-    margin_account_confirmed_bool: false # The DBC short needs a margin account.
+  params: {}
 market:
   session_calendar_id_str: XNYS
 schedule:

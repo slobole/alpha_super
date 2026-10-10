@@ -33,19 +33,13 @@ def validate_core5_release(release_obj: LiveRelease, *, require_live_qualificati
     for field_str, expected_value_obj in required_field_dict.items():
         if getattr(release_obj, field_str) != expected_value_obj:
             raise ValueError(f"CORE5 requires {field_str}={expected_value_obj!r}.")
+    # Owner decision 2026-10-11: no LIVE attestation (accounts are margin
+    # accounts). Older YAMLs may still carry these keys; they are ignored.
+    # runner still checks account-wide cash, margin previews and
+    # shortability before every submit. require_live_qualification_bool is
+    # kept for existing callers.
     if set(release_obj.params_dict) - {"capital_base_float", "margin_account_confirmed_bool", "core5_live_qualification_dict"}:
         raise ValueError("CORE5 uses the approved default strategy parameters; overrides require separate parity qualification.")
-    if require_live_qualification_bool and release_obj.mode_str == "live" and release_obj.enabled_bool:
-        # Owner decision 2026-10-10: no qualification record or expiry gate for
-        # LIVE. The DBC short still needs a margin account, attested like the
-        # capsule's (params.margin_account_confirmed_bool); a legacy
-        # core5_live_qualification_dict may carry the same flag. runner still
-        # requires fresh account-wide cash, margin previews and shortability
-        # before every submit.
-        legacy_record_obj = release_obj.params_dict.get("core5_live_qualification_dict")
-        legacy_margin_bool = isinstance(legacy_record_obj, dict) and legacy_record_obj.get("margin_account_confirmed_bool") is True
-        if release_obj.params_dict.get("margin_account_confirmed_bool") is not True and not legacy_margin_bool:
-            raise ValueError("CORE5 LIVE requires margin_account_confirmed_bool: true (the DBC short needs a margin account).")
 
 
 def is_core5_decision_bool(decision_plan_obj: DecisionPlan | None) -> bool:

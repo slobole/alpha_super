@@ -118,24 +118,16 @@ def _run_live_operation(operation_str, state_store_obj, broker_adapter_obj, runn
         runner_module.build_vplans(state_store_obj, broker_adapter_obj, SUBMIT_TIMESTAMP_TS, "live", **runner_kwarg_dict)
 
 
+@pytest.mark.parametrize("params_dict", [{}, {"margin_account_confirmed_bool": True}])
 @pytest.mark.parametrize("operation_str", ["submit", "reconcile", "build"])
-def test_persisted_capsule_live_with_margin_attestation_reaches_broker_resolution(capsule_case, monkeypatch, operation_str):
-    # LIVE is allowed (owner decision 2026-10-10): no mode lock before the broker step.
+def test_persisted_capsule_live_reaches_broker_resolution(capsule_case, monkeypatch, operation_str, params_dict):
+    # LIVE is allowed with no YAML attestation (owner decisions 2026-10-10/11).
     state_store_obj, broker_adapter_obj, release_obj, vplan_obj, runner_kwarg_dict, _ = capsule_case
-    state_store_obj.upsert_release(replace(release_obj, mode_str="live", account_route_str="U_TEST"))
+    state_store_obj.upsert_release(replace(release_obj, mode_str="live", account_route_str="U_TEST", params_dict=params_dict))
     def reached_fn(**_):
         raise _ReachedBrokerResolution()
     monkeypatch.setattr(runner_module, "_coerce_broker_adapter_resolver_obj", reached_fn)
     with pytest.raises(_ReachedBrokerResolution):
-        _run_live_operation(operation_str, state_store_obj, broker_adapter_obj, runner_kwarg_dict)
-
-
-@pytest.mark.parametrize("operation_str", ["submit", "build"])
-def test_persisted_capsule_live_without_margin_attestation_refused_before_broker_resolution(capsule_case, monkeypatch, operation_str):
-    state_store_obj, broker_adapter_obj, release_obj, vplan_obj, runner_kwarg_dict, _ = capsule_case
-    state_store_obj.upsert_release(replace(release_obj, mode_str="live", account_route_str="U_TEST", params_dict={}))
-    monkeypatch.setattr(runner_module, "_coerce_broker_adapter_resolver_obj", lambda **_: pytest.fail("Release check happened after broker resolution"))
-    with pytest.raises(ValueError, match="explicitly confirmed margin account"):
         _run_live_operation(operation_str, state_store_obj, broker_adapter_obj, runner_kwarg_dict)
 
 

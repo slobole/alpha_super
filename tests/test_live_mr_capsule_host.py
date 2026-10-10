@@ -161,15 +161,16 @@ def test_spmo_invalid_volume_cannot_silently_disable_parking(monkeypatch, volume
 @pytest.mark.parametrize("change_dict", [
     {"pod_budget_fraction_float": .03}, {"execution_policy_str": "same_day_moc"},
     {"data_profile_str": "norgate_eod_sp500_pit"}, {"params_dict": {"max_positions_int": 1}},
-    {"enabled_bool": True},
 ])
 def test_release_requires_qualified_frozen_contract(change_dict):
     with pytest.raises(ValueError, match="MR capsule"):
         validate_release_manifest(replace(_release(), **change_dict))
 
 
-def test_enabled_release_requires_explicit_margin_confirmation():
-    release_obj = replace(_release(), enabled_bool=True, account_route_str="DU12345", params_dict={"margin_account_confirmed_bool": True})
+@pytest.mark.parametrize("params_dict", [{}, {"margin_account_confirmed_bool": True}])
+def test_enabled_release_needs_no_margin_attestation(params_dict):
+    # Owner decision 2026-10-11: accounts are margin accounts; the old key is ignored.
+    release_obj = replace(_release(), enabled_bool=True, account_route_str="DU12345", params_dict=params_dict)
     validate_release_manifest(release_obj)
 
 
