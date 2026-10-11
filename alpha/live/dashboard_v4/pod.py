@@ -194,6 +194,67 @@ def build_evidence_tables_dict(source_dict, *, as_of_ts, fresh_bool):
     return result_dict
 
 
+def build_daily_completion_order_row_list(source_dict, daily_cycle_dict, *, as_of_ts, fresh_bool):
+    """Daily pods only: one Orders row per same-day exit completion (one MKT sell per asset).
+
+    A completion is matched to its broker order, ACK and fills by its exact
+    request key and broker order ID, never by symbol. The send result is saved
+    right after the send, so a claim without a broker record is not confirmed
+    (it may or may not be at the broker; it is never resent). A failed send says so.
+    """
+    from alpha.live.dashboard_v4.evidence import DAILY_COMPLETION_KEY_MARKER_STR
+
+    order_list, ack_list, fill_list = (source_dict.get(key_str) or [] for key_str in ("order_list", "ack_list", "fill_list"))
+    proof_order_map = {item_dict["broker_order_id_str"]: item_dict
+        for item_dict in (source_dict.get("cycle_evidence_dict") or {}).get("order_list") or [] if item_dict.get("completion_bool")}
+    claim_map = {item_dict.get("asset_str"): item_dict for item_dict in (daily_cycle_dict.get("completion_request_list") or []
+        if daily_cycle_dict.get("status_str") == "ok" else []) if item_dict.get("asset_str")}
+    recorded_map = {}
+    for item_dict in order_list:
+        key_str = str(item_dict.get("order_request_key_str") or "")
+        if DAILY_COMPLETION_KEY_MARKER_STR in key_str and key_str.endswith(DAILY_COMPLETION_KEY_MARKER_STR + str(item_dict.get("asset_str"))):
+            recorded_map.setdefault(item_dict.get("asset_str"), []).append(item_dict)
+    row_list = []
+    for asset_str in sorted(set(claim_map) | set(recorded_map), key=str):
+        claim_dict, recorded_list = claim_map.get(asset_str) or {}, recorded_map.get(asset_str) or []
+        order_dict = recorded_list[0] if len(recorded_list) == 1 else {}
+        amount_float = _number_float(order_dict.get("amount_float"))
+        if amount_float is None:
+            amount_float = _number_float(claim_dict.get("amount_float"))
+        order_str = ("SELL " + _number_str(abs(amount_float)) if amount_float is not None and amount_float < 0 else "SELL") + " · same-day MKT"
+        ack_label_str, ack_dict, order_id_str = "Not confirmed", {}, ""
+        if claim_dict.get("send_failed_bool"):
+            ack_label_str = "Send failed"
+        elif len(recorded_list) > 1:
+            ack_label_str = "Unknown"
+        elif order_dict:
+            ack_evidence_dict = _ack_dict({"order_request_key_str": order_dict.get("order_request_key_str"), "asset_str": asset_str,
+                "broker_order_type_str": "MKT"}, order_list, ack_list, as_of_ts=as_of_ts)
+            ack_label_str, ack_dict, order_id_str = (ack_evidence_dict["label_str"], ack_evidence_dict["ack_dict"],
+                ack_evidence_dict["order_id_str"])
+        response_ts = parse_timestamp_ts(ack_dict.get("response_timestamp_str"))
+        submitted_ts = parse_timestamp_ts(order_dict.get("submitted_timestamp_str"))
+        ack_time_str = _time_str(response_ts.isoformat(), as_of_ts) if (ack_label_str == "Acked" and response_ts is not None
+            and submitted_ts is not None and response_ts > submitted_ts) else "—"
+        filled_float = (proof_order_map.get(order_id_str) or {}).get("filled_share_float")
+        matched_fills = [item_dict for item_dict in fill_list if order_id_str and str(item_dict.get("broker_order_id_str")) == order_id_str]
+        price_float = None
+        if filled_float and matched_fills:
+            quantity_list = [_number_float(item_dict.get("fill_amount_float")) for item_dict in matched_fills]
+            price_list = [_number_float(item_dict.get("fill_price_float")) for item_dict in matched_fills]
+            if all(value_float is not None for value_float in quantity_list + price_list):
+                # Display-only VWAP = sum(abs(fill shares) * fill price) / sum(abs(fill shares)).
+                gross_float = sum(abs(value_float) for value_float in quantity_list)
+                if gross_float:
+                    price_float = sum(abs(quantity_float) * fill_price_float for quantity_float, fill_price_float in zip(quantity_list, price_list)) / gross_float
+        shown_ack_str = ack_label_str if fresh_bool or ack_label_str in {"Not confirmed", "Send failed"} else "Unknown"
+        row_list.append(_row_dict([_text_str(asset_str), order_str, shown_ack_str, _text_str(ack_dict.get("ack_source_str")), ack_time_str,
+            _number_str(abs(filled_float)) if filled_float is not None else "—", _number_str(price_float, price_bool=True),
+            _text_str(order_id_str) if order_id_str else "—"],
+            state_str="fail" if fresh_bool and ack_label_str in {"Send failed", "No ack"} else ""))
+    return row_list
+
+
 def build_daily_exceptions_table_dict(daily_cycle_dict):
     """Daily pods only: one row per saved close-of-day exception (what is missing to reach the plan)."""
     from alpha.live.dashboard_v4.daily_cycle import EXCEPTION_REASON_LABEL_DICT
@@ -259,6 +320,16 @@ def build_pod_page_dict(overview_dict, source_dict, finance_dict, *, pod_id_str,
                 step_list[3].update(actual_time_str=_time_str(max(ack_time_list).isoformat(), as_of_ts), delta_str="", time_kind_str="ACK")
     tables_dict = build_evidence_tables_dict(source_dict, as_of_ts=as_of_ts, fresh_bool=fresh_bool)
     if "daily_cycle_dict" in row_dict:
+        completion_row_list = build_daily_completion_order_row_list(source_dict, row_dict["daily_cycle_dict"],
+            as_of_ts=as_of_ts, fresh_bool=fresh_bool)
+        if completion_row_list:
+            orders_dict = tables_dict["orders"]
+            orders_dict["row_list"] = orders_dict["row_list"] + completion_row_list
+            unconfirmed_bool = any(row_dict["cell_list"][2] == "Not confirmed" for row_dict in completion_row_list)
+            orders_dict["note_str"] = " ".join(part_str for part_str in (orders_dict["note_str"],
+                "Same-day exit completions (MKT) follow the opening orders.",
+                "Not confirmed: claimed, but no broker record was saved. Check the broker; it is never resent."
+                if unconfirmed_bool else "") if part_str)
         tables_dict["exceptions"] = build_daily_exceptions_table_dict(row_dict["daily_cycle_dict"])
         if tables_dict["exceptions"]["row_list"]:
             # A daily close is judged from holdings: its evidence is the exceptions list.

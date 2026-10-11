@@ -42,9 +42,10 @@ reasons were removed with the funding checks, owner decision 2026-10-11.)
 1. `daily_data.py` reader + `daily_cycle.py` projection; cycle/overview/pod/next_commands wired behind the gate;
    `daily_demo.py` seeding real writers (paper, `demo_daily_*`).
 2. Dropped (one releases folder): daily LIVE pods already appear beside NDX/TAA, money included through the
-   existing single-root workspace and IBKR sync. Still open: wire `daily_demo.py` into the demo app (`--demo-daily`).
+   existing single-root workspace and IBKR sync. Done 2026-10-11: `--demo-daily` shows the daily demo pods.
 3. Done 2026-10-11: Exceptions tab on the Pod page (per-symbol close-of-day exceptions, same-day MKT completions
-   noted). Still open: show completion orders as rows in the Orders tab (`:daily-completion:` keys).
+   noted), and completion orders as rows in the Orders tab (`:daily-completion:` keys), kept out of the opening
+   fill proof.
 4. Next-trade forecast after an exceptions day (`next_operation.py`, `dashboard.py:1433` status tuple).
 5. System page: daily watchdog report, receipt, `.daily.sqlite3` alert keys, pod outboxes.
 6. Activity labels for daily events; pending reconciles quiet; mode filter.

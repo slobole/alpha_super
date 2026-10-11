@@ -16,6 +16,10 @@ from alpha.live.ops_report import parse_timestamp_ts
 
 
 QUANTITY_TOLERANCE_FLOAT = 1e-9  # Same share tolerance as the execution engine.
+# Daily pods (CORE5, MR capsule): a same-day exit completion is one claimed MKT
+# sell per decision and asset, keyed "<submission key>:daily-completion:<asset>"
+# (alpha.live.daily_reconcile). Monthly plans never carry this marker.
+DAILY_COMPLETION_KEY_MARKER_STR = ":daily-completion:"
 
 
 class _EvidenceError(ValueError):
@@ -45,6 +49,8 @@ def load_cycle_evidence_dict(target_obj, pod_row_dict: dict[str, Any], *, as_of_
     Completion requires abs(F_i - requested_i) <= 1e-9 for EVERY request,
     with each execution on the requested side and one unambiguous order ID.
     A reconciled position may pass a different tolerance; it is not fill proof.
+    A daily same-day completion order is outside the opening plan: it is checked
+    on its own and never counts toward the opening batch's proof.
     """
     result_dict: dict[str, Any] = {
         "state_str": "unknown", "reason_str": "Fill evidence unavailable",
@@ -134,7 +140,11 @@ def load_cycle_evidence_dict(target_obj, pod_row_dict: dict[str, Any], *, as_of_
         request_map_dict = {request_obj.order_request_key_str: request_obj for request_obj in request_list}
         order_map_dict: dict[str, dict[str, Any]] = {}
         request_key_set: set[str] = set()
+        opening_row_list, completion_row_list = [], []
         for order_row_obj in order_row_list:
+            (completion_row_list if DAILY_COMPLETION_KEY_MARKER_STR in str(order_row_obj["order_request_key_str"] or "")
+                else opening_row_list).append(order_row_obj)
+        for order_row_obj in opening_row_list:
             order_dict = dict(order_row_obj)
             order_id_str = str(order_dict["broker_order_id_str"] or "")
             request_key_str = str(order_dict["order_request_key_str"] or "")
@@ -173,6 +183,23 @@ def load_cycle_evidence_dict(target_obj, pod_row_dict: dict[str, Any], *, as_of_
             request_key_set.add(request_key_str)
         if request_key_set != set(request_map_dict):
             raise _EvidenceError("A planned order has no matching saved broker order.")
+        submission_key_str = str(plan_dict["submission_key_str"] or f"vplan:{decision_id_int}")
+        for order_row_obj in completion_row_list:
+            order_dict = dict(order_row_obj)
+            order_id_str = str(order_dict["broker_order_id_str"] or "")
+            amount_float = _quantity_float(order_dict["amount_float"])
+            reported_float = _quantity_float(order_dict["filled_amount_float"])
+            if (not order_id_str or order_id_str in order_map_dict
+                    or order_dict["order_request_key_str"] != f"{submission_key_str}{DAILY_COMPLETION_KEY_MARKER_STR}{order_dict['asset_str']}"
+                    or order_dict["submission_key_str"] != submission_key_str
+                    or order_dict["decision_plan_id_int"] != decision_id_int or order_dict["account_route_str"] != release_obj.account_route_str
+                    or order_dict["broker_order_type_str"] != "MKT" or order_dict["unit_str"] != "shares"
+                    or amount_float >= 0 or reported_float < 0 or reported_float > abs(amount_float) + QUANTITY_TOLERANCE_FLOAT):
+                raise _EvidenceError("A saved same-day completion order is not a valid exit sale.")
+            order_dict["submitted_ts"] = _timestamp_ts(order_dict["submitted_timestamp_str"], as_of_ts=as_of_ts)
+            order_dict.update(requested_share_float=amount_float, sparse_terminal_bool=False,
+                filled_share_float=0.0, fill_timestamp_list=[], completion_bool=True)
+            order_map_dict[order_id_str] = order_dict
         if any(order_dict["sparse_terminal_bool"] for order_dict in order_map_dict.values()):
             # Terminal broker refreshes can save zero/zero/zero quantities.
             # Only exact ACK identities plus complete, identifiable executions
@@ -181,6 +208,8 @@ def load_cycle_evidence_dict(target_obj, pod_row_dict: dict[str, Any], *, as_of_
             ack_request_set: set[str] = set()
             ack_order_set: set[str] = set()
             for ack_row_obj in ack_row_list:
+                if DAILY_COMPLETION_KEY_MARKER_STR in str(ack_row_obj["order_request_key_str"] or ""):
+                    continue  # Not part of the opening batch's proof.
                 order_id_str = str(ack_row_obj["broker_order_id_str"] or "")
                 request_key_str = ack_row_obj["order_request_key_str"]
                 order_dict = order_map_dict.get(order_id_str)
@@ -234,9 +263,13 @@ def load_cycle_evidence_dict(target_obj, pod_row_dict: dict[str, Any], *, as_of_
             complete_bool = abs(filled_float - requested_float) <= QUANTITY_TOLERANCE_FLOAT
             if order_dict["sparse_terminal_bool"] and not complete_bool:
                 raise _EvidenceError("Saved executions do not fully cover the broker's empty order summary.")
-            order_list.append({"broker_order_id_str": order_id_str, "asset_str": order_dict["asset_str"], "requested_share_float": requested_float, "filled_share_float": filled_float, "complete_bool": complete_bool})
-            fill_timestamp_list.extend(order_dict["fill_timestamp_list"])
-        filled_count_int = sum(order_dict["complete_bool"] for order_dict in order_list)
+            proof_dict = {"broker_order_id_str": order_id_str, "asset_str": order_dict["asset_str"], "requested_share_float": requested_float, "filled_share_float": filled_float, "complete_bool": complete_bool}
+            if order_dict.get("completion_bool"):
+                proof_dict["completion_bool"] = True
+            else:
+                fill_timestamp_list.extend(order_dict["fill_timestamp_list"])
+            order_list.append(proof_dict)
+        filled_count_int = sum(order_dict["complete_bool"] for order_dict in order_list if not order_dict.get("completion_bool"))
         complete_bool = filled_count_int == len(request_list)
         result_dict.update(
             state_str="complete" if complete_bool else "partial", reason_str="All orders filled" if complete_bool else "Orders not fully filled",

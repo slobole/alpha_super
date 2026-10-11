@@ -20,6 +20,17 @@ data. Each demo provider builds isolated temporary SQLite databases once through
 The server advances a simulated clock from its fixed scenario time. It does not
 load `config.env`, a real account database or a broker session.
 
+Add `--demo-daily` (with `--demo`) to show five synthetic daily pods (CORE5, MR
+capsule) beside the monthly demo pods: trading with a same-day completion, a
+last close with exceptions, not sent, dispatch unconfirmed, and open after
+close. Their rows come from the production summary row builder over owned
+temporary databases; they have no synthetic account report, so the money tiles
+keep the monthly scope. Without the flag the demo pages are unchanged.
+
+```powershell
+.venv\Scripts\python.exe -B -m alpha.live.dashboard_v4 --demo --demo-daily --port 8087
+```
+
 To use the existing local saved-data configuration:
 
 ```powershell
@@ -195,7 +206,7 @@ availability check, or permission to trade. It changes no scheduler or order gat
   status with `ACK missing`. A daily row without readable facts is Unknown, never
   the monthly projection. Monthly pods render byte-identically
   (`tests/test_dashboard_v4_monthly_golden.py`). `daily_demo.py` seeds owned
-  synthetic daily pods through the real writers; it is not wired into the app.
+  synthetic daily pods through the real writers; `--demo-daily` shows them.
 - Production has no executable action or export routes. Non-read methods return
   403 before acquisition; only the explicitly enabled synthetic demo allows
   its fixed preview, confirmation and cancellation requests.
@@ -243,6 +254,13 @@ shows its weight). Same-day MKT exit completions are noted above the table. When
 exceptions exist, the Reconcile step links there and the tab opens by default
 unless a step failed. Monthly pods never show the tab; `?tab=exceptions` falls
 back to their default tab.
+On a daily Pod, Orders also lists each same-day exit completion (one claimed MKT
+sell per asset) after the opening orders, matched to its broker order, ACK and
+fills by its exact `:daily-completion:` request key and broker order ID. The send
+result is saved right after the send, so a claim without a broker record is `Not
+confirmed` (check the broker; it is never resent); a failed send is `Send failed`.
+Fill proof keeps completions out of the opening batch: each is checked on its own
+as a sell of the right key, account, decision and MKT type.
 The Pod heading always shows the current Pod state, including non-cycle gates
 and database failures. The selected cycle has a separate badge and verdict.
 

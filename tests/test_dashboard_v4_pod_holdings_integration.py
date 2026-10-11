@@ -103,7 +103,7 @@ def test_create_demo_app_enables_full_visual_preview(monkeypatch):
     provider_list = []
 
     def capture_fixture(**option_dict):
-        assert option_dict == {"include_holdings_bool": True}
+        assert option_dict == {"include_holdings_bool": True, "include_daily_bool": False}
         result_tuple = original_fn(**option_dict)
         provider_list.append(result_tuple[2])
         return result_tuple

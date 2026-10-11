@@ -62,6 +62,15 @@ def _float_or_none(value_obj):
     return float(value_obj) if math.isfinite(value_obj) else None
 
 
+def _completion_amount_float(request_json_str):
+    """Only the claimed sale's share count (negative); nothing else of the request is kept."""
+    try:
+        amount_float = _float_or_none(json.loads(request_json_str).get("amount_float"))
+    except (TypeError, ValueError, AttributeError):
+        return None
+    return amount_float if amount_float is not None and amount_float < 0 else None
+
+
 def _timestamp_str(value_obj):
     timestamp_ts = parse_timestamp_ts(value_obj) if isinstance(value_obj, str) else None
     return timestamp_ts.isoformat() if timestamp_ts is not None else None
@@ -280,8 +289,9 @@ def _read_daily_cycle_dict(connection_obj, release_obj, decision_plan_id_int, as
     if "daily_completion_request" in table_set:
         result_dict["completion_request_list"] = [{"asset_str": _asset_str(row_obj["asset_str"]),
                 "vplan_id_int": row_obj["vplan_id_int"], "claimed_timestamp_str": _timestamp_str(row_obj["claimed_timestamp_str"]),
+                "amount_float": _completion_amount_float(row_obj["request_json_str"]),
                 "send_failed_bool": bool(row_obj["send_failed_int"])}
-            for row_obj in connection_obj.execute("""SELECT asset_str,vplan_id_int,claimed_timestamp_str,
+            for row_obj in connection_obj.execute("""SELECT asset_str,vplan_id_int,claimed_timestamp_str,request_json_str,
                 send_error_str IS NOT NULL AS send_failed_int FROM daily_completion_request
                 WHERE decision_plan_id_int=? AND pod_id_str=? AND account_route_str=? ORDER BY asset_str LIMIT ?""",
                 (selected_id_int, release_obj.pod_id_str, release_obj.account_route_str, ROW_LIMIT_INT))]

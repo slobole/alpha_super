@@ -12,7 +12,7 @@ from alpha.live.dashboard_v4.positions_data import load_positions_dict
 DEMO_NOW_TS = datetime(2026, 9, 8, 13, 41, 7, tzinfo=UTC)
 
 
-def build_demo_workspace_tuple(*, include_holdings_bool=False):
+def build_demo_workspace_tuple(*, include_holdings_bool=False, include_daily_bool=False):
     registry_dict, snapshot_dict = build_demo_fixture_tuple()
     client_dict = deepcopy(next(item_dict for item_dict in registry_dict["clients"]
                                if item_dict["client_id"] == "demo-client"))
@@ -88,6 +88,12 @@ def build_demo_workspace_tuple(*, include_holdings_bool=False):
             "next_phase_str": "post_execution_reconcile" if pod_id_str == "demo_1_1" else "eod_snapshot",
             "reason_code_str": "waiting_for_post_execution_reconcile" if pod_id_str == "demo_1_1" else "waiting_for_eod_snapshot"}
     provider_obj.get_scheduler_status_dict = demo_scheduler_status_dict
+    operations_account_list = client_dict["accounts"]
+    if include_daily_bool:
+        # --demo-daily only: the default demo pages stay byte-identical.
+        from alpha.live.dashboard_v4.daily_demo import attach_demo_daily
+        operations_account_list = list(client_dict["accounts"])
+        attach_demo_daily(provider_obj, operations_account_list, as_of_ts=DEMO_NOW_TS)
     from alpha.live.dashboard_v4.activity_demo import attach_demo_activity
     attach_demo_activity(provider_obj, as_of_ts=DEMO_NOW_TS)
     from alpha.live.dashboard_v4.system_demo import attach_demo_system
@@ -97,7 +103,7 @@ def build_demo_workspace_tuple(*, include_holdings_bool=False):
     summary_dict = provider_obj.get_summary_dict()
     summary_dict["as_of_timestamp_str"] = DEMO_NOW_TS.isoformat()
     workspace_dict = {
-        "client_dict": client_dict, "operations_account_list": client_dict["accounts"],
+        "client_dict": client_dict, "operations_account_list": operations_account_list,
         "valuation_account_list": client_dict["accounts"], "summary_dict": summary_dict,
         "financial_scope_complete_bool": True, "financial_error_str": "", "operations_error_str": "",
     }
@@ -107,10 +113,11 @@ def build_demo_workspace_tuple(*, include_holdings_bool=False):
     return workspace_dict, snapshot_dict[client_dict["client_id"]], provider_obj
 
 
-def create_demo_app(*, demo_tools_bool=False, console_appender_bool=False):
+def create_demo_app(*, demo_tools_bool=False, console_appender_bool=False, demo_daily_bool=False):
     from alpha.live.dashboard_v4.app import create_app
 
-    workspace_dict, snapshot_obj, provider_obj = build_demo_workspace_tuple(include_holdings_bool=True)
+    workspace_dict, snapshot_obj, provider_obj = build_demo_workspace_tuple(
+        include_holdings_bool=True, include_daily_bool=demo_daily_bool)
     start_float = monotonic()
 
     def demo_now_ts():

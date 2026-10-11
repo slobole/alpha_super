@@ -42,6 +42,12 @@
       "runtimeExecutable": "uv",
       "runtimeArgs": ["run", "python", "-B", "-m", "alpha.live.dashboard_v4", "--demo", "--demo-tools", "--port", "8086"],
       "port": 8086
+    },
+    {
+      "name": "v4-demo-daily",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "python", "-B", "-m", "alpha.live.dashboard_v4", "--demo", "--demo-daily", "--port", "8087"],
+      "port": 8087
     }
   ]
 }

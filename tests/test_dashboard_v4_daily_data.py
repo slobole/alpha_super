@@ -104,7 +104,7 @@ def test_exact_keys_counts_and_no_free_text(daily_case):
         "dispatch_deadline_timestamp_str": _utc_str(OPEN_TS - timedelta(minutes=2)),
         "attempted_count_int": len(request_list), "never_dispatched_count_int": 0}
     assert daily_dict["completion_request_list"] == [{"asset_str": "MSFT", "vplan_id_int": plan_obj.vplan_id_int,
-        "claimed_timestamp_str": _utc_str(INTRADAY_TS), "send_failed_bool": True}]
+        "claimed_timestamp_str": _utc_str(INTRADAY_TS), "amount_float": completion_obj.amount_float, "send_failed_bool": True}]
     alert_dict, = daily_dict["pod_alert_list"]
     assert alert_dict == {"alert_kind_str": "cycle_overdue", "decision_plan_id_int": decision_obj.decision_plan_id_int,
         "created_timestamp_str": _utc_str(CLOSE_TS + timedelta(hours=1)), "delivered_bool": False, "session_date_str": None,

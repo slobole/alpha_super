@@ -3,12 +3,15 @@
 Each demo pod is a LIVE-mode release with a DEMO account, a ``demo_daily_*`` id and
 the real CORE5/capsule import string (as a string: no strategy is loaded). The
 database is written once here, through the production state writers, and then
-read through the production daily reader in SQLite mode=ro. Not wired into the
-app yet; it never touches a real state DB, a broker or the network.
+read through the production daily reader in SQLite mode=ro. ``--demo-daily``
+shows these pods beside the monthly demo pods (``attach_demo_daily``); it never
+touches a real state DB, a broker or the network.
 """
 
 from contextlib import closing
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta
+import gc
 from pathlib import Path
 import sqlite3
 from tempfile import TemporaryDirectory, gettempdir
@@ -93,6 +96,9 @@ class DemoDailyStore:
         if (self.directory_path_obj.parent != Path(gettempdir()).resolve()
                 or not self.directory_path_obj.name.startswith(DEMO_DIRECTORY_PREFIX_STR)):
             raise ValueError("Refusing cleanup outside the owned daily demo directory")
+        # The V3 summary row builder can leave a connection in a reference
+        # cycle; Windows cannot delete an open SQLite file.
+        gc.collect()
         self._temp_obj.cleanup()
 
     def get_target_for_pod(self, pod_id_str):
@@ -255,3 +261,104 @@ class DemoDailyStore:
             connection_obj.execute("""UPDATE vplan_reconciliation_snapshot SET created_timestamp_str=?
                 WHERE julianday(created_timestamp_str)>julianday(?)""",
                 ((PREVIOUS_CLOSE_TS + timedelta(minutes=1, seconds=30)).isoformat(), as_of_str))
+
+
+DEMO_DAILY_NAME_DICT = {
+    "demo_daily_trading": "CORE5 · Trading", "demo_daily_exceptions": "Capsule · Last close exceptions",
+    "demo_daily_not_sent": "CORE5 · Not sent", "demo_daily_unconfirmed": "Capsule · Unconfirmed",
+    "demo_daily_overdue": "CORE5 · Open after close",
+}
+
+
+def attach_demo_daily(provider_obj, operations_account_list, *, as_of_ts=DEMO_NOW_TS):
+    """``--demo-daily``: the five synthetic daily pods beside the monthly demo pods.
+
+    Rows come from the production summary row builder over the owned daily
+    databases. The demo has no Norgate, so data and EOD fixtures are copied from
+    a monthly demo row. The pods join the operations list only: they have no
+    synthetic account report, so the client's money scope stays monthly. Readers
+    keep their production paths; a pod not owned here falls through to the
+    monthly demo store. Returns the daily store.
+    """
+    from alpha.live.dashboard import build_pod_row_dict
+    from alpha.live.dashboard_v4.evidence import load_cycle_evidence_dict
+    from alpha.live.dashboard_v4.pod_data import load_pod_cycles_dict
+    from alpha.live.dashboard_v4.positions_data import load_positions_dict
+
+    daily_store_obj = DemoDailyStore(as_of_ts=as_of_ts)
+    template_dict = provider_obj.row_list[-1]
+    try:
+        for pod_id_str, *_scenario_tuple in DEMO_DAILY_POD_TUPLE:
+            target_obj = daily_store_obj.get_target_for_pod(pod_id_str)
+            row_dict = build_pod_row_dict(target_obj, as_of_ts, str(daily_store_obj.directory_path_obj), None)
+            for key_str in ("norgate_snapshot_status_dict", "eod_snapshot_dict", "data_freshness_dict"):
+                row_dict[key_str] = deepcopy(template_dict[key_str])
+            row_dict.update(strategy_name_str=DEMO_DAILY_NAME_DICT[pod_id_str], health_str="green",
+                required_action_dict={"severity_str": "green", "label_str": "No action", "detail_str": ""},
+                debug_summary_dict={"severity_str": "green"})
+            provider_obj.row_list.append(row_dict)
+            operations_account_list.append({"account_route": target_obj.release_obj.account_route_str,
+                "pod_id": pod_id_str, "display_name": DEMO_DAILY_NAME_DICT[pod_id_str],
+                "effective_from": "2026-06-01", "effective_to": None})
+    except Exception:
+        daily_store_obj.close()
+        raise
+
+    monthly_target_fn, monthly_target_list_fn = provider_obj.get_target_for_pod, provider_obj.get_target_list
+    monthly_cycles_fn, monthly_evidence_fn = provider_obj.get_pod_cycles_dict, provider_obj.get_cycle_evidence_dict
+    monthly_positions_fn, monthly_scheduler_fn = provider_obj.get_positions_dict, provider_obj.get_scheduler_status_dict
+    monthly_close_fn = provider_obj.close
+
+    def get_target_for_pod(pod_id_str):
+        return daily_store_obj.get_target_for_pod(pod_id_str) or monthly_target_fn(pod_id_str)
+
+    def get_target_list():
+        return monthly_target_list_fn() + daily_store_obj.get_target_list()
+
+    def get_pod_cycles_dict(pod_id_str, *, as_of_ts, decision_plan_id_int=None, vplan_id_int=None):
+        target_obj = daily_store_obj.get_target_for_pod(pod_id_str)
+        if target_obj is None:
+            return monthly_cycles_fn(pod_id_str, as_of_ts=as_of_ts,
+                decision_plan_id_int=decision_plan_id_int, vplan_id_int=vplan_id_int)
+        result_dict = load_pod_cycles_dict(target_obj, as_of_ts=as_of_ts,
+            decision_plan_id_int=decision_plan_id_int, vplan_id_int=vplan_id_int)
+        if result_dict["status_str"] == "ok":
+            result_dict["cycle_evidence_dict"] = load_cycle_evidence_dict(
+                target_obj, result_dict["pod_row_dict"], as_of_ts=as_of_ts)
+        return result_dict
+
+    def get_cycle_evidence_dict(pod_row_dict, *, as_of_ts):
+        target_obj = daily_store_obj.get_target_for_pod(pod_row_dict.get("pod_id_str"))
+        if target_obj is None:
+            return monthly_evidence_fn(pod_row_dict, as_of_ts=as_of_ts)
+        return load_cycle_evidence_dict(target_obj, pod_row_dict, as_of_ts=as_of_ts)
+
+    def get_positions_dict(pod_id_str, *, as_of_ts):
+        target_obj = daily_store_obj.get_target_for_pod(pod_id_str)
+        if target_obj is None:
+            return monthly_positions_fn(pod_id_str, as_of_ts=as_of_ts)
+        return load_positions_dict(target_obj, as_of_ts=as_of_ts)
+
+    def get_scheduler_status_dict(pod_id_str, *, as_of_ts):
+        if daily_store_obj.get_target_for_pod(pod_id_str) is None:
+            return monthly_scheduler_fn(pod_id_str, as_of_ts=as_of_ts)
+        # Synthetic: each daily serve is alive and polls its open cycle.
+        return {"state_str": "sleeping", "alive_bool": True, "last_seen_timestamp_str": as_of_ts.isoformat(),
+            "promised_wake_timestamp_str": (as_of_ts + timedelta(seconds=30)).isoformat(),
+            "checked_timestamp_str": as_of_ts.isoformat(), "next_phase_str": "post_execution_reconcile",
+            "reason_code_str": "waiting_for_post_execution_reconcile"}
+
+    def close():
+        try:
+            daily_store_obj.close()
+        finally:
+            monthly_close_fn()
+
+    provider_obj.daily_store_obj = daily_store_obj
+    provider_obj.get_daily_cycle_dict = daily_store_obj.get_daily_cycle_dict
+    for name_str, function_obj in (("get_target_for_pod", get_target_for_pod), ("get_target_list", get_target_list),
+            ("get_pod_cycles_dict", get_pod_cycles_dict), ("get_cycle_evidence_dict", get_cycle_evidence_dict),
+            ("get_positions_dict", get_positions_dict), ("get_scheduler_status_dict", get_scheduler_status_dict),
+            ("close", close)):
+        setattr(provider_obj, name_str, function_obj)
+    return daily_store_obj
