@@ -30,7 +30,7 @@ schedule:
 
 execution:
   pod_budget_fraction_float: 1.0
-  auto_submit_enabled_bool: false
+  auto_submit_enabled_bool: true # Daily pods send every session; manual submission would skip days.
 
 bootstrap:
   initial_cash_float: 100000.0

@@ -56,7 +56,8 @@ def test_capsule_examples_have_distinct_ids_and_remain_disabled():
     client_id_set = {release_obj.broker_client_id_int for release_obj in release_list}
     assert len(client_id_set) == len(release_list) == 6
     assert not client_id_set.intersection({31, 32})
-    assert all(not release_obj.enabled_bool and not release_obj.auto_submit_enabled_bool for release_obj in release_list)
+    # Disabled, but auto-submit once enabled: daily pods send every session.
+    assert all(not release_obj.enabled_bool and release_obj.auto_submit_enabled_bool for release_obj in release_list)
     assert all(release_obj.mode_str == "paper" and release_obj.pod_budget_fraction_float == 1.0 for release_obj in release_list)
 
 

@@ -64,8 +64,10 @@ alpha/live/releases/<client_id>/*.yaml
 ## Wired Templates
 
 CORE5 uses a disabled `live` template with a dedicated USD margin account,
-full account budget `1.0`, and disabled submission. Each submission checks
-current margin and incremental DBC short availability. For local forward tests,
+full account budget `1.0`, and `auto_submit_enabled_bool: true`: like every
+MR capsule template, a daily pod must send each session once it is enabled
+(owner decision 2026-10-11). Each submission checks current margin and
+incremental DBC short availability. For local forward tests,
 use `incubation` and a `SIM_` route; `paper` requires its own paper account.
 See [CORE5 wiring and deployment prerequisites](../CORE5_WIRING_20261005.md).
 

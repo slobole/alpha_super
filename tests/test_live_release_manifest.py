@@ -192,7 +192,11 @@ def test_release_template_parses_and_starts_disabled(template_path_obj: Path):
     release_obj = parse_release_manifest(str(template_path_obj.resolve()))
 
     assert release_obj.enabled_bool is False
-    assert release_obj.auto_submit_enabled_bool is False
+    # Daily pods (CORE5, MR capsule) send every session: their templates auto-submit
+    # (owner decision 2026-10-11). Every other template stays manual-first.
+    daily_template_bool = (release_obj.strategy_import_str == "strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5"
+        or release_obj.strategy_import_str.startswith("strategies.mr_capsule."))
+    assert release_obj.auto_submit_enabled_bool is daily_template_bool
     assert release_obj.user_id_str == "your_user"
     assert release_obj.release_id_str.startswith("your_user.")
     assert release_obj.broker_host_str == "127.0.0.1"

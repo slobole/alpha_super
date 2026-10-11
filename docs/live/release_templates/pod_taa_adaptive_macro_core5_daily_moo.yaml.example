@@ -24,6 +24,6 @@ schedule:
   execution_policy_str: next_open_moo
 execution:
   pod_budget_fraction_float: 1.0
-  auto_submit_enabled_bool: false
+  auto_submit_enabled_bool: true # Daily pods send every session; manual submission would skip days.
 risk:
   risk_profile_str: core5_qualified_margin
