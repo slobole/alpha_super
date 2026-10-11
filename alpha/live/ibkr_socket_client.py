@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from math import isfinite
@@ -503,15 +504,32 @@ class IBKRSocketClient:
             portfolio_valuation_dict=portfolio_valuation_dict,
         )
 
-    def get_capsule_account_snapshot(self, account_route_str: str) -> BrokerSnapshot:
-        """Observe all clients' account orders without binding or changing them."""
-        return self.get_account_snapshot(account_route_str, include_all_client_orders_bool=True)
+    def get_capsule_account_snapshot(
+        self, account_route_str: str, *, include_portfolio_valuation_bool: bool = False,
+    ) -> BrokerSnapshot:
+        """Use completed account reads for capsule EOD, sizing and pre-submit."""
+        from alpha.live.daily_broker import DailySnapshotChangedError, _refresh_snapshot
+
+        with self.daily_connection() as ib_obj:
+            try:
+                daily_snapshot_obj, _ = _refresh_snapshot(ib_obj, self, account_route_str)
+            except DailySnapshotChangedError as exception_obj:
+                # No order was sent: retry the changing observation before cutoff.
+                raise ConnectionError(str(exception_obj)) from exception_obj
+            snapshot_obj = daily_snapshot_obj.broker_snapshot_obj
+            if include_portfolio_valuation_bool:
+                # Display marks cannot replace the completed cash/holdings read.
+                valuation_dict = self._capture_portfolio_valuation_dict(
+                    ib_obj, account_route_str, snapshot_obj.position_amount_map, force_refresh_bool=True)
+                snapshot_obj = replace(snapshot_obj, portfolio_valuation_dict=valuation_dict)
+        return snapshot_obj
 
     def _capture_portfolio_valuation_dict(
         self,
         ib_obj: IB,
         account_route_str: str,
         position_amount_map: dict[str, float],
+        *, force_refresh_bool: bool = False,
     ) -> dict[str, object]:
         """Optional EOD display values; never replace the trading snapshot.
 
@@ -534,12 +552,12 @@ class IBKRSocketClient:
             # accountDownloadEnd arrives. Reading the key never changes it.
             if "accountValues" in ib_obj.wrapper._futures:
                 return valuation_dict
-            if account_list == [account_route_str]:
+            if account_list == [account_route_str] and not force_refresh_bool:
                 portfolio_item_list = ib_obj.portfolio(account=account_route_str)
                 account_value_list = ib_obj.accountValues(account=account_route_str)
             else:
-                # Multi-account startup only uses accountUpdatesMulti (no
-                # portfolio marks). This is the sole classic account download
+                # Multi-account startup and the capsule's read-only connection
+                # have no portfolio marks. This is the sole classic account download
                 # on this dedicated connection. Collect fresh target rows;
                 # the SDK's unscoped completion alone is not completeness proof.
                 portfolio_item_list: list[object] = []

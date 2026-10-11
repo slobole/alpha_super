@@ -132,8 +132,8 @@ def test_capsule_daily_reconcile_runs_even_when_fill_reporting_is_unavailable(ca
 def test_gateway_uses_the_capsule_opt_in_methods():
     called_method_list = []
     class FakeSocket:
-        def get_capsule_account_snapshot(self, account_route_str):
-            called_method_list.append(("snapshot", account_route_str))
+        def get_capsule_account_snapshot(self, account_route_str, *, include_portfolio_valuation_bool=False):
+            called_method_list.append(("snapshot", account_route_str, include_portfolio_valuation_bool))
             return "account snapshot"
         def get_capsule_order_state_snapshot(self, account_route_str, since_timestamp_ts, **kwarg_dict):
             called_method_list.append(("orders", account_route_str, since_timestamp_ts, kwarg_dict))

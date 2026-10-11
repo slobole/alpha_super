@@ -55,8 +55,8 @@ class FakeAdapter:
     def get_eod_account_snapshot(self, account_route_str):
         return self._call("get_eod_account_snapshot", self._snapshot())
 
-    def get_capsule_account_snapshot(self, account_route_str):
-        return self._call("get_capsule_account_snapshot", self._snapshot())
+    def get_capsule_account_snapshot(self, account_route_str, *, include_portfolio_valuation_bool=False):
+        return self._call("get_capsule_eod_snapshot" if include_portfolio_valuation_bool else "get_capsule_account_snapshot", self._snapshot())
 
     def get_daily_execution_snapshot(self, account_route_str):
         now_ts = datetime.now(UTC)
@@ -129,7 +129,7 @@ def test_core5_daily_checks_run_the_serve_reads_only(tmp_path, capsys, monkeypat
 def test_capsule_daily_checks_use_the_capsule_reads(tmp_path, capsys, monkeypatch):
     exit_int, fake_obj, _ = _run_daily(tmp_path, CAPSULE_TEMPLATE_STR, capsys, monkeypatch)
     assert exit_int == 0
-    assert fake_obj.call_list == ["get_visible_account_route_set", "get_eod_account_snapshot",
+    assert fake_obj.call_list == ["get_visible_account_route_set", "get_capsule_eod_snapshot",
         "get_capsule_account_snapshot", "get_daily_execution_snapshot"]
 
 

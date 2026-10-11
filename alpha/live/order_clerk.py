@@ -147,7 +147,9 @@ class BrokerAdapter(ABC):
     def get_account_snapshot(self, account_route_str: str) -> BrokerSnapshot:
         raise NotImplementedError
 
-    def get_capsule_account_snapshot(self, account_route_str: str) -> BrokerSnapshot:
+    def get_capsule_account_snapshot(self, account_route_str: str, *, include_portfolio_valuation_bool: bool = False) -> BrokerSnapshot:
+        if include_portfolio_valuation_bool:
+            return self.get_eod_account_snapshot(account_route_str)
         return self.get_account_snapshot(account_route_str)
 
     def get_core5_account_snapshot(self, account_route_str: str, *, include_portfolio_valuation_bool: bool = False) -> BrokerSnapshot:
@@ -258,8 +260,9 @@ class IBKRGatewayBrokerAdapter(BrokerAdapter):
     def get_account_snapshot(self, account_route_str: str) -> BrokerSnapshot:
         return self.socket_client_obj.get_account_snapshot(account_route_str)
 
-    def get_capsule_account_snapshot(self, account_route_str: str) -> BrokerSnapshot:
-        return self.socket_client_obj.get_capsule_account_snapshot(account_route_str)
+    def get_capsule_account_snapshot(self, account_route_str: str, *, include_portfolio_valuation_bool: bool = False) -> BrokerSnapshot:
+        return self.socket_client_obj.get_capsule_account_snapshot(account_route_str,
+            include_portfolio_valuation_bool=include_portfolio_valuation_bool)
 
     def get_core5_account_snapshot(self, account_route_str: str, *, include_portfolio_valuation_bool: bool = False) -> BrokerSnapshot:
         from alpha.live.core5_broker import get_core5_account_snapshot

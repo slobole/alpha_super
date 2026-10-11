@@ -542,18 +542,6 @@ def test_capsule_zero_fill_completed_sale_is_explicitly_verified(monkeypatch):
     assert fill_list == []
 
 
-def test_capsule_account_snapshot_includes_other_client_orders_without_changing_default(monkeypatch):
-    ib_obj = _CapsuleEvidenceIB([], open_trade_list=[
-        _snapshot_trade_obj(7, order_ref_str="", status_str="Submitted"),
-        _snapshot_trade_obj(8, account_str="OTHER", status_str="Submitted")])
-    client_obj = _funding_client_obj(monkeypatch, ib_obj)
-    assert client_obj.get_account_snapshot("SIM_pod").open_order_id_list == []
-    snapshot_obj = client_obj.get_capsule_account_snapshot("SIM_pod")
-    assert snapshot_obj.open_order_id_list == ["7"]
-    assert snapshot_obj.position_amount_map == {"BRK.B": 6.0}
-    assert ib_obj.all_open_call_count_int == 1
-
-
 def test_capsule_completed_quantity_cannot_hide_simultaneous_other_client_open_order(monkeypatch):
     open_trade_obj = _snapshot_trade_obj(1, status_str="Submitted", log_bool=False)
     client_obj = _funding_client_obj(monkeypatch,

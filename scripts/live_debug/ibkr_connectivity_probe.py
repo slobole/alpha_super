@@ -364,7 +364,7 @@ def run_daily_pod_checks(release_obj: Any, broker_obj: Any) -> list[dict[str, An
         run_step("Account read (16:10 and before sending)", account_step)
     else:
         def eod_step():
-            snapshot_obj = broker_obj.get_eod_account_snapshot(account_str)
+            snapshot_obj = broker_obj.get_capsule_account_snapshot(account_str, include_portfolio_valuation_bool=True)
             return _snapshot_summary_str(snapshot_obj), snapshot_obj
         run_step("Account read at 16:10", eod_step)
 

@@ -3808,8 +3808,10 @@ def eod_snapshot(
             broker_adapter_for_release_obj.get_core5_account_snapshot(
                 release_obj.account_route_str, include_portfolio_valuation_bool=release_obj.mode_str == "live")
             if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR
-            else
-            broker_adapter_for_release_obj.get_eod_account_snapshot(release_obj.account_route_str)
+            else broker_adapter_for_release_obj.get_capsule_account_snapshot(
+                release_obj.account_route_str, include_portfolio_valuation_bool=release_obj.mode_str == "live")
+            if release_obj.strategy_import_str.startswith("strategies.mr_capsule.")
+            else broker_adapter_for_release_obj.get_eod_account_snapshot(release_obj.account_route_str)
             if release_obj.mode_str == "live"
             else broker_adapter_for_release_obj.get_account_snapshot(release_obj.account_route_str))
         requires_close_snapshot_bool = (
