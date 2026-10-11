@@ -1,3 +1,4 @@
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -8,7 +9,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from alpha.live import daily_watchdog
+from alpha.live.daily_notifications import ensure_daily_alert_schema
 from alpha.live.dashboard_v4 import system_data
+from alpha.live.mr_capsule_notifications import enqueue_daily_exception_alert, ensure_execution_alert_schema
 from alpha.live.release_manifest import parse_release_manifest
 from test_live_dashboard import _write_release_manifest
 
@@ -578,3 +582,120 @@ def test_invalid_flex_attempt_receipt_is_not_ignored(tmp_path, override_dict):
     result_dict = _load_dict(provider_obj, workspace_dict, performance_db_path_str=path_str)["flex_dict"]
     assert result_dict["state_str"] == "unknown"
     assert result_dict["now_str"] == "Saved sync receipt unavailable"
+
+
+# Daily pods (CORE5, MR capsule): the Daily alerts row.
+CORE5_IMPORT_STR = "strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5"
+
+
+def _daily_case_tuple(tmp_path, **receipt_override_dict):
+    """A LIVE CORE5 pod beside a monthly one: saved report, matching receipt, empty real outboxes."""
+    daily_obj = _target_obj(tmp_path, "core5", "U765432", strategy_import_str=CORE5_IMPORT_STR)
+    provider_obj, workspace_dict, target_list = _fixture_tuple(tmp_path, [_target_obj(tmp_path), daily_obj])
+    _save_sources(tmp_path, provider_obj, target_list)
+    _save_run(tmp_path, target_list, **receipt_override_dict)
+    Path(daily_obj.db_path_str).unlink()
+    with closing(sqlite3.connect(daily_obj.db_path_str)) as connection_obj, connection_obj:
+        ensure_daily_alert_schema(connection_obj)
+        ensure_execution_alert_schema(connection_obj)
+    return provider_obj, workspace_dict, daily_obj
+
+
+def _add_pod_alert(target_obj, key_str, *, delivered_str=None, mode_str="live", created_ts=BASE_TS - timedelta(hours=1)):
+    release_obj = target_obj.release_obj
+    with closing(sqlite3.connect(target_obj.db_path_str)) as connection_obj, connection_obj:
+        connection_obj.execute("""INSERT INTO daily_pod_alert(alert_key_str,alert_kind_str,release_id_str,pod_id_str,
+            account_route_str,mode_str,payload_json_str,created_timestamp_str,delivered_timestamp_str)
+            VALUES (?,'cycle_overdue',?,?,?,?,'{"content":"secret-alert-text"}',?,?)""", (key_str, release_obj.release_id_str,
+            release_obj.pod_id_str, release_obj.account_route_str, mode_str, created_ts.isoformat(), delivered_str))
+
+
+def _add_daily_checks(tmp_path, key_list, *, delivered_bool):
+    """The watchdog's own writer: keys mode|pod|kind|session, delivered or left for retry."""
+    alert_list = [{"mode_str": mode_str, "pod_id_str": pod_str, "account_route_str": "U765432", "kind_str": kind_str,
+        "session_str": session_str, "last_error_str": ""} for mode_str, pod_str, kind_str, session_str in key_list]
+    daily_watchdog.deliver_daily_heartbeat_alerts(alert_list, str(tmp_path / "watchdog_notification_state.daily.sqlite3"),
+        "https://discord.invalid/webhook", lambda url_str, payload_dict: delivered_bool)
+
+
+def test_daily_alerts_row_needs_a_live_daily_pod(tmp_path):
+    provider_obj, workspace_dict, target_list = _fixture_tuple(tmp_path)
+    _save_sources(tmp_path, provider_obj, target_list)
+    assert "daily_alerts_dict" not in _load_dict(provider_obj, workspace_dict)
+    paper_obj = _target_obj(tmp_path, "core5", "DU765432", mode_str="paper", strategy_import_str=CORE5_IMPORT_STR)
+    assert system_data.build_daily_alerts_dict(None, [paper_obj], None, BASE_TS) is None
+
+
+def test_daily_alerts_count_live_outbox_rows_and_recent_watchdog_checks_only(tmp_path):
+    provider_obj, workspace_dict, daily_obj = _daily_case_tuple(tmp_path)
+    _add_pod_alert(daily_obj, "cycle_overdue:1")
+    _add_pod_alert(daily_obj, "cycle_overdue:2", delivered_str=BASE_TS.isoformat())
+    _add_pod_alert(daily_obj, "cycle_overdue:3", mode_str="paper")
+    # Queued: the watchdog's next run has not had its turn yet.
+    _add_pod_alert(daily_obj, "cycle_overdue:4", created_ts=BASE_TS - timedelta(minutes=14))
+    with closing(sqlite3.connect(daily_obj.db_path_str)) as connection_obj, connection_obj:
+        enqueue_daily_exception_alert(connection_obj, decision_plan_id_int=7, pod_id_str="core5", account_route_str="U765432",
+            mode_str="live", exception_list=[{"asset_str": "DBC", "side_str": "SELL", "quantity_float": 25.0,
+            "reason_str": "actual_holding_differs_from_vplan"}], created_timestamp_ts=BASE_TS - timedelta(minutes=15))
+    _add_daily_checks(tmp_path, [("live", "core5", "decision_incomplete", "2026-09-20")], delivered_bool=True)
+    # Pending only while the session is inside the 7-day window (BASE_TS is 2026-09-21).
+    _add_daily_checks(tmp_path, [("live", "core5", "opening_not_dispatched", "2026-09-21"),
+        ("live", "core5", "decision_incomplete", "2026-09-14"), ("live", "core5", "decision_incomplete", "2026-09-13"),
+        ("paper", "core5", "decision_incomplete", "2026-09-21"), ("live", "pod_one", "decision_incomplete", "2026-09-21")],
+        delivered_bool=False)
+    row_dict = _load_dict(provider_obj, workspace_dict)["daily_alerts_dict"]
+    assert (row_dict["state_str"], row_dict["now_str"]) == ("warning", "4 daily alerts not delivered")
+    assert row_dict["detail_str"] == "LIVE pod outboxes 2 · Watchdog daily checks 2. Retried on each watchdog run."
+    assert row_dict["last_timestamp_str"] == BASE_TS.isoformat()
+    assert "secret" not in json.dumps(row_dict)
+
+
+def test_old_undelivered_daily_checks_cannot_hide_a_recent_one(tmp_path):
+    provider_obj, workspace_dict, _ = _daily_case_tuple(tmp_path)
+    _add_daily_checks(tmp_path, [("live", "core5", "opening_not_dispatched", "2026-09-21")], delivered_bool=False)
+    # More older keys than the read cap, written after the recent one.
+    with closing(sqlite3.connect(tmp_path / "watchdog_notification_state.daily.sqlite3")) as connection_obj, connection_obj:
+        connection_obj.executemany("INSERT INTO daily_watchdog_alert(alert_key_str) VALUES (?)",
+            [(f"live|core5|decision_incomplete|{(BASE_TS - timedelta(days=8 + day_int)).date().isoformat()}",)
+             for day_int in range(system_data.POD_LIMIT_INT * 32 + 100)])
+    row_dict = _load_dict(provider_obj, workspace_dict)["daily_alerts_dict"]
+    assert (row_dict["state_str"], row_dict["now_str"]) == ("warning", "1 daily alert not delivered")
+
+
+def test_daily_alerts_are_ok_once_everything_was_delivered(tmp_path):
+    provider_obj, workspace_dict, daily_obj = _daily_case_tuple(tmp_path)
+    _add_pod_alert(daily_obj, "cycle_overdue:1", delivered_str=BASE_TS.isoformat())
+    _add_daily_checks(tmp_path, [("live", "core5", "decision_incomplete", "2026-09-21")], delivered_bool=True)
+    row_dict = _load_dict(provider_obj, workspace_dict)["daily_alerts_dict"]
+    assert (row_dict["state_str"], row_dict["now_str"]) == ("ok", "No undelivered daily alerts")
+
+
+def _capsule_error_list(mode_str):
+    return [{"mode_str": mode_str, "pod_id_str": "core5", "reason_code_str": "capsule_notification_delivery_failed",
+        "error_type_str": "OSError"}]
+
+
+@pytest.mark.parametrize("override_dict,state_str,now_str", [
+    ({"notification_configured_bool": False, "notification_pending_live_count_int": None}, "skip", "Not configured"),
+    ({"capsule_notification_error_list": _capsule_error_list("live")}, "error", "Daily alert check failed"),
+    ({"capsule_notification_error_list": _capsule_error_list("unknown")}, "error", "Daily alert check failed"),
+    # A PAPER pod's delivery failure is not a LIVE problem.
+    ({"capsule_notification_error_list": _capsule_error_list("paper")}, "warning", "1 daily alert not delivered")])
+def test_daily_alerts_follow_the_saved_watchdog_run(tmp_path, override_dict, state_str, now_str):
+    provider_obj, workspace_dict, daily_obj = _daily_case_tuple(tmp_path, **override_dict)
+    _add_pod_alert(daily_obj, "cycle_overdue:1")
+    row_dict = _load_dict(provider_obj, workspace_dict)["daily_alerts_dict"]
+    assert (row_dict["state_str"], row_dict["now_str"]) == (state_str, now_str)
+
+
+@pytest.mark.parametrize("damage_str", ["corrupt_pod_db", "missing_pod_db", "corrupt_watchdog_state"])
+def test_unreadable_daily_alert_state_is_unknown(tmp_path, damage_str):
+    provider_obj, workspace_dict, daily_obj = _daily_case_tuple(tmp_path)
+    if damage_str == "corrupt_pod_db":
+        Path(daily_obj.db_path_str).write_bytes(b"not a database" * 100)
+    elif damage_str == "missing_pod_db":
+        Path(daily_obj.db_path_str).unlink()
+    else:
+        (tmp_path / "watchdog_notification_state.daily.sqlite3").write_bytes(b"not a database" * 100)
+    row_dict = _load_dict(provider_obj, workspace_dict)["daily_alerts_dict"]
+    assert (row_dict["state_str"], row_dict["now_str"]) == ("unknown", "Saved daily alert state unavailable")

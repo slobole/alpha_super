@@ -1,7 +1,7 @@
 """Small read-only System health projections; no probes, task runs or writers."""
 
 from contextlib import closing
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from itertools import islice
 import hashlib
 import json
@@ -29,6 +29,10 @@ SOURCE_FRESH_SECONDS_INT = 120
 IDENTITY_PATTERN_OBJ = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}\Z")
 MARKET_TIMEZONE_OBJ = ZoneInfo("America/New_York")
 IDENTITY_FIELD_TUPLE = ("pod_id_str", "account_route_str", "release_id_str", "user_id_str", "mode_str")
+# The watchdog's daily checks retry an alert only while its session is in their
+# short lookback; older undelivered keys are no longer pending.
+DAILY_CHECK_ALERT_WINDOW = timedelta(days=7)
+DAILY_OUTBOX_TABLE_TUPLE = ("daily_pod_alert", "mr_capsule_execution_alert")
 
 
 def _row_dict(now_str="Unknown", *, state_str="unknown", last_timestamp_str="", expected_str="Saved evidence", detail_str="", checked_bool=True):
@@ -302,6 +306,76 @@ def _alerts_dict(path_obj, target_list, report_dict, as_of_ts, *, receipt_dict=N
         return result_dict
 
 
+def build_daily_alerts_dict(path_obj, target_list, receipt_dict, as_of_ts):
+    """Daily pods (CORE5, MR capsule): alerts not yet delivered, counts only.
+
+    Each daily pod's outboxes (``daily_pod_alert``, ``mr_capsule_execution_alert``)
+    are retried on every watchdog run; the watchdog's daily checks keep their keys
+    in ``watchdog_notification_state.daily.sqlite3``. SQLite mode=ro; alert text is
+    never read. None when no LIVE daily pod is in scope.
+    """
+    from alpha.live.dashboard_v4.daily_data import is_daily_release_bool
+
+    # LIVE only: the watchdog task runs with -Mode live (the runbook default), so a
+    # PAPER pod's alerts are never delivered there and would never clear.
+    daily_list = [target_obj for target_obj in target_list
+        if is_daily_release_bool(target_obj.release_obj) and target_obj.release_obj.mode_str == "live"]
+    if not daily_list:
+        return None
+    expected_str = "When a daily pod needs action"
+    last_str = receipt_dict["completed_at_utc_str"] if receipt_dict else ""
+    if receipt_dict and receipt_dict.get("notification_configured_bool") is False:
+        return _row_dict("Not configured", state_str="skip", checked_bool=False, expected_str=expected_str)
+    error_list = receipt_dict.get("capsule_notification_error_list") if receipt_dict else None
+    # Same split as the watchdog's LIVE pending count: an unknown mode counts as LIVE.
+    if isinstance(error_list, list) and any(not isinstance(error_dict, dict)
+            or error_dict.get("mode_str") not in ("paper", "incubation") for error_dict in error_list):
+        return _row_dict("Daily alert check failed", state_str="error", last_timestamp_str=last_str, expected_str=expected_str,
+            detail_str="The last watchdog run could not read or deliver a LIVE daily pod's alerts.")
+    # A pod's outbox row younger than the watchdog's report window is still queued for
+    # its next run. Daily-check keys are written only by a delivery attempt.
+    queued_after_str = (as_of_ts - timedelta(seconds=DEFAULT_STALE_AFTER_SECONDS_INT)).isoformat()
+    try:
+        outbox_int = 0
+        for target_obj in daily_list:
+            release_obj = target_obj.release_obj
+            db_path_obj = Path(target_obj.db_path_str).resolve()
+            if not db_path_obj.is_file():
+                raise ValueError("Daily pod database missing")
+            with closing(sqlite3.connect(f"{db_path_obj.as_uri()}?mode=ro", uri=True, timeout=1.0)) as connection_obj:
+                table_set = {row_obj[0] for row_obj in connection_obj.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                for table_str in DAILY_OUTBOX_TABLE_TUPLE:
+                    if table_str in table_set:
+                        outbox_int += connection_obj.execute(f"""SELECT COUNT(*) FROM {table_str} WHERE pod_id_str=?
+                            AND account_route_str=? AND mode_str=? AND delivered_timestamp_str IS NULL
+                            AND julianday(created_timestamp_str)<=julianday(?)""", (release_obj.pod_id_str,
+                            release_obj.account_route_str, release_obj.mode_str, queued_after_str)).fetchone()[0]
+        check_int = 0
+        state_path_obj = None if path_obj is None else path_obj.parent / "watchdog_notification_state.daily.sqlite3"
+        if state_path_obj is not None and state_path_obj.is_file():
+            pod_set = {target_obj.release_obj.pod_id_str for target_obj in daily_list}
+            from_date_str = (as_of_ts - DAILY_CHECK_ALERT_WINDOW).astimezone(MARKET_TIMEZONE_OBJ).date().isoformat()
+            with closing(sqlite3.connect(f"{state_path_obj.resolve().as_uri()}?mode=ro", uri=True, timeout=1.0)) as connection_obj:
+                if connection_obj.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='daily_watchdog_alert'").fetchone():
+                    # Old undelivered keys are never cleaned up: filter the window first, newest first.
+                    for (key_str,) in connection_obj.execute("""SELECT alert_key_str FROM daily_watchdog_alert
+                            WHERE delivered_timestamp_str IS NULL AND substr(alert_key_str,-10)>=?
+                            ORDER BY rowid DESC LIMIT ?""", (from_date_str, POD_LIMIT_INT * 32)):
+                        # Key: mode|pod|kind|session date.
+                        part_list = str(key_str).split("|")
+                        if len(part_list) == 4 and part_list[0] == "live" and part_list[1] in pod_set and part_list[3] >= from_date_str:
+                            check_int += 1
+    except (OSError, ValueError, TypeError, sqlite3.Error):
+        return _row_dict("Saved daily alert state unavailable", expected_str=expected_str)
+    total_int = outbox_int + check_int
+    if total_int:
+        return _row_dict(f"{total_int} daily alert{'s' if total_int != 1 else ''} not delivered", state_str="warning",
+            last_timestamp_str=last_str, expected_str=expected_str,
+            detail_str=f"LIVE pod outboxes {outbox_int} · Watchdog daily checks {check_int}. Retried on each watchdog run.")
+    return _row_dict("No undelivered daily alerts", state_str="ok", last_timestamp_str=last_str, expected_str=expected_str,
+        detail_str="LIVE pod outboxes and the watchdog's daily checks.")
+
+
 def _watchdog_run_dict(path_obj, target_list, report_dict, as_of_ts):
     if path_obj is None:
         return None
@@ -457,4 +531,7 @@ def load_system_source_dict(provider_obj, workspace_dict, *, as_of_ts, performan
         watchdog_dict=watchdog_dict, alerts_dict=_alerts_dict(path_obj, target_list, report_dict, as_of_ts, receipt_dict=receipt_dict),
         deadman_dict=_deadman_dict(receipt_dict, as_of_ts),
         flex_dict=_flex_dict(performance_db_path_str, target_list, as_of_ts))
+    daily_alerts_dict = build_daily_alerts_dict(path_obj, target_list, receipt_dict, as_of_ts)
+    if daily_alerts_dict is not None:
+        result_dict["daily_alerts_dict"] = daily_alerts_dict
     return result_dict

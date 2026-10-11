@@ -362,3 +362,24 @@ def attach_demo_daily(provider_obj, operations_account_list, *, as_of_ts=DEMO_NO
             ("close", close)):
         setattr(provider_obj, name_str, function_obj)
     return daily_store_obj
+
+
+def attach_demo_daily_system(provider_obj):
+    """``--demo-daily``: System health's Daily alerts row, read from the owned daily outboxes.
+
+    Uses the production reader; the demo has no watchdog state file, so only the
+    pods' outboxes count, against the synthetic watchdog run's completion time.
+    """
+    from alpha.live.dashboard_v4.system_data import build_daily_alerts_dict
+
+    monthly_source_fn = provider_obj.get_system_source_dict
+
+    def get_system_source_dict(workspace_dict, *, as_of_ts):
+        source_dict = monthly_source_fn(workspace_dict, as_of_ts=as_of_ts)
+        receipt_dict = {"completed_at_utc_str": source_dict["watchdog_dict"]["last_timestamp_str"],
+            "notification_configured_bool": True}
+        source_dict["daily_alerts_dict"] = build_daily_alerts_dict(None, provider_obj.daily_store_obj.get_target_list(),
+            receipt_dict, as_of_ts)
+        return source_dict
+
+    provider_obj.get_system_source_dict = get_system_source_dict

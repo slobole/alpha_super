@@ -433,6 +433,19 @@ import. Coverage follows the existing daily 08:00 ET rule, including weekends,
 so a newly closed market does not immediately create a false Late. No financial
 history or return calculation is rebuilt by these health reads.
 
+Daily alerts appears only when a LIVE daily pod (CORE5, MR capsule) is in scope.
+It counts, never reading alert text, the undelivered rows of each daily pod's own
+outboxes (`daily_pod_alert`, `mr_capsule_execution_alert`; pod, account and mode
+must match; a row younger than the 15-minute watchdog report window is still
+queued, not counted) plus the watchdog's undelivered daily-check keys in
+`watchdog_notification_state.daily.sqlite3` (LIVE, a pod in scope, session within
+7 days: those checks retry only inside their short lookback, so older keys never
+clear). The watchdog task runs LIVE-only (`-Mode live`), so PAPER pods never
+count. A saved run with notifications off is `Not configured`; a LIVE or
+unknown-mode entry in its `capsule_notification_error_list` is `Daily alert check
+failed`; unreadable state is Unknown. `--demo-daily` runs the same reader on the
+demo pods' outboxes.
+
 The Event log check uses the existing scheduler idle ceiling (60 minutes) and
 60-second wake allowance; the watchdog report age policy is 900 seconds, not a
 claim about its task schedule. Scheduler evidence uses bounded 64 KiB log tails

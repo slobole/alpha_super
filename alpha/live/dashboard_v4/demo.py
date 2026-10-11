@@ -98,6 +98,9 @@ def build_demo_workspace_tuple(*, include_holdings_bool=False, include_daily_boo
     attach_demo_activity(provider_obj, as_of_ts=DEMO_NOW_TS)
     from alpha.live.dashboard_v4.system_demo import attach_demo_system
     attach_demo_system(provider_obj)
+    if include_daily_bool:
+        from alpha.live.dashboard_v4.daily_demo import attach_demo_daily_system
+        attach_demo_daily_system(provider_obj)
     from alpha.live.dashboard_v4.console_demo import attach_demo_console
     attach_demo_console(provider_obj, as_of_ts=DEMO_NOW_TS)
     summary_dict = provider_obj.get_summary_dict()

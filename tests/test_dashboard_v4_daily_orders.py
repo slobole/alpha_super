@@ -150,3 +150,12 @@ def test_demo_daily_requires_demo(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["dashboard_v4", "--demo-daily"])
     with pytest.raises(SystemExit):
         main_module.main()
+
+
+def test_demo_daily_system_health_counts_the_undelivered_daily_alerts():
+    from alpha.live.dashboard_v4.demo import create_demo_app
+
+    # The capsule's close-with-exceptions alert and the overdue pod's alert; the demo never sends.
+    system_str = _page_text(create_demo_app(demo_daily_bool=True).test_client(), "/system")
+    assert "Daily alerts 2 daily alerts not delivered" in system_str
+    assert "Daily alerts" not in _page_text(create_demo_app().test_client(), "/system")

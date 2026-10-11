@@ -285,6 +285,9 @@ def build_system_page_dict(overview_dict, workspace_dict, source_dict, *, as_of_
     continuous_list = [scheduler_row_dict, gateway_row_dict,
         _aux_row_dict(aux_source_dict, "alerts", "Alerts · Discord", as_of_ts=as_of_ts),
         _row_dict("dashboard", "Dashboard", "done", "Responding", _time_str(as_of_ts.isoformat(), as_of_ts), "Refresh every 15 s")]
+    if "daily_alerts_dict" in source_dict:
+        # Daily pods only: their outboxes and the watchdog's daily checks.
+        continuous_list.insert(3, _aux_row_dict(aux_source_dict, "daily_alerts", "Daily alerts", as_of_ts=as_of_ts))
 
     norgate_state_list, sync_time_list, have_list, need_list, fred_state_list, fred_date_list = [], [], [], [], [], []
     for saved_dict in saved_list:
