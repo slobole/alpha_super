@@ -417,3 +417,54 @@ def test_pod_page_shows_the_exceptions_tab_for_daily_pods_only(daily_wiring_tupl
         as_of_ts=DEMO_NOW_TS, tab_str="exceptions")
     assert "exceptions" not in {item_dict["key_str"] for item_dict in monthly_dict["tab_list"]}
     assert monthly_dict["tab_str"] != "exceptions"
+
+
+@pytest.mark.parametrize("close_status_str", ["completed", "completed_with_exceptions"])
+def test_next_after_a_daily_close_is_the_same_with_or_without_exceptions(close_status_str):
+    """Phase 4: an exceptions day never stalls the forecast. Demo DB, real writer and readers."""
+    import sqlite3
+    from contextlib import closing
+
+    from alpha.live.dashboard import build_pod_row_dict
+    from alpha.live.dashboard_v4.daily_data import load_daily_cycle_dict
+    from alpha.live.dashboard_v4.next_operation import build_next_operation_dict
+    from alpha.live.dashboard_v4.pod_demo import _DemoStateStore
+    from alpha.live.models import BrokerSnapshot
+
+    close_ts = datetime(2026, 9, 8, 20, 1, 30, tzinfo=UTC)  # Tue 16:01:30 ET
+    store_obj = DemoDailyStore()
+    try:
+        target_obj = store_obj.get_target_for_pod("demo_daily_exceptions")
+        with closing(sqlite3.connect(target_obj.db_path_str)) as connection_obj:
+            vplan_id_int, decision_id_int = connection_obj.execute(
+                "SELECT vplan_id_int, decision_plan_id_int FROM vplan ORDER BY vplan_id_int DESC LIMIT 1").fetchone()
+        exception_list = [] if close_status_str == "completed" else [{"asset_str": "NVDA", "side_str": "BUY",
+            "quantity_float": 2.0, "reason_str": "actual_holding_differs_from_vplan", "expected_share_float": 20.0,
+            "actual_share_float": 18.0, "residual_amount_float": 2.0}]
+        with closing(_DemoStateStore(target_obj.db_path_str)) as writer_obj:
+            writer_obj.complete_daily_cycle(decision_id_int, vplan_id_int, BrokerSnapshot(target_obj.release_obj.account_route_str,
+                close_ts, 2500.0, 100000.0, position_amount_map={"MSFT": 12.0, "NVDA": 20.0 - len(exception_list) * 2, "BIL": 360.0},
+                net_liq_float=100000.0), close_status_str, exception_list, close_ts)
+        with closing(sqlite3.connect(target_obj.db_path_str)) as connection_obj, connection_obj:
+            # Writers stamp wall time; pin it to the close.
+            for table_str, field_str in (("decision_plan", "updated_timestamp_str"), ("vplan", "updated_timestamp_str"),
+                    ("vplan_reconciliation_snapshot", "created_timestamp_str"), ("pod_state_history", "updated_timestamp_str")):
+                connection_obj.execute(f"UPDATE {table_str} SET {field_str}=? WHERE julianday({field_str})>julianday(?)",
+                    (close_ts.isoformat(), close_ts.isoformat()))
+            connection_obj.execute("UPDATE pod_state_history SET recorded_timestamp_str=updated_timestamp_str")
+        observed_list = []
+        for now_ts, data_ready_bool in ((datetime(2026, 9, 8, 22, 0, tzinfo=UTC), False), (datetime(2026, 9, 9, 12, 0, tzinfo=UTC), True)):
+            row_dict = build_pod_row_dict(target_obj, now_ts, str(store_obj.directory_path_obj), None)
+            row_dict["norgate_snapshot_status_dict"] = ({"status_str": "ready", "snapshot_fresh_for_cycle_bool": True,
+                "snapshot_date_str": "2026-09-08"} if data_ready_bool else {"status_str": "waiting", "snapshot_fresh_for_cycle_bool": False,
+                "snapshot_stale_past_alert_deadline_bool": False, "snapshot_date_str": "2026-09-04"})
+            row_dict["daily_cycle_dict"] = load_daily_cycle_dict(target_obj, as_of_ts=now_ts)
+            cycle_dict = build_cycle_view_dict(row_dict, now_ts=now_ts)
+            next_dict = build_next_operation_dict(row_dict, cycle_dict, now_ts=now_ts)
+            observed_list.append((cycle_dict["daily_status_dict"]["key_str"], next_dict["next_str"], next_dict["next_time_str"]))
+        closed_key_str = "closed" if close_status_str == "completed" else "closed_with_exceptions"
+        # Evening, data not yet ready: the close stands and Next waits for data.
+        # Next morning, data ready: the owed decision is due by the 09:28 cutoff.
+        assert observed_list == [(closed_key_str, "Data", "when ready"), ("deciding", "Decide", "09:28:00")]
+    finally:
+        store_obj.close()

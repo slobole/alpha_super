@@ -46,7 +46,9 @@ reasons were removed with the funding checks, owner decision 2026-10-11.)
 3. Done 2026-10-11: Exceptions tab on the Pod page (per-symbol close-of-day exceptions, same-day MKT completions
    noted), and completion orders as rows in the Orders tab (`:daily-completion:` keys), kept out of the opening
    fill proof.
-4. Next-trade forecast after an exceptions day (`next_operation.py`, `dashboard.py:1433` status tuple).
+4. Verified 2026-10-11, no change needed: after a close with exceptions the Next line matches a clean close (Data ·
+   when ready, then Decide · 09:28), because the daily projection already owns daily status. V3 `dashboard.py` stays
+   unchanged. Locked by `test_next_after_a_daily_close_is_the_same_with_or_without_exceptions`.
 5. System page: daily watchdog report, receipt, `.daily.sqlite3` alert keys, pod outboxes.
 6. Done 2026-10-11: Activity labels for daily events; pending reconciles quiet (a sent completion stays its own
    row); closed daily cycles read as days. The existing LIVE-only mode filter already applies to daily events.
