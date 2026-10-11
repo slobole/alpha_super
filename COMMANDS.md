@@ -165,7 +165,7 @@ diagnose setup. Most paths/IDs default from env (`config.env`).
 | Command | What |
 |---|---|
 | `.\scripts\collect_vps_debug_bundle.ps1 -Mode live -PodId <pod_id>` | Collect a redacted baseline VPS debug bundle under `results/vps_debug_bundles/` and zip it for trusted review. Does not tick, submit, reconcile, or EOD snapshot. Add `-IncludeRunnerDetails` for status/plan views that can write diagnostic job metadata, `-IncludeDoctor -DoctorBrokerClientId <unused_id>` for doctor, or `-ReleaseManifestPath <yaml> -IbkrProbeClientId <unused_id>` for the separate IBKR probe. |
-| `uv run python scripts/live_debug/ibkr_connectivity_probe.py` | Test the IBKR API connection + dump account snapshot (cash/positions/orders). Flags: `--release-manifest-path <yaml>` (auto-configures), `--port 7497`, `--json`. |
+| `uv run python scripts/live_debug/ibkr_connectivity_probe.py` | Test the IBKR API connection + dump account snapshot (cash/positions/orders). Flags: `--release-manifest-path <yaml>` (auto-configures), `--port 7497`, `--json`. For a CORE5/MR capsule pod before go-live add `--daily-pod-checks` with an unused `--client-id`: runs the serve's account reads and pre-submit margin/funding/borrow checks, what-if only, no order sent. |
 | `uv run python -m alpha.live.dashboard_v3` | Live operator console (see [section 6](#6-control-panels-web-ui)). |
 | `uv run python -m alpha.live.runner doctor --mode paper --pod-id <pod_id>` | **First check when something feels wrong.** Produces the live health verdict: release, config, data gate, DecisionPlan/VPlan, broker/reconcile state. Add `--json` for raw detail. |
 | `uv run python -m alpha.live.runner status --mode paper --pod-id <pod_id>` | Read current sleeve state without submitting orders. |
