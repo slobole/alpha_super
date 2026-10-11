@@ -66,8 +66,9 @@ alpha/live/releases/<client_id>/*.yaml
 CORE5 uses a disabled `live` template with a dedicated USD margin account,
 full account budget `1.0`, and `auto_submit_enabled_bool: true`: like every
 MR capsule template, a daily pod must send each session once it is enabled
-(owner decision 2026-10-11). Each submission checks current margin and
-incremental DBC short availability. For local forward tests,
+(owner decision 2026-10-11). Like NDX/TAA, there is no margin, funding or DBC
+borrow preview before sending; IBKR's own pre-trade checks decide (owner
+decision 2026-10-11). For local forward tests,
 use `incubation` and a `SIM_` route; `paper` requires its own paper account.
 See [CORE5 wiring and deployment prerequisites](../CORE5_WIRING_20261005.md).
 

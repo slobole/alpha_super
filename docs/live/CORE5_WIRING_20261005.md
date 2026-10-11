@@ -1,8 +1,8 @@
 # CORE5 wiring and deployment prerequisites — 2026-10-05
 
 CORE5 has a gated production execution route and is classified **WIRED**. The
-release template is disabled, automatic submission is off, and its account and
-qualification fields are unfilled. No actual release, account allocation, VPS,
+release template is disabled and its account field is unfilled; once enabled it
+submits automatically (owner decision 2026-10-11). No actual release, account allocation, VPS,
 broker connection, or order was created by this work on `main`.
 
 WIRED is a code integration result. Physical deployment still requires the
@@ -44,7 +44,7 @@ searched. See [the complete signal formulas](CORE5_ADAPTER_QUALIFICATION.md#froz
                              |
        *** CRITICAL *** no T+1 price can change quantities
                              |
-[VPlan + current account + margin previews + DBC availability]
+[VPlan + fresh strict account read (holdings, all-client orders)]
                              |
 [Before next open minus 2 minutes: atomic submission claim]
                              |
@@ -65,33 +65,26 @@ was replaced only after implementing the following checks:
    open orders are inspected at EOD, VPlan construction, submission and reconcile.
 2. **Dedicated account:** no enabled second pod may share CORE5's account in
    the same mode, regardless of manifest order. Budget fraction must be 1.0.
-3. **Current funding:** require standard margin (`STKNOPT`/`STKMRGN`) and available
-   funds/excess liquidity. Preview every order leg using `whatIfOrder`, including
-   reducing sells. Portfolio margin (`PMRGN`/`GPMRGN`) is rejected: independent
-   previews cannot bound joint stress/hedge interactions. A reversal's second
-   preview uses cumulative same-symbol shares against the actual broker position.
-   Actual transmitted legs remain separate and unchanged.
-4. **Conservative capacity:** sum positive initial/maintenance margin changes;
-   give no credit for pending sells; add the sum of positive preview equity
-   debits (including previewed costs) to both requirements. Each must fit the lower of the account's
-   starting and final corresponding capacity. Recheck readiness, margin type,
-   positions and all-client orders after previews.
-5. **Incremental short availability:** when the final DBC short increases,
-   current `shortableShares` must cover that increase. Missing/invalid data or
-   insufficient shares blocks the entire plan; no silent long-only fallback.
-   Only the temporary market-data subscription is cancelled.
-6. **Timing:** normal scheduled submission stays 6m30s before next open.
-   CORE5 blocks at or after open minus two minutes, both before and after
-   preflight, and immediately before each socket dispatch after connection and
+3. **Funding, margin and DBC borrow: removed 2026-10-11.** The original wiring
+   previewed every leg with `whatIfOrder`, required a standard margin account,
+   checked available funds/excess liquidity and, for a larger DBC short,
+   `shortableShares`. Owner decision 2026-10-11 removed these checks, as for the
+   monthly pods: IBKR's own pre-trade checks accept or reject each order. The
+   daily close records a rejected leg as an exception, the receipt does not
+   advance, and CORE5 catches up at the next session's replay. Actual
+   transmitted legs, including the two DBC reversal legs, are unchanged.
+4. **Timing:** normal scheduled submission stays 6m30s before next open.
+   CORE5 blocks at or after open minus two minutes, before the account read,
+   and immediately before each socket dispatch after connection and
    contract qualification. The local deadline leaves broker MKT/OPG unchanged.
    A mid-batch timeout retains the submission claim for reconciliation of any
    earlier legs. This conservative cutoff includes the Nasdaq 09:28 MOO deadline
    described by [IBKR](https://www.interactivebrokers.com/en/trading/ordertypes.php?menu=B).
-7. **Restart/concurrency:** a failing/late preflight may block only an untouched
+5. **Restart/concurrency:** a failing/late preflight may block only an untouched
    ready plan. It cannot overwrite another process's submission claim. After a
    crash following the claim, scheduler and expiry paths retain the pending cycle
    and route it to reconciliation.
-8. **Honest reference status:** generic automatic return comparison refuses
+6. **Honest reference status:** generic automatic return comparison refuses
    CORE5 with `core5_accounting_bridge_required`; that generic reference removes
    dividends but retains synthetic borrow. Conditional decision/order comparison
    remains available through the existing saved-price oracle.
@@ -104,18 +97,19 @@ An enabled live release needs no extra YAML attestation. Owner decisions:
 approval fields), and 2026-10-11 removed the margin-account flag because the
 accounts are margin accounts. Older YAMLs that still carry
 `core5_live_qualification_dict` or `margin_account_confirmed_bool` keep working;
-both keys are ignored. Each submission still runs the account, margin-preview
-and DBC shortability checks described above.
+both keys are ignored. Each submission still runs the strict account read
+described above; it no longer previews margin or DBC borrow (owner decision
+2026-10-11).
 
-Previews cannot reserve borrow or margin, guarantee basket margin or auction
-acceptance, or prevent conditions changing after the check. Portfolio-margin
-accounts remain unsupported; real fills require account qualification. Borrow rate is
-reported as unknown by the preflight; no new economic rate cap is invented.
-Existing shorts can be recalled between cycles. Broker statement reconciliation
-and the operator's recall procedure remain necessary (G-030).
+Without previews, a buy the account cannot fund or a DBC short IBKR cannot
+borrow is rejected by IBKR and recorded at the daily close. The code no longer
+checks the account's margin type; the owner's accounts are standard margin
+accounts. No borrow-rate cap exists. Existing shorts can be recalled between
+cycles. Broker statement reconciliation and the operator's recall procedure
+remain necessary (G-030).
 
 Incubation uses a virtual `SIM_` account and its existing simulated ledger;
-PAPER uses a distinct paper account and the physical broker preflight. Neither
+PAPER uses a distinct paper account and the same strict account reads. Neither
 incubation P&L nor PAPER fills prove physical account return/fill parity.
 
 ## Missed session or interrupted-cycle recovery
@@ -181,7 +175,7 @@ new performance, sample-size, regime-robustness or multiple-comparison claim.
 | Sizing | Same signed whole shares, target-vs-delta semantics and separate reversal legs. |
 | References | CAPITALSPECIAL Close_T retained; current quotes cannot resize. |
 | State/config | No schema/pickle migration; additive qualification params and atomic status method. |
-| Logs/dashboard | Existing fields retained; funding evidence and explicit block reasons added. |
+| Logs/dashboard | Existing fields retained; explicit block reasons added (funding evidence removed 2026-10-11). |
 | Windows/restart | Temporary SQLite tests cover competing claims and reopen-after-claim. |
 | Releases | Disabled example changed; no actual runtime YAML/account/service enabled or edited. |
 

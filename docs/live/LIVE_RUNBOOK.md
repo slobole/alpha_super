@@ -803,24 +803,27 @@ configuration validation; enablement and deployment still require approval.
 
 ### Probe a daily pod's IBKR account before go-live
 
-Unlike NDX/TAA, the CORE5 and MR capsule serves read the account strictly and run
-margin, funding and (CORE5) DBC borrow checks before sending. These checks fail
-closed: an unexpected IBKR reply blocks that day's send and raises an alert; it
-never sends a wrong order. Before enabling a daily pod, run the existing IBKR
-connectivity probe with `--daily-pod-checks`, once during market hours and once
-around 09:20 New York time, with an API client ID no other process uses:
+Unlike NDX/TAA, the CORE5 and MR capsule serves read the account strictly
+(holdings, cash and the open orders of every API client) at 16:10 and again
+before sending. These reads fail closed: an unexpected IBKR reply blocks that
+day's send and raises an alert; it never sends a wrong order. Like NDX/TAA, they
+run no margin, funding or borrow preview before sending (owner decision
+2026-10-11): IBKR's own pre-trade checks accept or reject each order, and the
+daily close records a rejected order as an exception. Before enabling a daily
+pod, run the existing IBKR connectivity probe with `--daily-pod-checks`, once
+during market hours and once around 09:20 New York time, with an API client ID
+no other process uses:
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\live_debug\ibkr_connectivity_probe.py --release-manifest-path <path to the pod YAML> --client-id 90 --daily-pod-checks
 ```
 
-After the usual connectivity report it runs the same account reads, daily close
-read and pre-submit checks as the serve, using one-share what-if previews (CORE5
-also previews a DBC short one share larger, to read shortable shares). No order
-is transmitted. Exit 0 means every step passed; a `FAIL` line names the IBKR call
-or field. Without `--daily-pod-checks` the probe behaves exactly as before. Owner decision
-2026-10-11: the checks stay; if one fails only because IBKR does not return a
-field it reads, remove that check rather than working around it.
+After the usual connectivity report it runs the same account reads and daily
+close read as the serve. It only reads: no order or preview is transmitted. Exit
+0 means every step passed; a `FAIL` line names the IBKR call or field. Without
+`--daily-pod-checks` the probe behaves exactly as before. Owner decision
+2026-10-11: if a read fails only because IBKR does not return a field it needs,
+remove that check rather than working around it.
 
 Each CORE5 or MR capsule pod must have its **own dedicated IBKR account/subaccount**
 and full-account budget (`execution.pod_budget_fraction_float: 1.0`). Do not share that account

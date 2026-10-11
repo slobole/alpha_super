@@ -12,10 +12,9 @@ Usage
 
 Daily pods (CORE5, MR capsule) before go-live: add --daily-pod-checks with an
 unused client ID. After the connectivity report it runs the serve's own account
-reads, daily close read and pre-submit margin/funding/borrow checks, using
-one-share what-if previews only; no order is transmitted. Owner decision
-2026-10-11: if a check fails only because IBKR does not return a field it reads,
-remove that check rather than working around it.
+reads and daily close read; it only reads, and no order is transmitted. Owner
+decision 2026-10-11: if a check fails only because IBKR does not return a field
+it reads, remove that check rather than working around it.
 
     uv run python scripts/live_debug/ibkr_connectivity_probe.py ^
         --release-manifest-path <pod YAML> --client-id 90 --daily-pod-checks
@@ -37,7 +36,6 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from alpha.live.ibkr_socket_client import IBKRSocketClient
-from alpha.live.models import BrokerOrderRequest
 from alpha.live.order_clerk import infer_ibkr_account_mode_str
 from alpha.live.release_manifest import parse_release_manifest
 
@@ -52,10 +50,6 @@ SELECTED_ACCOUNT_TAG_TUPLE: tuple[str, ...] = (
     "InitMarginReq",
     "MaintMarginReq",
 )
-# Capsule funding compares buy notional with BuyingPower; one share at this
-# placeholder price only proves the field is read, not that a real batch fits.
-DAILY_PROBE_PLACEHOLDER_PRICE_FLOAT = 100.0
-CAPSULE_SAMPLE_ASSET_TUPLE: tuple[str, ...] = ("AAPL", "BIL")
 
 
 def _safe_float_or_none(raw_value_obj: Any) -> float | None:
@@ -294,7 +288,7 @@ def _render_probe_report_str(probe_report_dict: dict[str, Any]) -> str:
             output_line_list.append("  " + json.dumps(open_order_row_dict, sort_keys=True))
 
     if "daily_pod_check_list" in probe_report_dict:
-        output_line_list.append("Daily pod checks (read-only: what-if previews only; no order is transmitted)")
+        output_line_list.append("Daily pod checks (read-only; no order is transmitted)")
         for step_dict in probe_report_dict["daily_pod_check_list"]:
             output_line_list.append(f"  {step_dict['status_str']}  {step_dict['label_str']}: {step_dict['detail_str']}")
         output_line_list.append(
@@ -311,7 +305,6 @@ class ReadOnlyBroker:
     ALLOWED_METHOD_TUPLE: tuple[str, ...] = (
         "get_visible_account_route_set", "get_core5_account_snapshot", "get_eod_account_snapshot",
         "get_capsule_account_snapshot", "get_daily_execution_snapshot",
-        "get_core5_funding_evidence", "get_capsule_funding_evidence",
     )
 
     def __init__(self, adapter_obj: Any):
@@ -321,34 +314,6 @@ class ReadOnlyBroker:
         if name_str not in self.ALLOWED_METHOD_TUPLE:
             raise AttributeError(f"The probe is read-only; {name_str} is not allowed.")
         return getattr(object.__getattribute__(self, "_adapter_obj"), name_str)
-
-
-def _daily_sample_request(release_obj: Any, asset_str: str, amount_float: float, index_int: int) -> BrokerOrderRequest:
-    return BrokerOrderRequest(
-        release_id_str=release_obj.release_id_str, pod_id_str=release_obj.pod_id_str,
-        account_route_str=release_obj.account_route_str, submission_key_str="probe",
-        order_request_key_str=f"probe:{asset_str}:{index_int}", asset_str=asset_str,
-        broker_order_type_str="MOO", order_class_str="probe", unit_str="shares",
-        amount_float=float(amount_float), target_bool=False, trade_id_int=None,
-        sizing_reference_price_float=DAILY_PROBE_PLACEHOLDER_PRICE_FLOAT, portfolio_value_float=0.0,
-    )
-
-
-def core5_sample_request_list(release_obj: Any, position_dict: dict[str, float]) -> list[BrokerOrderRequest]:
-    """One-share buys of every CORE5 asset except DBC, plus a DBC sell that grows
-    the short by one share so the shortable-shares check also runs."""
-    from alpha.live.core5_adapter import CORE5_ASSET_TUPLE
-
-    request_list = []
-    for index_int, asset_str in enumerate(CORE5_ASSET_TUPLE):
-        amount_float = -(max(float(position_dict.get("DBC", 0.0)), 0.0) + 1.0) if asset_str == "DBC" else 1.0
-        request_list.append(_daily_sample_request(release_obj, asset_str, amount_float, index_int))
-    return request_list
-
-
-def capsule_sample_request_list(release_obj: Any) -> list[BrokerOrderRequest]:
-    return [_daily_sample_request(release_obj, asset_str, 1.0, index_int)
-            for index_int, asset_str in enumerate(CAPSULE_SAMPLE_ASSET_TUPLE)]
 
 
 def _plain(value_obj: Any) -> Any:
@@ -369,25 +334,13 @@ def _snapshot_summary_str(snapshot_obj: Any) -> str:
             f"open orders {len(snapshot_obj.open_order_id_list)}")
 
 
-def _funding_summary_str(evidence_dict: dict[str, Any]) -> str:
-    preview_str = ", ".join(f"{item_dict['asset_str']} {item_dict['status_str']}"
-                            for item_dict in evidence_dict.get("preview_list") or [])
-    fact_list = [f"type {evidence_dict.get('trading_type_str')}"]
-    for key_str, label_str in (("available_funds_float", "AvailableFunds"), ("excess_liquidity_float", "ExcessLiquidity"),
-                               ("buying_power_float", "BuyingPower"), ("dbc_shortable_shares_float", "DBC shortable")):
-        if evidence_dict.get(key_str) is not None:
-            fact_list.append(f"{label_str} {evidence_dict[key_str]:,.0f}")
-    return "; ".join(fact_list) + (f"; previews: {preview_str}" if preview_str else "")
-
-
 def run_daily_pod_checks(release_obj: Any, broker_obj: Any) -> list[dict[str, Any]]:
-    """The serve's own reads and pre-submit checks; one failure never stops the others."""
+    """The serve's own account reads; one failure never stops the others."""
     from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR
 
     account_str = release_obj.account_route_str
     core5_bool = release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR
     step_list: list[dict[str, Any]] = []
-    context_dict: dict[str, Any] = {}
 
     def run_step(label_str, step_fn):
         try:
@@ -407,7 +360,6 @@ def run_daily_pod_checks(release_obj: Any, broker_obj: Any) -> list[dict[str, An
     if core5_bool:
         def account_step():
             snapshot_obj = broker_obj.get_core5_account_snapshot(account_str, include_portfolio_valuation_bool=True)
-            context_dict["position_dict"] = dict(snapshot_obj.position_amount_map)
             return _snapshot_summary_str(snapshot_obj), snapshot_obj
         run_step("Account read (16:10 and before sending)", account_step)
     else:
@@ -428,20 +380,6 @@ def run_daily_pod_checks(release_obj: Any, broker_obj: Any) -> list[dict[str, An
         return (_snapshot_summary_str(daily_obj.broker_snapshot_obj)
                 + f"; open order rows {len(daily_obj.open_order_row_list)}"), daily_obj
     run_step("Daily close read (holdings and all-client open orders)", daily_step)
-
-    if core5_bool:
-        def core5_funding_step():
-            if "position_dict" not in context_dict:
-                raise ValueError("skipped: needs the account read above to pass first")
-            request_list = core5_sample_request_list(release_obj, context_dict["position_dict"])
-            evidence_dict = broker_obj.get_core5_funding_evidence(account_str, request_list, context_dict["position_dict"])
-            return _funding_summary_str(evidence_dict), evidence_dict
-        run_step("Pre-submit margin, funding and DBC borrow check (what-if only)", core5_funding_step)
-    else:
-        def capsule_funding_step():
-            evidence_dict = broker_obj.get_capsule_funding_evidence(account_str, capsule_sample_request_list(release_obj))
-            return _funding_summary_str(evidence_dict), evidence_dict
-        run_step("Pre-submit buying power and margin check (what-if only)", capsule_funding_step)
     return step_list
 
 
@@ -496,8 +434,8 @@ def parse_args(argv_list: list[str] | None = None) -> argparse.Namespace:
     parser_obj.add_argument("--traceback", dest="traceback_bool", action="store_true")
     parser_obj.add_argument(
         "--daily-pod-checks", dest="daily_pod_checks_bool", action="store_true",
-        help="CORE5/MR capsule only: also run the serve's account reads and pre-submit checks "
-             "(what-if only, no order sent). Requires --release-manifest-path and an unused --client-id.",
+        help="CORE5/MR capsule only: also run the serve's own account reads and daily close read "
+             "(read-only, no order sent). Requires --release-manifest-path and an unused --client-id.",
     )
     return parser_obj.parse_args(argv_list)
 

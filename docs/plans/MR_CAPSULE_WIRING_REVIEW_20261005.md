@@ -536,6 +536,8 @@ The current repository base is `54b417f` (other work was committed separately).
 - Capsule buy batches require actual account margin type, USD buying power
   against all buy notionals without credit for pending sales, and individual
   broker what-if checks. This is a precheck, not guaranteed basket funding/fills.
+  **Removed by owner decision 2026-10-11:** no funding precheck; as for the
+  monthly pods, IBKR's own pre-trade checks accept or reject each buy.
 - Original request identities are built before dispatch is reordered: BIL sells,
   other sells, then buys. Orders remain next-open MOO; sales are not awaited.
 - Reconciliation uses account-scoped order/fill evidence and fresh actual shares.

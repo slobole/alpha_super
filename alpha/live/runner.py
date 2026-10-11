@@ -3389,8 +3389,7 @@ def submit_ready_vplans(
                     raise ValueError("CORE5 MOO submission cutoff has passed.")
                 if not release_obj.enabled_bool:
                     raise ValueError("CORE5 release is disabled.")
-                # Revalidate saved releases as well as manifests. Qualification
-                # can expire while a frozen order plan waits for submission.
+                # Revalidate saved releases as well as manifests.
                 validate_core5_release(release_obj)
                 fresh_core5_snapshot_obj = broker_adapter_obj.get_core5_account_snapshot(vplan_obj.account_route_str)
                 if fresh_core5_snapshot_obj.account_route_str != vplan_obj.account_route_str:
@@ -3398,23 +3397,10 @@ def submit_ready_vplans(
                 require_core5_position_match(vplan_obj.current_broker_position_map, fresh_core5_snapshot_obj.position_amount_map)
                 if fresh_core5_snapshot_obj.open_order_id_list:
                     raise ValueError("CORE5 account has outstanding orders before submission.")
-                core5_block_reason_str = "core5_funding_not_verified"
-                preview_request_list = build_broker_order_request_list_from_vplan(vplan_obj)
-                funding_evidence_dict = (
-                    {"simulated_bool": True, "source_str": "incubation"}
-                    if release_obj.mode_str == "incubation"
-                    else broker_adapter_obj.get_core5_funding_evidence(
-                        vplan_obj.account_route_str, preview_request_list, vplan_obj.current_broker_position_map)
-                )
-                checked_timestamp_str = funding_evidence_dict.get("checked_at_str")
-                if not funding_evidence_dict.get("simulated_bool") and checked_timestamp_str is None:
-                    raise ValueError("CORE5 funding verification lacks its capture timestamp.")
-                if checked_timestamp_str is not None:
-                    checked_timestamp_ts = datetime.fromisoformat(str(checked_timestamp_str))
-                    if checked_timestamp_ts.tzinfo is None or checked_timestamp_ts >= core5_cutoff_ts:
-                        raise ValueError("CORE5 funding verification completed after the MOO cutoff.")
-                log_event("core5_funding_checked", _build_vplan_log_payload_dict(
-                    release_obj, vplan_obj, as_of_ts, {"funding_evidence_dict": funding_evidence_dict}), log_path_str=log_path_str)
+                # Owner decision 2026-10-11: like the monthly pods, no margin,
+                # funding or DBC borrow preview before sending. IBKR's own
+                # pre-trade checks accept or reject each order; the daily close
+                # records any rejected intent as an exception and CORE5 catches up.
             except Exception as exception_obj:
                 blocked_action_count_int += 1
                 reason_str = record_dispatch_failure(state_store_obj, release_obj, vplan_obj,
@@ -3438,13 +3424,10 @@ def submit_ready_vplans(
                 validate_mr_capsule_execution_contract(
                     release_obj, decision_plan_obj, fresh_capsule_snapshot_obj
                 )
-                capsule_block_reason_str = "mr_capsule_funding_not_verified"
-                preview_request_list = list(broker_order_request_list)
-                funding_evidence_dict = ({"simulated_bool": True, "source_str": "incubation"}
-                    if release_obj.mode_str == "incubation" else broker_adapter_obj.get_capsule_funding_evidence(
-                        vplan_obj.account_route_str, preview_request_list))
-                log_event("mr_capsule_funding_checked", _build_vplan_log_payload_dict(
-                    release_obj, vplan_obj, as_of_ts, {"funding_evidence_dict": funding_evidence_dict}), log_path_str=log_path_str)
+                # Owner decision 2026-10-11: like the monthly pods, no buying
+                # power or margin preview before sending. IBKR's own pre-trade
+                # checks accept or reject each buy; the daily close records a
+                # rejected buy as an exception.
             except Exception as exception_obj:
                 blocked_action_count_int += 1
                 reason_counter_obj[capsule_block_reason_str] += 1
@@ -3453,38 +3436,10 @@ def submit_ready_vplans(
                         broker_order_request_list, exception_obj, as_of_ts, before_send_bool=True)
                     reason_counter_obj[reason_str] += 1
                     continue
-                if capsule_block_reason_str == "mr_capsule_funding_not_verified":
-                    # Funding can suppress new risk, never a verified exit.
-                    from alpha.live.capsule_funding import persist_capsule_buy_drop
-                    try:
-                        drop_saved_bool = persist_capsule_buy_drop(state_store_obj, release_obj, vplan_obj)
-                    except Exception as persistence_exception_obj:
-                        reason_counter_obj["mr_capsule_funding_drop_persist_failed"] += 1
-                        try:
-                            state_store_obj.block_unsubmitted_daily_cycle(int(vplan_obj.decision_plan_id_int), "blocked")
-                        except Exception as block_exception_obj:
-                            log_event("mr_capsule_funding_cycle_block_failed", _build_vplan_log_payload_dict(
-                                release_obj, vplan_obj, as_of_ts, {"severity_str": "critical",
-                                    "error_str": str(block_exception_obj)}), log_path_str=log_path_str)
-                        log_event("mr_capsule_funding_drop_persist_failed", _build_vplan_log_payload_dict(
-                            release_obj, vplan_obj, as_of_ts, {"severity_str": "critical",
-                                "error_str": str(persistence_exception_obj), "funding_error_str": str(exception_obj)}),
-                            log_path_str=log_path_str)
-                        continue
-                    if not drop_saved_bool:
-                        continue
-                    suppressed_request_list.extend(request_obj for request_obj in broker_order_request_list
-                        if request_obj.amount_float > 0)
-                    broker_order_request_list = [request_obj for request_obj in broker_order_request_list
-                        if request_obj.amount_float < 0]
-                    log_event(capsule_block_reason_str, _build_vplan_log_payload_dict(
-                        release_obj, vplan_obj, as_of_ts, {"error_str": str(exception_obj),
-                        "suppressed_buy_count_int": len(suppressed_request_list)}), log_path_str=log_path_str)
-                else:
-                    state_store_obj.block_unsubmitted_daily_cycle(int(vplan_obj.decision_plan_id_int), "blocked")
-                    log_event(capsule_block_reason_str, _build_vplan_log_payload_dict(
-                        release_obj, vplan_obj, as_of_ts, {"error_str": str(exception_obj)}), log_path_str=log_path_str)
-                    continue
+                state_store_obj.block_unsubmitted_daily_cycle(int(vplan_obj.decision_plan_id_int), "blocked")
+                log_event(capsule_block_reason_str, _build_vplan_log_payload_dict(
+                    release_obj, vplan_obj, as_of_ts, {"error_str": str(exception_obj)}), log_path_str=log_path_str)
+                continue
         if not state_store_obj.claim_vplan_for_submission(int(vplan_obj.vplan_id_int or 0)):
             blocked_action_count_int += 1
             reason_counter_obj["submission_claim_failed"] += 1

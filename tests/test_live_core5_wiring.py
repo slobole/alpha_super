@@ -127,28 +127,28 @@ def test_qualified_live_fake_cycle_preserves_intent_and_commits_after_close(
         tmp_path, monkeypatch, release_obj, core5_price_df, cycle_str)
     expected_request_list = build_broker_order_request_list_from_vplan(vplan_obj)
     phase_list = []
-    original_funding_fn = broker_obj.get_core5_funding_evidence
+    original_account_fn = broker_obj.get_core5_account_snapshot
     original_claim_fn = store_obj.claim_vplan_for_submission
 
-    def funding_fn(account_route_str, request_list, current_position_dict):
-        phase_list.append("funding")
+    def account_fn(account_route_str, *argument_tuple, **argument_dict):
+        phase_list.append("account_read")
         assert account_route_str == release_obj.account_route_str
-        assert request_list == expected_request_list
-        assert current_position_dict == vplan_obj.current_broker_position_map
         assert store_obj.get_vplan_by_id(vplan_obj.vplan_id_int).status_str == "ready"
-        return original_funding_fn(account_route_str, request_list, current_position_dict)
+        return original_account_fn(account_route_str, *argument_tuple, **argument_dict)
 
     def claim_fn(vplan_id_int):
         phase_list.append("claim")
         return original_claim_fn(vplan_id_int)
 
-    monkeypatch.setattr(broker_obj, "get_core5_funding_evidence", funding_fn)
+    monkeypatch.setattr(broker_obj, "get_core5_account_snapshot", account_fn)
+    monkeypatch.setattr(broker_obj, "get_core5_funding_evidence",
+        lambda *_argument_tuple: pytest.fail("Funding previews were removed (owner decision 2026-10-11)"))
     monkeypatch.setattr(store_obj, "claim_vplan_for_submission", claim_fn)
     prior_state_dict = dict(store_obj.get_pod_state(release_obj.pod_id_str).strategy_state_dict)
     result_dict = runner.submit_ready_vplans(store_obj, broker_obj, decision_obj.submission_timestamp_ts,
         mode_str, False, vplan_id_int=vplan_obj.vplan_id_int, **runner_kwarg_dict)
     assert result_dict["submitted_vplan_count_int"] == 1
-    assert phase_list == ["funding", "claim"]
+    assert phase_list == ["account_read", "claim"]
     deadline_str = (vplan_obj.target_execution_timestamp_ts - timedelta(minutes=2)).isoformat()
     assert broker_obj.submitted_order_request_list == [replace(request_obj,
         submission_deadline_timestamp_str=deadline_str) for request_obj in expected_request_list]
@@ -181,32 +181,6 @@ def test_qualified_live_fake_cycle_preserves_intent_and_commits_after_close(
     assert restarted_store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str).status_str == "completed"
 
 
-@pytest.mark.parametrize("error_obj", [ValueError("Borrow unavailable"),
-    TimeoutError("Margin preview timed out"), NotImplementedError("Funding unsupported")])
-@pytest.mark.parametrize("mode_str", ["paper", "live"])
-def test_unverified_funding_never_claims_or_submits(
-        qualified_release_obj, core5_price_df, tmp_path, monkeypatch, error_obj, mode_str):
-    release_obj = _release_for_mode(qualified_release_obj, mode_str)
-    store_obj, broker_obj, decision_obj, vplan_obj, runner_kwarg_dict = _prepared_cycle(
-        tmp_path, monkeypatch, release_obj, core5_price_df, "long_to_short")
-    prior_state_dict = dict(store_obj.get_pod_state(release_obj.pod_id_str).strategy_state_dict)
-
-    def failed_funding_fn(*argument_tuple):
-        raise error_obj
-
-    monkeypatch.setattr(broker_obj, "get_core5_funding_evidence", failed_funding_fn)
-    monkeypatch.setattr(store_obj, "claim_vplan_for_submission",
-        lambda *_argument_tuple: pytest.fail("Unverified funding claimed a batch"))
-    result_dict = runner.submit_ready_vplans(store_obj, broker_obj, decision_obj.submission_timestamp_ts,
-        mode_str, False, vplan_id_int=vplan_obj.vplan_id_int, **runner_kwarg_dict)
-    assert result_dict["submitted_vplan_count_int"] == 0
-    assert not broker_obj.submitted_order_request_list
-    assert store_obj.get_vplan_by_id(vplan_obj.vplan_id_int).status_str == (
-        "ready" if isinstance(error_obj, TimeoutError) else "submitted")
-    assert store_obj.get_pending_daily_decision_plan_list()
-    assert store_obj.get_pod_state(release_obj.pod_id_str).strategy_state_dict == prior_state_dict
-
-
 def test_base_adapter_cannot_invent_core5_funding_evidence():
     with pytest.raises(NotImplementedError):
         BrokerAdapter.get_core5_funding_evidence(object(), "U_CORE5_TEST", [], {})
@@ -220,11 +194,11 @@ def test_failed_paper_preflight_cannot_downgrade_another_process_submission_clai
     other_store_obj = LiveStateStore(str(tmp_path / "core5.sqlite3"))
     prior_state_dict = dict(store_obj.get_pod_state(release_obj.pod_id_str).strategy_state_dict)
 
-    def competing_claim_then_failure_fn(*argument_tuple):
+    def competing_claim_then_failure_fn(*argument_tuple, **argument_dict):
         assert other_store_obj.claim_vplan_for_submission(vplan_obj.vplan_id_int)
-        raise TimeoutError("This worker lost its margin preview after another worker claimed")
+        raise TimeoutError("This worker lost its account read after another worker claimed")
 
-    monkeypatch.setattr(broker_obj, "get_core5_funding_evidence", competing_claim_then_failure_fn)
+    monkeypatch.setattr(broker_obj, "get_core5_account_snapshot", competing_claim_then_failure_fn)
     monkeypatch.setattr(store_obj, "claim_vplan_for_submission",
         lambda *_argument_tuple: pytest.fail("Failed worker tried to claim"))
     result_dict = runner.submit_ready_vplans(store_obj, broker_obj, decision_obj.submission_timestamp_ts,
@@ -267,36 +241,13 @@ def test_paper_restart_after_claim_reconciles_without_expiring_the_pending_cycle
     assert schedule_obj.reason_code_str == "ready_to_reconcile"
 
 
-@pytest.mark.parametrize("evidence_phase_str", ["submission", "cutoff", "after_cutoff"])
-def test_paper_funding_completion_must_precede_opening_order_cutoff(
-        qualified_release_obj, core5_price_df, tmp_path, monkeypatch, evidence_phase_str):
-    release_obj = _release_for_mode(qualified_release_obj, "paper")
-    store_obj, broker_obj, decision_obj, vplan_obj, runner_kwarg_dict = _prepared_cycle(
-        tmp_path, monkeypatch, release_obj, core5_price_df)
-    cutoff_ts = decision_obj.target_execution_timestamp_ts - timedelta(minutes=2)
-    checked_ts = decision_obj.submission_timestamp_ts if evidence_phase_str == "submission" else (
-        cutoff_ts if evidence_phase_str == "cutoff" else cutoff_ts + timedelta(seconds=1))
-    monkeypatch.setattr(broker_obj, "get_core5_funding_evidence", lambda *_argument_tuple: {
-        "simulated_bool": True, "checked_at_str": checked_ts.isoformat()})
-    if evidence_phase_str != "submission":
-        monkeypatch.setattr(store_obj, "claim_vplan_for_submission",
-            lambda *_argument_tuple: pytest.fail("Late funding evidence claimed a batch"))
-    result_dict = runner.submit_ready_vplans(store_obj, broker_obj, decision_obj.submission_timestamp_ts,
-        "paper", False, vplan_id_int=vplan_obj.vplan_id_int, **runner_kwarg_dict)
-    assert result_dict["submitted_vplan_count_int"] == int(evidence_phase_str == "submission")
-    assert bool(broker_obj.submitted_order_request_list) == (evidence_phase_str == "submission")
-    if evidence_phase_str != "submission":
-        assert store_obj.get_vplan_by_id(vplan_obj.vplan_id_int).status_str == "submitted"
-        assert store_obj.get_pending_daily_decision_plan_list()
-
-
-def test_paper_submit_at_cutoff_never_requests_funding_or_claims(
+def test_paper_submit_at_cutoff_never_reads_account_or_claims(
         qualified_release_obj, core5_price_df, tmp_path, monkeypatch):
     release_obj = _release_for_mode(qualified_release_obj, "paper")
     store_obj, broker_obj, decision_obj, vplan_obj, runner_kwarg_dict = _prepared_cycle(
         tmp_path, monkeypatch, release_obj, core5_price_df)
-    monkeypatch.setattr(broker_obj, "get_core5_funding_evidence",
-        lambda *_argument_tuple: pytest.fail("Cutoff guard ran after funding"))
+    monkeypatch.setattr(broker_obj, "get_core5_account_snapshot",
+        lambda *_argument_tuple, **_argument_dict: pytest.fail("Cutoff guard ran after the account read"))
     monkeypatch.setattr(store_obj, "claim_vplan_for_submission",
         lambda *_argument_tuple: pytest.fail("Cutoff guard allowed a submission claim"))
     result_dict = runner.submit_ready_vplans(store_obj, broker_obj,
@@ -407,7 +358,7 @@ def test_socket_cutoff_stops_dispatch_and_preserves_claimed_cycle_for_daily_reco
 
 @pytest.mark.parametrize("mutation_str", ["other_account", "other_client_order", "changed_position"])
 @pytest.mark.parametrize("mode_str", ["paper", "live"])
-def test_final_account_read_blocks_changed_account_before_funding(
+def test_final_account_read_blocks_changed_account_before_claim(
         qualified_release_obj, core5_price_df, tmp_path, monkeypatch, mutation_str, mode_str):
     release_obj = _release_for_mode(qualified_release_obj, mode_str)
     store_obj, broker_obj, decision_obj, vplan_obj, runner_kwarg_dict = _prepared_cycle(
@@ -417,8 +368,8 @@ def test_final_account_read_blocks_changed_account_before_funding(
         {"open_order_id_list": ["manual:other_client"]} if mutation_str == "other_client_order"
         else {"position_amount_map": {"SPY": 1.0}})
     monkeypatch.setattr(broker_obj, "get_core5_account_snapshot", lambda *_argument_tuple: replace(snapshot_obj, **mutation_dict))
-    monkeypatch.setattr(broker_obj, "get_core5_funding_evidence",
-        lambda *_argument_tuple: pytest.fail("Account validation did not precede funding"))
+    monkeypatch.setattr(store_obj, "claim_vplan_for_submission",
+        lambda *_argument_tuple: pytest.fail("Account validation did not precede the claim"))
     result_dict = runner.submit_ready_vplans(store_obj, broker_obj, decision_obj.submission_timestamp_ts,
         mode_str, False, vplan_id_int=vplan_obj.vplan_id_int, **runner_kwarg_dict)
     assert result_dict["submitted_vplan_count_int"] == 0

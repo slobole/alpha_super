@@ -59,9 +59,9 @@ Capsule stock entry dollars and BIL/SPMO share targets use the same `NAV_T`.
 Parking ETF shares stay fixed from Close T. Stock entry shares use the existing
 pre-submit reference quote: `floor(frozen_entry_dollars / live_reference_price)`.
 The stock/ETF distinction is intentional; capsule stock quantities are not all
-fixed at Close T. Existing dedicated-account, whole-share and margin requirements
+fixed at Close T. Existing dedicated-account and whole-share requirements
 remain. See [capsule prerequisites](../plans/MR_CAPSULE_WIRING_REVIEW_20261005.md)
-and [CORE5 funding/borrow qualification](CORE5_WIRING_20261005.md).
+and [CORE5 wiring](CORE5_WIRING_20261005.md).
 
 ## Opening dispatch and intraday completion
 
@@ -93,13 +93,13 @@ missed and blocked cycles stay pending until daily close reconciliation.
 
 CORE5 quotes are non-blocking diagnostics; frozen Close-T prices are explicitly
 labeled. **There is no new NAV/cash deviation guard and no quote-based resize.**
-Existing account identity, holdings/open-order, validity, funding, borrow and
-qualification checks still apply. A permanent capsule funding-preflight failure
-drops buys while retaining verified initial sells, including BIL sells. The drop
-is committed before submission claim and remains true for the entire cycle,
-including process restarts and every transient retry. A later successful funding
-preview cannot restore those buys. Transient failures before any permanent drop
-retain the complete batch for retry.
+Existing account identity, holdings/open-order and validity checks still apply.
+Owner decision 2026-10-11: like the monthly pods, CORE5 and the capsule run no
+funding, margin or borrow preview before sending. IBKR's own pre-trade checks
+accept or reject each order; the daily close records a rejected order as an
+exception. Known transient errors before any attempted send retain the complete
+batch for retry. A capsule cycle saved before this change with the old funding
+buy drop keeps it for the whole cycle: sells only, and no BIL completion sale.
 
 After the target open and strictly before its exchange close, an already-sent
 cycle may make **one claimed MKT SELL attempt per decision and asset**:
@@ -107,8 +107,7 @@ cycle may make **one claimed MKT SELL attempt per decision and asset**:
 - A non-BIL asset is eligible only when its frozen target is zero and actual
   positive shares remain. No buy, short cover or nonzero-target top-up is added.
 - BIL may sell `max(actual_BIL - frozen_target_BIL, 0)` with a nonnegative target,
-  but only if funding did not drop buys. It is never sold alone by same-day
-  completion after that buy drop, even though the initial batch retained sells.
+  except in a cycle saved with the old (pre-2026-10-11) funding buy drop.
 - A fresh complete all-client order list must show **no open order for that
   symbol**. An unrelated symbol does not block this asset. Refresh again before
   each asset; quantity is `max(actual_shares - frozen_target_shares, 0)`.

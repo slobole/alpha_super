@@ -94,15 +94,12 @@ def _assert_closes_once_after_session(case_obj, monkeypatch):
         assert connection_obj.execute("SELECT COUNT(*) FROM mr_capsule_execution_alert").fetchone()[0] == 1
 
 
-@pytest.mark.parametrize("stage_str", ["account", "funding", "trace"])
+@pytest.mark.parametrize("stage_str", ["account", "trace"])
 def test_transient_errors_before_place_order_remain_retryable_until_cutoff(core5_case, monkeypatch, stage_str):
     case_obj = core5_case
     if stage_str == "account":
         original_fn = case_obj.broker_obj.get_core5_account_snapshot
         owner_obj, name_str = case_obj.broker_obj, "get_core5_account_snapshot"
-    elif stage_str == "funding":
-        original_fn = case_obj.broker_obj.get_core5_funding_evidence
-        owner_obj, name_str = case_obj.broker_obj, "get_core5_funding_evidence"
     else:
         original_fn = runner._emit_live_trace_event
         owner_obj, name_str = runner, "_emit_live_trace_event"
@@ -200,7 +197,7 @@ def test_wall_clock_crossing_cutoff_stops_retry_and_awaits_daily_close(core5_cas
         monkeypatch.setattr(socket_broker_obj, "qualifyContracts", slow_timeout_fn)
         monkeypatch.setattr(case_obj.broker_obj, "submit_order_request_list", socket_obj.submit_order_request_list)
     else:
-        monkeypatch.setattr(case_obj.broker_obj, "get_core5_funding_evidence", slow_timeout_fn)
+        monkeypatch.setattr(case_obj.broker_obj, "get_core5_account_snapshot", slow_timeout_fn)
     assert _submit(case_obj)["submitted_vplan_count_int"] == 0
     _assert_pending_daily_requests(case_obj,
         {request_obj.order_request_key_str for request_obj in build_broker_order_request_list_from_vplan(case_obj.vplan_obj)})
@@ -212,7 +209,8 @@ def test_wall_clock_crossing_cutoff_stops_retry_and_awaits_daily_close(core5_cas
 def test_core5_cutoff_prevents_preflight_and_records_every_unsent_request(core5_case, monkeypatch):
     case_obj = core5_case
     cutoff_ts = case_obj.vplan_obj.target_execution_timestamp_ts - timedelta(minutes=2)
-    monkeypatch.setattr(case_obj.broker_obj, "get_core5_funding_evidence", lambda *argument_tuple: pytest.fail("cutoff reached funding"))
+    monkeypatch.setattr(case_obj.broker_obj, "get_core5_account_snapshot",
+        lambda *argument_tuple, **argument_dict: pytest.fail("cutoff reached the account read"))
     monkeypatch.setattr(case_obj.store_obj, "claim_vplan_for_submission", lambda *argument_tuple: pytest.fail("cutoff claimed dispatch"))
     assert _submit(case_obj, cutoff_ts)["submitted_vplan_count_int"] == 0
     _assert_pending_daily_requests(case_obj,
@@ -228,7 +226,7 @@ def test_capsule_cutoff_uses_same_deadline_and_no_broker_dispatch(capsule_case, 
         vplan_obj=vplan_obj, decision_obj=decision_obj, option_dict=option_dict)
     cutoff_ts = vplan_obj.target_execution_timestamp_ts - timedelta(minutes=2)
     _freeze_dispatch_clock(monkeypatch, [cutoff_ts])
-    monkeypatch.setattr(broker_obj, "get_capsule_funding_evidence", lambda *argument_tuple: pytest.fail("cutoff reached funding"))
+    monkeypatch.setattr(broker_obj, "get_capsule_account_snapshot", lambda *argument_tuple: pytest.fail("cutoff reached the account read"))
     assert _submit(case_obj, cutoff_ts)["submitted_vplan_count_int"] == 0
     _assert_pending_daily_requests(case_obj,
         {request_obj.order_request_key_str for request_obj in build_broker_order_request_list_from_vplan(vplan_obj)})
@@ -236,20 +234,20 @@ def test_capsule_cutoff_uses_same_deadline_and_no_broker_dispatch(capsule_case, 
     _assert_closes_once_after_session(case_obj, monkeypatch)
 
 
-def test_capsule_transient_funding_retry_retains_buy_and_sell(capsule_case, monkeypatch):
+def test_capsule_transient_account_read_retry_retains_buy_and_sell(capsule_case, monkeypatch):
     store_obj, broker_obj, release_obj, vplan_obj, option_dict, _ = capsule_case
     decision_obj = store_obj.get_decision_plan_by_id(vplan_obj.decision_plan_id_int)
     case_obj = SimpleNamespace(store_obj=store_obj, broker_obj=broker_obj, release_obj=release_obj,
         vplan_obj=vplan_obj, decision_obj=decision_obj, option_dict=option_dict)
     _freeze_dispatch_clock(monkeypatch, [decision_obj.submission_timestamp_ts])
-    funding_fn = broker_obj.get_capsule_funding_evidence
+    account_fn = broker_obj.get_capsule_account_snapshot
     def transient_fn(*argument_tuple):
-        raise TimeoutError("temporary margin preview timeout")
-    monkeypatch.setattr(broker_obj, "get_capsule_funding_evidence", transient_fn)
+        raise TimeoutError("temporary account read timeout")
+    monkeypatch.setattr(broker_obj, "get_capsule_account_snapshot", transient_fn)
     assert _submit(case_obj)["submitted_vplan_count_int"] == 0
     assert store_obj.get_vplan_by_id(vplan_obj.vplan_id_int).status_str == "ready"
     assert store_obj.get_decision_plan_by_id(vplan_obj.decision_plan_id_int).status_str == "vplan_ready"
-    monkeypatch.setattr(broker_obj, "get_capsule_funding_evidence", funding_fn)
+    monkeypatch.setattr(broker_obj, "get_capsule_account_snapshot", account_fn)
     assert _submit(case_obj)["submitted_vplan_count_int"] == 1
     assert [(request_obj.asset_str, request_obj.amount_float) for request_obj in broker_obj.submitted_order_request_list] == [("BIL", -100.0), ("AAPL", 80.0)]
 

@@ -35,9 +35,9 @@ def validate_core5_release(release_obj: LiveRelease, *, require_live_qualificati
             raise ValueError(f"CORE5 requires {field_str}={expected_value_obj!r}.")
     # Owner decision 2026-10-11: no LIVE attestation (accounts are margin
     # accounts). Older YAMLs may still carry these keys; they are ignored.
-    # runner still checks account-wide cash, margin previews and
-    # shortability before every submit. require_live_qualification_bool is
-    # kept for existing callers.
+    # IBKR's own pre-trade checks decide funding, margin and DBC borrow, as
+    # for the monthly pods. require_live_qualification_bool is kept for
+    # existing callers.
     if set(release_obj.params_dict) - {"capital_base_float", "margin_account_confirmed_bool", "core5_live_qualification_dict"}:
         raise ValueError("CORE5 uses the approved default strategy parameters; overrides require separate parity qualification.")
 

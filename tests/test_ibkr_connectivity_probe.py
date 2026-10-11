@@ -1,5 +1,4 @@
 """IBKR connectivity probe: unchanged default output, plus the read-only daily pod checks; fake broker only."""
-from contextlib import contextmanager
 from datetime import UTC, datetime
 import json
 from pathlib import Path
@@ -9,9 +8,7 @@ from types import ModuleType
 import pytest
 import yaml
 
-from alpha.live.core5_broker import get_core5_funding_evidence
 from alpha.live.daily_broker import DailyExecutionSnapshot
-from alpha.live.ibkr_socket_client import IBKRSocketClient
 from alpha.live.models import BrokerSnapshot
 import scripts.live_debug.ibkr_connectivity_probe as probe_module
 
@@ -22,10 +19,6 @@ CORE5_TEMPLATE_STR = "pod_taa_adaptive_macro_core5_daily_moo.yaml.example"
 CAPSULE_TEMPLATE_STR = "pod_mr_dv2_vix_gated_bil_daily_moo.yaml.example"
 # The last commit before the daily pod checks were added to this probe.
 PRE_MERGE_COMMIT_STR = "6cdba8f"
-
-
-class _ReachedBroker(Exception):
-    pass
 
 
 def _report_dict():
@@ -43,7 +36,6 @@ class FakeAdapter:
         self.kwargs_dict = kwargs
         self.fail_dict = fail_dict or {}
         self.call_list = []
-        self.request_list = []
 
     def _call(self, name_str, value_obj):
         self.call_list.append(name_str)
@@ -70,16 +62,11 @@ class FakeAdapter:
         now_ts = datetime.now(UTC)
         return self._call("get_daily_execution_snapshot", DailyExecutionSnapshot(self._snapshot(), [], now_ts, now_ts))
 
-    def get_core5_funding_evidence(self, account_route_str, request_list, position_dict):
-        self.request_list = list(request_list)
-        return self._call("get_core5_funding_evidence", {"trading_type_str": "STKMRGN", "available_funds_float": 50000.0,
-            "excess_liquidity_float": 60000.0, "dbc_shortable_shares_float": 1000000.0,
-            "preview_list": [{"asset_str": request_obj.asset_str, "status_str": "PreSubmitted"} for request_obj in request_list]})
+    def get_core5_funding_evidence(self, *_args):
+        raise AssertionError("Funding previews were removed (owner decision 2026-10-11).")
 
-    def get_capsule_funding_evidence(self, account_route_str, request_list):
-        self.request_list = list(request_list)
-        return self._call("get_capsule_funding_evidence", {"trading_type_str": "STKMRGN", "buying_power_float": 200000.0,
-            "preview_list": [{"asset_str": request_obj.asset_str, "status_str": "PreSubmitted"} for request_obj in request_list]})
+    def get_capsule_funding_evidence(self, *_args):
+        raise AssertionError("Funding previews were removed (owner decision 2026-10-11).")
 
     def submit_order_request_list(self, **_kwargs):
         raise AssertionError("The probe must never reach an order call.")
@@ -133,17 +120,15 @@ def test_default_output_is_identical_to_the_pre_merge_probe(monkeypatch, capsys,
     assert observation_list[1] == observation_list[0]
 
 
-def test_core5_daily_checks_run_every_read_and_sample_a_dbc_short(tmp_path, capsys, monkeypatch):
+def test_core5_daily_checks_run_the_serve_reads_only(tmp_path, capsys, monkeypatch):
     exit_int, fake_obj, output_obj = _run_daily(tmp_path, CORE5_TEMPLATE_STR, capsys, monkeypatch)
     assert exit_int == 0
     assert fake_obj.kwargs_dict["client_id_int"] == 90 and fake_obj.kwargs_dict["port_int"] == 7497
     assert fake_obj.call_list == ["get_visible_account_route_set", "get_core5_account_snapshot",
-        "get_daily_execution_snapshot", "get_core5_funding_evidence"]
-    amount_dict = {request_obj.asset_str: request_obj.amount_float for request_obj in fake_obj.request_list}
-    # DBC held long 10: the sample sells 11 so the account ends one share short.
-    assert amount_dict == {"SPY": 1.0, "IEF": 1.0, "GLD": 1.0, "DBC": -11.0, "UUP": 1.0, "BIL": 1.0}
+        "get_daily_execution_snapshot"]
     assert "IBKR connectivity probe" in output_obj.out
-    assert "no order is transmitted" in output_obj.out and output_obj.out.count("  PASS  ") == 4
+    assert "no order is transmitted" in output_obj.out and output_obj.out.count("  PASS  ") == 3
+    assert "what-if" not in output_obj.out
     assert "RESULT: all daily pod checks passed." in output_obj.out
 
 
@@ -151,32 +136,23 @@ def test_capsule_daily_checks_use_the_capsule_reads(tmp_path, capsys, monkeypatc
     exit_int, fake_obj, _ = _run_daily(tmp_path, CAPSULE_TEMPLATE_STR, capsys, monkeypatch)
     assert exit_int == 0
     assert fake_obj.call_list == ["get_visible_account_route_set", "get_eod_account_snapshot",
-        "get_capsule_account_snapshot", "get_daily_execution_snapshot", "get_capsule_funding_evidence"]
-    assert [(request_obj.asset_str, request_obj.amount_float) for request_obj in fake_obj.request_list] == [
-        ("AAPL", 1.0), ("BIL", 1.0)]
+        "get_capsule_account_snapshot", "get_daily_execution_snapshot"]
 
 
 def test_a_failed_daily_check_is_reported_and_the_other_steps_still_run(tmp_path, capsys, monkeypatch):
-    error_obj = ValueError("CORE5 requires a verified standard margin account (IBKR TradingType-S).")
-    exit_int, _, output_obj = _run_daily(tmp_path, CORE5_TEMPLATE_STR, capsys, monkeypatch,
-        fail_dict={"get_core5_funding_evidence": error_obj})
-    assert exit_int == 1
-    assert "FAIL  Pre-submit margin, funding and DBC borrow check (what-if only): ValueError: CORE5 requires" in output_obj.out
-    assert "PASS  Daily close read" in output_obj.out and "at least one daily pod check failed" in output_obj.out
-
-
-def test_a_failed_account_read_skips_the_core5_margin_check(tmp_path, capsys, monkeypatch):
+    error_obj = ValueError("CORE5 requires unambiguous USD TotalCashValue.")
     exit_int, fake_obj, output_obj = _run_daily(tmp_path, CORE5_TEMPLATE_STR, capsys, monkeypatch,
-        fail_dict={"get_core5_account_snapshot": ValueError("CORE5 requires unambiguous USD TotalCashValue.")})
-    assert exit_int == 1 and "get_core5_funding_evidence" not in fake_obj.call_list
-    assert "skipped: needs the account read above to pass first" in output_obj.out
+        fail_dict={"get_core5_account_snapshot": error_obj})
+    assert exit_int == 1 and fake_obj.call_list[-1] == "get_daily_execution_snapshot"
+    assert "FAIL  Account read (16:10 and before sending): ValueError: CORE5 requires" in output_obj.out
+    assert "PASS  Daily close read" in output_obj.out and "at least one daily pod check failed" in output_obj.out
 
 
 def test_json_output_adds_the_daily_checks(tmp_path, capsys, monkeypatch):
     exit_int, _, output_obj = _run_daily(tmp_path, CAPSULE_TEMPLATE_STR, capsys, monkeypatch, "--json")
     result_dict = json.loads(output_obj.out)
     assert exit_int == 0 and result_dict["daily_pod_checks_passed_bool"] is True
-    assert len(result_dict["daily_pod_check_list"]) == 5 and result_dict["connected_bool"] is True
+    assert len(result_dict["daily_pod_check_list"]) == 4 and result_dict["connected_bool"] is True
 
 
 @pytest.mark.parametrize("case_str", ["no_manifest", "monthly_release", "pod_client_id", "no_client_id"])
@@ -195,31 +171,9 @@ def test_daily_checks_refuse_before_connecting(tmp_path, capsys, monkeypatch, ca
     assert exit_int == 2 and "daily pod checks:" in capsys.readouterr().err
 
 
-def test_read_only_wrapper_blocks_every_order_call():
+def test_read_only_wrapper_blocks_every_order_and_preview_call():
     broker_obj = probe_module.ReadOnlyBroker(FakeAdapter())
-    for name_str in ("submit_order_request_list", "cancel_daily_owned_orders", "submit_manual_order"):
+    for name_str in ("submit_order_request_list", "cancel_daily_owned_orders", "submit_manual_order",
+                     "get_core5_funding_evidence", "get_capsule_funding_evidence"):
         with pytest.raises(AttributeError, match="read-only"):
             getattr(broker_obj, name_str)
-
-
-def test_sample_orders_pass_the_production_validation(tmp_path):
-    """The real checks validate requests before connecting: reaching connect proves they are accepted."""
-    release_obj = probe_module.parse_release_manifest(str(_release_path(tmp_path, CORE5_TEMPLATE_STR)))
-
-    class BrokerStopsAtConnect:
-        timeout_seconds_float = 4.0
-
-        @contextmanager
-        def connect(self):
-            raise _ReachedBroker()
-            yield
-
-    for position_dict in ({}, {"DBC": 10.0}, {"DBC": -5.0, "SPY": 3.0}):
-        with pytest.raises(_ReachedBroker):
-            get_core5_funding_evidence(BrokerStopsAtConnect(), "U_PROBE",
-                probe_module.core5_sample_request_list(release_obj, position_dict), position_dict)
-    capsule_release_obj = probe_module.parse_release_manifest(str(_release_path(tmp_path, CAPSULE_TEMPLATE_STR)))
-    socket_client_obj = IBKRSocketClient()
-    socket_client_obj.connect = BrokerStopsAtConnect().connect
-    with pytest.raises(_ReachedBroker):
-        socket_client_obj.get_capsule_funding_evidence("U_PROBE", probe_module.capsule_sample_request_list(capsule_release_obj))
