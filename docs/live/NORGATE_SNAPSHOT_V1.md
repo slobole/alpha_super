@@ -480,3 +480,19 @@ uv run --with pytest python -m pytest `
   tests/test_live_runner.py::test_tick_does_not_build_decision_plan_when_snapshot_sync_waits `
   tests/test_live_runner.py::test_tick_blocks_only_decision_plan_build_when_snapshot_sync_not_ready -q
 ```
+
+## E2 sector-capped NDX monthly profile (2026-10-11)
+
+`norgate_eod_ndx_e2_pit_plus_vxn_helper` is a new schema-v2 profile for the two
+independent E2 components. It preserves the existing NDX profiles and carries
+1999-through-T PIT history, native nominal-close anchors, SPY and `$SPXTR`
+TOTALRETURN references, `$VXN`, and a complete current-at-export GICS level-1
+map with hash and capture timestamp. Clients validate the map and price history
+locally and never fetch classifications from the provider. Current PIT members,
+SPY and `$SPXTR` also require unpadded T endpoint proof matching exported Close_T;
+VXN retains prior-as-of behavior. Missing/invalid data stops a new decision. Native eight-digit GICS IDs are preserved; successful
+unclassified symbols share UNKNOWN, while provider errors abort export.
+
+The new profile and disabled templates do not activate any account. See
+[E2 wiring](NDX_E2_WIRING_20261011.md) for exact rules, monthly pre-open sizing,
+rollout prerequisites, historical-GICS limitations and verification evidence.

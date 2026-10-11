@@ -3,7 +3,8 @@ NATR20 Nasdaq-100 momentum with monthly VXN scaling and a 40% GICS-sector cap.
 
 The NATR20 book of the NDX design of record "E2 + 40% sector cap" (Scout amendment A15, 2026-10-04); the
 dollar-ATR book is strategy_mo_atr_normalized_ndx_vxn_scaled_sector_cap.py and the pair is held 50/50 in
-portfolios/ndx_e2_sector_cap_5050.yaml. Research / PM only; nothing here is wired to a live account.
+portfolios/ndx_e2_sector_cap_5050.yaml. WIRED as an independent monthly account route; disabled templates and
+execution contract: docs/live/NDX_E2_WIRING_20261011.md. No deployment is implied.
 
 Everything is strategy_mo_natr20_ndx_vxn_scaled except the top-N walk:
 

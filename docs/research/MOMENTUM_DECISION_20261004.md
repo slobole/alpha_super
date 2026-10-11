@@ -1,5 +1,7 @@
 # Momentum family: map, evidence and decision (2026-10-04)
 
+**Implementation update (2026-10-11):** both capped E2 components are WIRED as independent account routes, with disabled templates. The historical research decision below is unchanged. See [E2 wiring and execution contract](../live/NDX_E2_WIRING_20261011.md).
+
 **Owner request (2026-10-04):** put everything about the momentum strategies in order (what exists, what was chosen,
 the statistics) and decide on the momentum strategy.
 

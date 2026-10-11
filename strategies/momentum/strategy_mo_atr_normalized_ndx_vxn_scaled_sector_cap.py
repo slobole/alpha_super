@@ -4,7 +4,8 @@ The LIVE NDX VXN pod rule (dollar ATR20 ranking) with a 40% GICS-sector cap.
 One of the two books of the NDX design of record "E2 + 40% sector cap" (Scout amendment A15, 2026-10-04,
 docs/research/SCOUT_ROBUSTNESS_20261002.md): this file is the dollar-ATR book, and its sibling
 strategy_mo_natr20_ndx_vxn_scaled_sector_cap.py is the NATR20 book. The pair is held 50/50 in
-portfolios/ndx_e2_sector_cap_5050.yaml. Research / PM only; nothing here is wired to a live account.
+portfolios/ndx_e2_sector_cap_5050.yaml. WIRED as an independent monthly account route; disabled templates and
+execution contract: docs/live/NDX_E2_WIRING_20261011.md. No deployment is implied.
 
 Everything is the live strategy (strategy_mo_atr_normalized_ndx_vxn_scaled) except the top-N walk:
 
@@ -145,7 +146,15 @@ class SectorCapVxnScaledAtrNormalizedNdxStrategy(SectorCapSelectionMixin, VxnSca
 
 def sector_map_for_universe(universe_df: pd.DataFrame) -> dict[str, str]:
     """Current GICS level-1 sector for every symbol that was ever a member (Norgate, fetched once)."""
-    return build_current_gics_sector_map(sorted(str(s) for s in universe_df.columns))
+    from data.norgate_snapshot_store import (
+        NDX_E2_PROFILE_STR, get_active_data_profile_str, is_snapshot_mode_enabled_bool, load_ndx_e2_sector_map,
+    )
+    symbol_list = sorted(str(symbol_str) for symbol_str in universe_df.columns)
+    if get_active_data_profile_str() == NDX_E2_PROFILE_STR:
+        if not is_snapshot_mode_enabled_bool():
+            raise RuntimeError("E2 deployment/reference sector maps require snapshot mode.")
+        return load_ndx_e2_sector_map(symbol_list)
+    return build_current_gics_sector_map(symbol_list)
 
 
 def configured_config(

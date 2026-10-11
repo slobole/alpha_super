@@ -2,7 +2,9 @@
 # docs/research/SCOUT_ROBUSTNESS_20261002.md): 50% the live dollar-ATR NDX VXN rule and
 # 50% the NATR20 rule, each capped at 4 of 10 names per current-label GICS sector,
 # rebalanced back to 50/50 monthly (both books trade at month end, as in the Scout study).
-# Research book: the live NDX pod is unchanged. History through 2026 has been examined.
+# Research aggregation: both components are WIRED to independent accounts.
+# This file does not transfer capital or rebalance live accounts to 50/50.
+# The existing live NDX pod is unchanged. History through 2026 has been examined.
 name_str: "ndx_e2_sector_cap_5050"
 capital_base_float: 1e+06
 backtest_start_date_str: "2000-01-01"

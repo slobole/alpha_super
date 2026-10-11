@@ -1,0 +1,54 @@
+# Disabled template for one independent E2 sector-capped momentum component.
+# Copy to alpha/live/releases/<client_id>/<pod_id>.yaml and edit the copy only.
+# Give this component its own account; no combined 50/50 allocation is implemented.
+# Close_T determines weights; pre-open broker NAV and reference quotes determine shares.
+identity:
+  release_id: your_user.pod_ndx_natr20_vxn_scaled_sector_cap.monthly_open.v1
+  user_id: your_user
+  pod_id: pod_ndx_natr20_vxn_scaled_sector_cap_01
+
+deployment:
+  mode: paper
+  enabled_bool: false
+
+broker:
+  account_route: DU_YOUR_NATR20_PAPER_ACCOUNT
+  host_str: 127.0.0.1
+  port_int: 7497
+  client_id_int: 49 # Keep unique per running API process.
+  timeout_seconds_float: 4.0
+
+strategy:
+  strategy_import_str: strategies.momentum.strategy_mo_natr20_ndx_vxn_scaled_sector_cap:SectorCapNatr20VxnScaledNdxStrategy
+  data_profile_str: norgate_eod_ndx_e2_pit_plus_vxn_helper
+  params:
+    max_positions_int: 10
+    sector_cap_int: 4
+    lookback_month_int: 12
+    index_trend_window_int: 200
+    stock_trend_window_int: 100
+    regime_symbol_str: SPY
+    vxn_symbol_str: "$VXN"
+    target_vxn_pct_float: 22.0
+    min_exposure_scale_float: 0.25
+    max_exposure_scale_float: 1.0
+    slippage_float: 0.00025
+    commission_per_share_float: 0.005
+    commission_minimum_float: 1.0
+
+market:
+  session_calendar_id_str: XNYS
+
+schedule:
+  signal_clock_str: month_end_snapshot_ready
+  execution_policy_str: next_month_first_open
+
+execution:
+  pod_budget_fraction_float: 1.0 # Fraction of this component's dedicated account NAV.
+  auto_submit_enabled_bool: false
+
+bootstrap:
+  initial_cash_float: 100000.0 # Initial model state; pre-open broker NAV sizes orders.
+
+risk:
+  risk_profile_str: standard_monthly_momentum_vxn_scaled_sector_cap

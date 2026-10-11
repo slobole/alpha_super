@@ -30,7 +30,7 @@ import pandas as pd
 
 from alpha.live.models import LiveRelease
 from data.norgate_loader import is_snapshot_mode_enabled_bool, load_latest_snapshot_session_label_ts
-from data.norgate_snapshot_store import CORE5_PROFILE_STR, MR_CAPSULE_DV2_PROFILE_STR, MR_CAPSULE_HPI_PROFILE_STR
+from data.norgate_snapshot_store import CORE5_PROFILE_STR, MR_CAPSULE_DV2_PROFILE_STR, MR_CAPSULE_HPI_PROFILE_STR, NDX_E2_PROFILE_STR
 
 
 DEFAULT_SUBMISSION_BUFFER_MINUTES_INT = 10
@@ -50,6 +50,7 @@ SIGNAL_CLOCK_ALIAS_MAP: dict[str, str] = {
     "pre_close_1545_et": "pre_close_15m",
 }
 DATA_PROFILE_HEARTBEAT_SYMBOL_MAP: dict[str, str] = {
+    NDX_E2_PROFILE_STR: "$SPX",
     CORE5_PROFILE_STR: "$SPX",
     MR_CAPSULE_DV2_PROFILE_STR: "$SPX",
     MR_CAPSULE_HPI_PROFILE_STR: "$SPX",

@@ -80,7 +80,20 @@ HELPER_PROFILE_BY_SYMBOL_DICT: dict[str, str] = {
     "$VIX": "norgate_eod_etf_plus_vix_helper",
     "$VXN": "norgate_eod_ndx_pit_plus_vxn_helper",
 }
+NDX_E2_PROFILE_STR = "norgate_eod_ndx_e2_pit_plus_vxn_helper"
+NDX_E2_PRICE_HISTORY_START_DATE_STR = "1999-01-01"
+NDX_E2_DATA_CONTRACT_DICT = {
+    "price_history_start_date_str": NDX_E2_PRICE_HISTORY_START_DATE_STR,
+    "price_padding_setting_str": "ALLMARKETDAYS",
+    "past_member_tail_policy_str": "exact",
+    "sector_classification_source_str": "Norgate",
+    "sector_classification_scheme_str": "GICS",
+    "sector_classification_level_int": 1,
+    "sector_classification_basis_str": "current_at_export",
+}
+NDX_E2_SECTOR_ID_SET = {"10000000", "15000000", "20000000", "25000000", "30000000", "35000000", "40000000", "45000000", "50000000", "55000000", "60000000", "UNKNOWN"}
 NDX_PROFILE_SET = {
+    NDX_E2_PROFILE_STR,
     "norgate_eod_ndx_pit",
     "norgate_eod_ndx_pit_plus_vxn_helper",
 }
@@ -296,6 +309,115 @@ def _validate_price_contract(
                 "NDX schema-v2 snapshot is missing SPY adjustment rows: "
                 f"{sorted(missing_spy_adjustment_set)}"
             )
+
+
+def ndx_e2_sector_map_hash_str(sector_by_symbol_dict: dict[str, str]) -> str:
+    return hashlib.sha256(json.dumps(
+        sector_by_symbol_dict, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")).hexdigest()
+
+
+def _validate_ndx_e2_snapshot_contract(
+    snapshot_dir_path_obj: Path, manifest_dict: dict[str, Any], snapshot_date_ts: pd.Timestamp,
+) -> None:
+    if manifest_dict.get("schema_version") != SNAPSHOT_SCHEMA_VERSION_INT:
+        raise NorgateSnapshotValidationError("E2 requires the current snapshot schema.")
+    contract_dict = manifest_dict.get("data_contract", {})
+    if not isinstance(contract_dict, dict) or any(
+        contract_dict.get(key_str) != value_obj for key_str, value_obj in NDX_E2_DATA_CONTRACT_DICT.items()
+    ):
+        raise NorgateSnapshotValidationError("E2 sector/price data contract is incomplete.")
+    if contract_dict.get("sector_snapshot_date_str") != snapshot_date_ts.date().isoformat():
+        raise NorgateSnapshotValidationError("E2 sector map belongs to another snapshot date.")
+    try:
+        observed_ts = datetime.fromisoformat(contract_dict["sector_observed_timestamp_str"])
+        if observed_ts.tzinfo is None:
+            raise ValueError("Timezone missing")
+    except (KeyError, TypeError, ValueError) as exception_obj:
+        raise NorgateSnapshotValidationError("E2 sector observation timestamp is invalid.") from exception_obj
+    sector_by_symbol_dict = contract_dict.get("sector_by_symbol_dict")
+    if not isinstance(sector_by_symbol_dict, dict) or not sector_by_symbol_dict or any(
+        not isinstance(symbol_str, str) or not symbol_str.strip()
+        or not isinstance(sector_str, str) or sector_str not in NDX_E2_SECTOR_ID_SET
+        for symbol_str, sector_str in sector_by_symbol_dict.items()
+    ):
+        raise NorgateSnapshotValidationError("E2 requires explicit GICS sectors or UNKNOWN for every symbol.")
+    if contract_dict.get("sector_map_hash_str") != ndx_e2_sector_map_hash_str(sector_by_symbol_dict):
+        raise NorgateSnapshotValidationError("E2 sector map hash mismatch.")
+    _validate_file_hash(snapshot_dir_path_obj, manifest_dict, UNIVERSE_FILE_NAME_STR)
+    universe_df = pd.read_parquet(snapshot_dir_path_obj / UNIVERSE_FILE_NAME_STR)
+    if "date" in universe_df.columns:
+        universe_df = universe_df.set_index("date")
+    if set(map(str, universe_df.columns)) != set(sector_by_symbol_dict):
+        raise NorgateSnapshotValidationError("E2 sector map must cover the complete PIT universe.")
+    # *** CRITICAL *** Membership at Close_T must exist explicitly; no later row
+    # or forward-filled month-end membership may certify the signal session.
+    universe_date_idx = pd.DatetimeIndex(pd.to_datetime(universe_df.index)).normalize()
+    if universe_date_idx.has_duplicates or snapshot_date_ts not in universe_date_idx:
+        raise NorgateSnapshotValidationError("E2 PIT universe lacks a unique snapshot-session row.")
+    membership_df = universe_df.apply(pd.to_numeric, errors="coerce")
+    if not membership_df.isin([0, 1]).all().all():
+        raise NorgateSnapshotValidationError("E2 PIT membership must contain only explicit zero/one values.")
+    if set(manifest_dict.get("required_helpers", [])) != {"$VXN"}:
+        raise NorgateSnapshotValidationError("E2 requires the VXN helper.")
+    expected_symbol_set = set(sector_by_symbol_dict) | {"SPY"}
+    if set(manifest_dict.get("required_symbols", [])) != expected_symbol_set | {"$SPXTR"}:
+        raise NorgateSnapshotValidationError("E2 manifest symbols differ from its PIT universe and benchmark.")
+    price_column_set = set(pq.read_schema(snapshot_dir_path_obj / PRICE_FILE_NAME_STR).names)
+    if not {"Open", "High", "Low", "Close", "Unadjusted Close"}.issubset(price_column_set):
+        raise NorgateSnapshotValidationError("E2 requires OHLC and nominal closing-price anchors.")
+    price_df = pd.read_parquet(snapshot_dir_path_obj / PRICE_FILE_NAME_STR)
+    price_date_ser = pd.to_datetime(price_df["date"]).dt.normalize()
+    if (price_date_ser > snapshot_date_ts).any() or price_df.duplicated(["date", "symbol_str", "adjustment_str"]).any():
+        raise NorgateSnapshotValidationError("E2 price rows are duplicated or later than the snapshot session.")
+    capital_df = price_df.loc[price_df["adjustment_str"] == CAPITALSPECIAL_ADJUSTMENT_STR]
+    stock_df = capital_df.loc[capital_df["symbol_str"].isin(expected_symbol_set) & capital_df["Close"].notna()]
+    anchor_mat = stock_df[["Open", "High", "Low", "Close", "Unadjusted Close"]].apply(pd.to_numeric, errors="coerce").to_numpy(dtype=float)
+    if not np.isfinite(anchor_mat).all() or (anchor_mat <= 0).any():
+        raise NorgateSnapshotValidationError("E2 observed stock OHLC/raw anchors must be finite and positive.")
+    current_member_set = set(universe_df.columns[membership_df.loc[universe_date_idx == snapshot_date_ts].iloc[0] == 1])
+    expected_endpoint_dict = {symbol_str: snapshot_date_ts.date().isoformat()
+        for symbol_str in current_member_set | {"SPY", "$SPXTR"}}
+    if contract_dict.get("observed_endpoint_date_by_symbol_dict") != expected_endpoint_dict:
+        raise NorgateSnapshotValidationError("E2 requires unpadded source observations through the snapshot session.")
+    latest_price_df = stock_df.loc[pd.to_datetime(stock_df["date"]).dt.normalize() == snapshot_date_ts]
+    if not (current_member_set | {"SPY"}).issubset(set(latest_price_df["symbol_str"])):
+        raise NorgateSnapshotValidationError("E2 current PIT members and SPY require snapshot-session prices.")
+    spy_df = capital_df.loc[capital_df["symbol_str"] == "SPY"]
+    spy_date_idx = pd.DatetimeIndex(pd.to_datetime(spy_df["date"])).normalize().sort_values()
+    if spy_date_idx.empty or spy_df["Close"].isna().any():
+        raise NorgateSnapshotValidationError("E2 SPY regime history must not contain missing closes.")
+    import exchange_calendars as calendar_module
+    calendar_obj = calendar_module.get_calendar("XNYS", start=str((spy_date_idx[0] - pd.Timedelta(days=31)).date()), end=str((snapshot_date_ts + pd.Timedelta(days=31)).date()))
+    expected_session_idx = calendar_obj.sessions_in_range(spy_date_idx[0], snapshot_date_ts).tz_localize(None)
+    if not spy_date_idx.equals(expected_session_idx):
+        raise NorgateSnapshotValidationError("E2 SPY regime history must cover every XNYS session through T.")
+    # *** CRITICAL *** Rolling windows count sessions, not surviving observations.
+    # Preserve legitimate pre-inception/post-delisting gaps, but a hole between
+    # a stock's first and last observed prices must never shorten its windows.
+    for symbol_str, symbol_price_df in stock_df.groupby("symbol_str"):
+        symbol_date_idx = pd.DatetimeIndex(pd.to_datetime(symbol_price_df["date"])).normalize().sort_values()
+        expected_symbol_idx = expected_session_idx[(expected_session_idx >= symbol_date_idx[0]) & (expected_session_idx <= symbol_date_idx[-1])]
+        if not symbol_date_idx.equals(expected_symbol_idx):
+            raise NorgateSnapshotValidationError(f"E2 stock history has a missing market session: {symbol_str}.")
+    benchmark_df = price_df.loc[(price_df["symbol_str"] == "$SPXTR") & (price_df["adjustment_str"] == TOTALRETURN_ADJUSTMENT_STR)]
+    benchmark_date_idx = pd.DatetimeIndex(pd.to_datetime(benchmark_df["date"])).normalize().sort_values()
+    benchmark_close_vec = pd.to_numeric(benchmark_df["Close"], errors="coerce").to_numpy(dtype=float)
+    if not benchmark_date_idx.equals(expected_session_idx) or not np.isfinite(benchmark_close_vec).all() or (benchmark_close_vec <= 0).any():
+        raise NorgateSnapshotValidationError("E2 requires complete TOTALRETURN SPXTR benchmark history.")
+    vxn_ser = pd.to_numeric(capital_df.loc[capital_df["symbol_str"] == "$VXN", "Close"], errors="coerce")
+    if vxn_ser.empty or not np.isfinite(vxn_ser).all() or (vxn_ser <= 0).any():
+        raise NorgateSnapshotValidationError("E2 requires finite positive as-of VXN observations.")
+
+
+def load_ndx_e2_sector_map(
+    symbol_list: Sequence[str], *, snapshot_date_str: str | None = None,
+) -> dict[str, str]:
+    snapshot_obj = load_valid_snapshot_manifest(NDX_E2_PROFILE_STR, snapshot_date_str=snapshot_date_str)
+    sector_by_symbol_dict = snapshot_obj.manifest_dict["data_contract"]["sector_by_symbol_dict"]
+    if not set(symbol_list).issubset(sector_by_symbol_dict):
+        raise NorgateSnapshotValidationError("E2 sector snapshot does not cover the requested universe.")
+    return {symbol_str: sector_by_symbol_dict[symbol_str] for symbol_str in symbol_list}
 
 
 def _load_manifest_from_dir(snapshot_dir_path_obj: Path) -> tuple[dict[str, Any], str]:
@@ -675,6 +797,8 @@ def _load_valid_snapshot_manifest_cached(
         schema_version_int,
         profile_str,
     )
+    if profile_str == NDX_E2_PROFILE_STR:
+        _validate_ndx_e2_snapshot_contract(snapshot_dir_path_obj, manifest_dict, snapshot_date_ts)
     if profile_str == CORE5_PROFILE_STR:
         _validate_core5_snapshot_contract(snapshot_dir_path_obj, manifest_dict, snapshot_date_ts)
     if profile_str in MR_CAPSULE_PROFILE_SET:
@@ -712,7 +836,7 @@ def load_valid_snapshot_manifest(
     # replacing/corrupting a previously read artifact cannot reuse a green cache.
     manifest_loader_fn = (
         _load_valid_snapshot_manifest_cached.__wrapped__
-        if profile_str == CORE5_PROFILE_STR
+        if profile_str in {CORE5_PROFILE_STR, NDX_E2_PROFILE_STR}
         else _load_valid_snapshot_manifest_cached
     )
     return manifest_loader_fn(

@@ -26,6 +26,7 @@ from data.norgate_snapshot_store import (
     ALPHA_USE_NORGATE_SNAPSHOT_ENV_STR,
     CAPITALSPECIAL_ADJUSTMENT_STR,
     HPI_SP500_PROFILE_STR,
+    NDX_E2_PROFILE_STR,
     NORGATE_SNAPSHOT_ROOT_ENV_STR,
     TOTALRETURN_ADJUSTMENT_STR,
     is_snapshot_mode_enabled_bool,
@@ -405,6 +406,7 @@ def _check_profile_smoke(
     printer_fn: PrinterFn,
 ) -> None:
     smoke_map_dict: dict[str, list[tuple[str, str]]] = {
+        NDX_E2_PROFILE_STR: [("index", "Nasdaq 100"), ("symbol", "$VXN")],
         CORE5_PROFILE_STR: [("symbol", "IEF"), ("symbol", "BIL"), ("symbol", "$SPXTR")],
         "norgate_eod_etf_plus_vix_helper": [("symbol", "SPY"), ("symbol", "$VIX")],
         "norgate_eod_sp500_pit": [("index", "S&P 500")],

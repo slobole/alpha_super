@@ -140,10 +140,10 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     # The two books of the NDX design of record "E2 + 40% GICS-sector cap"
     # (Scout amendment A15, 2026-10-04): the live dollar-ATR rule and the NATR20
     # rule, each with at most 4 of 10 names per current-label GICS sector, held
-    # 50/50 in portfolios/ndx_e2_sector_cap_5050.yaml (owner request). PM-only;
-    # the live NDX pod is unchanged and these have no live route.
-    "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled_sector_cap:SectorCapVxnScaledAtrNormalizedNdxStrategy": MaturityTier.PM_READY,
-    "strategies.momentum.strategy_mo_natr20_ndx_vxn_scaled_sector_cap:SectorCapNatr20VxnScaledNdxStrategy": MaturityTier.PM_READY,
+    # 50/50 in the research portfolio; WIRED as independent dedicated-account
+    # monthly routes. Disabled templates; docs/live/NDX_E2_WIRING_20261011.md.
+    "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled_sector_cap:SectorCapVxnScaledAtrNormalizedNdxStrategy": MaturityTier.WIRED,
+    "strategies.momentum.strategy_mo_natr20_ndx_vxn_scaled_sector_cap:SectorCapNatr20VxnScaledNdxStrategy": MaturityTier.WIRED,
     # MR capsule pods (docs/research/MR_CAPSULE_20261003.md, build record 2026-10-04): DV2 and the HPI 2/3/5
     # vote behind one shared VIX gate. BIL is primary; SPMO is the alternative.
     # Separate cash identities provide the gate-only stage. WIRED routes require

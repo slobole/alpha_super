@@ -6,6 +6,7 @@ import os
 import shutil
 import sys
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Iterable
 
@@ -33,6 +34,11 @@ from data.norgate_snapshot_store import (
     MR_CAPSULE_PRICE_HISTORY_START_DATE_STR,
     MR_CAPSULE_EMPTY_HISTORY_FALLBACK_START_DATE_STR,
     MR_CAPSULE_VIX_HISTORY_START_DATE_STR,
+    NDX_E2_DATA_CONTRACT_DICT,
+    NDX_E2_PROFILE_STR,
+    NDX_E2_PRICE_HISTORY_START_DATE_STR,
+    NDX_E2_SECTOR_ID_SET,
+    ndx_e2_sector_map_hash_str,
     SNAPSHOT_SCHEMA_VERSION_INT,
     TOTALRETURN_ADJUSTMENT_STR,
     core5_price_coverage_dict,
@@ -90,6 +96,10 @@ PROFILE_EXPORT_SPEC_DICT: dict[str, NorgateExportProfileSpec] = {
         capital_symbol_tuple=("SPY",),
         total_return_symbol_tuple=("SPY",),
     ),
+    NDX_E2_PROFILE_STR: NorgateExportProfileSpec(
+        indexname_str="Nasdaq 100", capital_symbol_tuple=("SPY",),
+        total_return_symbol_tuple=("SPY", "$SPXTR"), helper_symbol_tuple=("$VXN",),
+    ),
     "norgate_eod_ndx_pit_plus_vxn_helper": NorgateExportProfileSpec(
         indexname_str="Nasdaq 100",
         capital_symbol_tuple=("SPY",),
@@ -108,6 +118,25 @@ def _load_direct_norgate_module():
     except ModuleNotFoundError as exc:
         raise RuntimeError("Snapshot export must run on the Windows Norgate node.") from exc
     return norgatedata_module
+
+
+def _capture_ndx_e2_sector_contract(symbol_list: list[str], snapshot_date_str: str) -> dict[str, object]:
+    provider_obj = _load_direct_norgate_module()
+    sector_by_symbol_dict: dict[str, str] = {}
+    for symbol_str in sorted(set(symbol_list)):
+        # A provider exception is not a successfully observed unclassified name.
+        sector_obj = provider_obj.classification_at_level(symbol_str, "GICS", "ClassificationId", 1)
+        sector_str = "UNKNOWN" if sector_obj is None or not str(sector_obj).strip() else str(sector_obj).strip()
+        if sector_str not in NDX_E2_SECTOR_ID_SET:
+            raise ValueError(f"Invalid GICS level-1 classification for {symbol_str}: {sector_str!r}")
+        sector_by_symbol_dict[symbol_str] = sector_str
+    return {
+        **NDX_E2_DATA_CONTRACT_DICT,
+        "sector_by_symbol_dict": sector_by_symbol_dict,
+        "sector_map_hash_str": ndx_e2_sector_map_hash_str(sector_by_symbol_dict),
+        "sector_snapshot_date_str": snapshot_date_str,
+        "sector_observed_timestamp_str": datetime.now(UTC).isoformat(),
+    }
 
 
 def validate_export_profile(profile_str: str) -> None:
@@ -329,6 +358,16 @@ def _export_profile_to_root_path(
             ),
         )
 
+    if profile_str == NDX_E2_PROFILE_STR:
+        if end_date_str != snapshot_date_str:
+            raise ValueError("E2 export must end on the snapshot session.")
+        # *** CRITICAL *** Match the research history boundary and include every
+        # name with PIT membership between 1999 and T, including delisted names.
+        universe_df = universe_df.loc[NDX_E2_PRICE_HISTORY_START_DATE_STR:snapshot_date_str]
+        universe_df = universe_df.loc[:, universe_df.eq(1).any(axis=0)]
+        pit_symbol_list = universe_df.columns.astype(str).tolist()
+        start_date_str = NDX_E2_PRICE_HISTORY_START_DATE_STR
+
     symbol_list = list(dict.fromkeys(pit_symbol_list + list(profile_spec_obj.capital_symbol_tuple)))
     helper_symbol_list = list(profile_spec_obj.helper_symbol_tuple)
     benchmark_symbol_list = list(profile_spec_obj.total_return_symbol_tuple)
@@ -367,6 +406,35 @@ def _export_profile_to_root_path(
             else "exact"
         ),
     }
+    if profile_str == NDX_E2_PROFILE_STR:
+        if end_date_str != snapshot_date_str:
+            raise ValueError("E2 export must end on the snapshot session.")
+        data_contract_dict.update(_capture_ndx_e2_sector_contract(pit_symbol_list, snapshot_date_str))
+        current_member_list = universe_df.columns[universe_df.loc[pd.Timestamp(snapshot_date_str)].eq(1)].astype(str).tolist()
+        observed_endpoint_dict = {}
+        for symbol_str in sorted(set(current_member_list) | {"SPY", "$SPXTR"}):
+            # *** CRITICAL *** Preserve padded historical signals, but certify
+            # Close_T with an actual unpadded observation before a live decision.
+            observed_price_df = _load_price_frame_df(
+                symbol_str=symbol_str,
+                adjustment_str=TOTALRETURN_ADJUSTMENT_STR if symbol_str == "$SPXTR" else CAPITALSPECIAL_ADJUSTMENT_STR,
+                start_date_str=snapshot_date_str, end_date_str=snapshot_date_str,
+                padding_type_name_str="NONE",
+            )
+            if (len(observed_price_df) != 1
+                    or pd.Timestamp(observed_price_df["date"].iloc[0]) != pd.Timestamp(snapshot_date_str)
+                    or not math.isfinite(float(observed_price_df["Close"].iloc[0]))
+                    or float(observed_price_df["Close"].iloc[0]) <= 0):
+                raise ValueError(f"E2 has no unpadded source observation at {snapshot_date_str} for {symbol_str}.")
+            exported_endpoint_df = price_df.loc[
+                price_df["symbol_str"].eq(symbol_str)
+                & price_df["adjustment_str"].eq(TOTALRETURN_ADJUSTMENT_STR if symbol_str == "$SPXTR" else CAPITALSPECIAL_ADJUSTMENT_STR)
+                & pd.to_datetime(price_df["date"]).eq(pd.Timestamp(snapshot_date_str))
+            ]
+            if len(exported_endpoint_df) != 1 or float(exported_endpoint_df["Close"].iloc[0]) != float(observed_price_df["Close"].iloc[0]):
+                raise ValueError(f"E2 exported Close_T differs from its unpadded source observation: {symbol_str}.")
+            observed_endpoint_dict[symbol_str] = snapshot_date_str
+        data_contract_dict["observed_endpoint_date_by_symbol_dict"] = observed_endpoint_dict
     if profile_str in MR_CAPSULE_PROFILE_SET:
         data_contract_dict.update(MR_CAPSULE_DATA_CONTRACT_BY_PROFILE_DICT[profile_str])
         data_contract_dict["source_field_by_pair_dict"] = price_df.attrs["source_field_by_pair_dict"]
@@ -450,7 +518,7 @@ def export_profile_snapshot(
     if final_snapshot_dir_path_obj.exists() and not overwrite_bool:
         manifest_path_obj = final_snapshot_dir_path_obj / "manifest.json"
         if manifest_path_obj.exists():
-            if profile_str == CORE5_PROFILE_STR or profile_str in MR_CAPSULE_PROFILE_SET:
+            if profile_str in {CORE5_PROFILE_STR, NDX_E2_PROFILE_STR} or profile_str in MR_CAPSULE_PROFILE_SET:
                 load_valid_snapshot_manifest(
                     profile_str, snapshot_date_str=resolved_snapshot_date_str,
                     snapshot_root_str=str(snapshot_root_path_obj),
@@ -476,7 +544,7 @@ def export_profile_snapshot(
             end_date_str=resolved_end_date_str,
             overwrite_bool=False,
         )
-        if profile_str == CORE5_PROFILE_STR or profile_str in MR_CAPSULE_PROFILE_SET:
+        if profile_str in {CORE5_PROFILE_STR, NDX_E2_PROFILE_STR} or profile_str in MR_CAPSULE_PROFILE_SET:
             load_valid_snapshot_manifest(
                 profile_str, snapshot_date_str=resolved_snapshot_date_str,
                 snapshot_root_str=str(staging_root_path_obj),

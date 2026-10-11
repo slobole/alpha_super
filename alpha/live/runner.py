@@ -17,7 +17,7 @@ from typing import Callable
 import uuid
 
 from alpha.data import FredSeriesLoadError
-from alpha.live import reference_compare, scheduler_utils, strategy_host
+from alpha.live import ndx_e2_adapter, reference_compare, scheduler_utils, strategy_host
 from alpha.live.core5_adapter import (
     CORE5_STRATEGY_IMPORT_STR, require_core5_position_match,
     validate_core5_release,
@@ -5479,6 +5479,10 @@ def get_compare_reference_summary(
                 int(latest_vplan_obj.vplan_id_int)
             ),
         }
+        if release_obj.strategy_import_str in ndx_e2_adapter.NDX_E2_STRATEGY_IMPORT_TUPLE:
+            compare_report_dict["reference_provenance_dict"] = reference_compare.get_ndx_e2_reference_provenance_dict(
+                reference_maps_dict
+            )
         compare_report_dict["trade_fill_diff_row_dict_list"] = (
             reference_compare.build_trade_fill_diff_row_dict_list(
                 target_session_date_str=target_session_date_str,

@@ -4,6 +4,7 @@ import html
 import importlib
 import inspect
 import json
+from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,12 @@ import pandas as pd
 
 from alpha.engine.strategy import Strategy, dividend_cash_ledger_disabled_context
 from alpha.live.models import LiveRelease
+from alpha.live.ndx_e2_adapter import (
+    NDX_E2_SIZING_CONTRACT_STR,
+    NDX_E2_STRATEGY_IMPORT_TUPLE,
+    validate_ndx_e2_release,
+)
+from data import norgate_snapshot_store as snapshot_module
 from data.norgate_loader import use_norgate_data_profile
 
 
@@ -21,6 +28,48 @@ REFERENCE_RUN_VARIANT_PARAMETER_NAME_LIST: list[str] = [
     "end_date_str",
 ]
 LIVE_REFERENCE_ACCOUNTING_CONTRACT_VERSION_STR = "price_return_ledger_v1"
+
+NDX_E2_REFERENCE_NOTE_STR = (
+    "Research fixes whole-share quantities from Close_T NAV and prices; live uses "
+    "the approved pre-open broker NAV and reference prices. This comparison is "
+    "not exact share or P&L parity. Historical selections reuse the snapshot's "
+    "current GICS map, not historical point-in-time GICS."
+)
+
+
+def get_ndx_e2_reference_provenance_dict(reference_maps_dict: dict[str, Any]) -> dict[str, Any]:
+    """Keep old/manual references explicitly diagnostic when lineage is absent."""
+    stored_provenance_dict = reference_maps_dict.get("reference_provenance_dict")
+    provenance_dict = {
+        "scope_str": "diagnostic_current_sector_map_reconstruction",
+        "provenance_available_bool": False,
+        "data_profile_str": None,
+        "snapshot_date_str": None,
+        "snapshot_manifest_hash_str": None,
+        "sector_map_hash_str": None,
+        "sector_by_symbol_dict": None,
+        "sector_classification_basis_str": None,
+        "sector_observed_timestamp_str": None,
+        "research_sizing_basis_str": "Close_T_NAV_and_prices",
+        "live_sizing_contract_str": NDX_E2_SIZING_CONTRACT_STR,
+        "exact_share_parity_bool": False,
+        "exact_pnl_parity_bool": False,
+        "historical_pit_gics_bool": False,
+        "note_str": NDX_E2_REFERENCE_NOTE_STR,
+    }
+    lineage_field_tuple = (
+        "data_profile_str", "snapshot_date_str", "snapshot_manifest_hash_str",
+        "sector_map_hash_str", "sector_by_symbol_dict", "sector_classification_basis_str",
+        "sector_observed_timestamp_str",
+    )
+    if (isinstance(stored_provenance_dict, dict)
+            and stored_provenance_dict.get("provenance_available_bool") is True
+            and all(stored_provenance_dict.get(field_str) for field_str in lineage_field_tuple)):
+        provenance_dict.update({
+            field_str: deepcopy(stored_provenance_dict[field_str]) for field_str in lineage_field_tuple
+        })
+        provenance_dict["provenance_available_bool"] = True
+    return provenance_dict
 
 
 def build_reference_output_dir_path(
@@ -119,6 +168,16 @@ def run_auto_reference_strategy(
     if "output_dir_str" in signature_obj.parameters:
         run_kwarg_dict["output_dir_str"] = str(output_dir_path_obj)
 
+    e2_snapshot_obj = None
+    if release_obj.strategy_import_str in NDX_E2_STRATEGY_IMPORT_TUPLE:
+        validate_ndx_e2_release(release_obj)
+        if not snapshot_module.is_snapshot_mode_enabled_bool():
+            raise RuntimeError("E2 deployment references require snapshot mode.")
+        e2_snapshot_obj = snapshot_module.load_valid_snapshot_manifest(
+            release_obj.data_profile_str,
+            minimum_snapshot_date_str=reference_end_date_str,
+        )
+
     # The current live/reference contract is still price_return_ledger_v1.
     # Keep this diagnostic on the same accounting basis as LIVE/IBKR until a
     # separately authorized broker-dividend reconciliation rollout exists.
@@ -132,6 +191,31 @@ def run_auto_reference_strategy(
             f"Strategy module '{module_import_str}' run_variant(...) returned "
             f"{type(strategy_obj).__name__}, expected Strategy."
         )
+    if e2_snapshot_obj is not None:
+        after_snapshot_obj = snapshot_module.load_valid_snapshot_manifest(release_obj.data_profile_str)
+        if after_snapshot_obj.manifest_hash_str != e2_snapshot_obj.manifest_hash_str:
+            raise RuntimeError("E2 reference snapshot changed during the run.")
+        sector_contract_dict = e2_snapshot_obj.manifest_dict["data_contract"]
+        # A deployment window may omit retired names; validate its projection,
+        # while recording the complete frozen PIT-universe map below.
+        expected_sector_dict = {
+            str(symbol_str): sector_contract_dict["sector_by_symbol_dict"].get(str(symbol_str))
+            for symbol_str in strategy_obj.universe_df.columns
+        }
+        if getattr(strategy_obj, "sector_by_symbol_map", None) != expected_sector_dict:
+            raise RuntimeError("E2 reference sector map differs from the validated snapshot.")
+        provenance_dict = get_ndx_e2_reference_provenance_dict({})
+        provenance_dict.update({
+            "provenance_available_bool": True,
+            "data_profile_str": e2_snapshot_obj.profile_str,
+            "snapshot_date_str": e2_snapshot_obj.snapshot_date_ts.date().isoformat(),
+            "snapshot_manifest_hash_str": e2_snapshot_obj.manifest_hash_str,
+            "sector_map_hash_str": sector_contract_dict["sector_map_hash_str"],
+            "sector_by_symbol_dict": dict(sector_contract_dict["sector_by_symbol_dict"]),
+            "sector_classification_basis_str": sector_contract_dict["sector_classification_basis_str"],
+            "sector_observed_timestamp_str": sector_contract_dict["sector_observed_timestamp_str"],
+        })
+        strategy_obj.reference_provenance_dict = provenance_dict
     validate_live_reference_accounting_contract(strategy_obj)
     strategy_obj.configure_dividend_cash_ledger(enabled_bool=False)
     return strategy_obj
@@ -218,9 +302,17 @@ def build_reference_maps_dict(reference_strategy_obj: Strategy) -> dict[str, Any
     equity_by_date_dict, cash_by_date_dict = _build_reference_result_maps(reference_strategy_obj)
     realized_weight_history_df = _build_reference_realized_weight_history_df(reference_strategy_obj)
 
+    provenance_field_dict = {}
+    strategy_class_obj = type(reference_strategy_obj)
+    strategy_import_str = f"{strategy_class_obj.__module__}:{strategy_class_obj.__name__}"
+    if strategy_import_str in NDX_E2_STRATEGY_IMPORT_TUPLE:
+        provenance_field_dict["reference_provenance_dict"] = get_ndx_e2_reference_provenance_dict({
+            "reference_provenance_dict": getattr(reference_strategy_obj, "reference_provenance_dict", None),
+        })
     return {
         "reference_strategy_obj": reference_strategy_obj,
         **reference_accounting_policy_dict,
+        **provenance_field_dict,
         "transaction_map_dict": transaction_map_dict,
         "equity_by_date_dict": equity_by_date_dict,
         "cash_by_date_dict": cash_by_date_dict,
@@ -560,6 +652,8 @@ def write_reference_compare_artifacts(
         **trade_fill_summary_dict,
         "reference_strategy_pickle_path_str": reference_strategy_pickle_path_str,
     }
+    if release_obj.strategy_import_str in NDX_E2_STRATEGY_IMPORT_TUPLE:
+        summary_dict["reference_provenance_dict"] = get_ndx_e2_reference_provenance_dict(reference_maps_dict)
     summary_json_path_obj.write_text(json.dumps(summary_dict, indent=2, sort_keys=True), encoding="utf-8")
 
     _write_html_report(
@@ -840,6 +934,19 @@ def _write_html_report(
     raw_fill_table_html_str = _df_to_html_table_str(raw_fill_compare_df)
     raw_position_table_html_str = _df_to_html_table_str(position_compare_df)
 
+    reference_note_html_str = ""
+    if release_obj.strategy_import_str in NDX_E2_STRATEGY_IMPORT_TUPLE:
+        provenance_dict = get_ndx_e2_reference_provenance_dict(summary_dict)
+        provenance_label_str = (
+            f"Snapshot {provenance_dict['snapshot_date_str']}; profile {provenance_dict['data_profile_str']}; "
+            f"manifest {provenance_dict['snapshot_manifest_hash_str']}; sector map {provenance_dict['sector_map_hash_str']}."
+            if provenance_dict["provenance_available_bool"] else "Snapshot provenance unavailable."
+        )
+        reference_note_html_str = (
+            "<p><strong>E2 diagnostic reference.</strong> "
+            f"{html.escape(NDX_E2_REFERENCE_NOTE_STR)} {html.escape(provenance_label_str)}</p>"
+        )
+
     html_text_str = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -864,7 +971,7 @@ def _write_html_report(
 </head>
 <body>
   <h1>{html.escape(release_obj.pod_id_str)} Live vs Backtest</h1>
-  <p>Release: {html.escape(release_obj.release_id_str)}</p>
+  <p>Release: {html.escape(release_obj.release_id_str)}</p>{reference_note_html_str}
   <section>
     <h2>Comparison Window</h2>
     {window_card_html_str}

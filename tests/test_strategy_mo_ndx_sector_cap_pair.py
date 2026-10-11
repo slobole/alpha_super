@@ -57,7 +57,7 @@ def test_vxn_scale_multiplies_the_capped_weights_and_unknown_is_a_capped_bucket(
     assert weight_ser.tolist() == pytest.approx([0.125] * 3)  # 0.25 x (22 / 44)
 
 
-def test_pair_inherits_the_two_engine_rules_and_is_pm_ready_not_wired():
+def test_pair_inherits_the_two_engine_rules_and_is_wired():
     assert issubclass(SectorCapVxnScaledAtrNormalizedNdxStrategy, VxnScaledAtrNormalizedNdxStrategy)
     assert issubclass(SectorCapNatr20VxnScaledNdxStrategy, Natr20VxnScaledNdxStrategy)
     assert SectorCapVxnScaledAtrNormalizedNdxStrategy.get_target_weight_ser is SectorCapSelectionMixin.get_target_weight_ser
@@ -68,5 +68,5 @@ def test_pair_inherits_the_two_engine_rules_and_is_pm_ready_not_wired():
         "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled_sector_cap:SectorCapVxnScaledAtrNormalizedNdxStrategy",
         "strategies.momentum.strategy_mo_natr20_ndx_vxn_scaled_sector_cap:SectorCapNatr20VxnScaledNdxStrategy",
     ):
-        assert strategy_registry.tier_for(ref_str) == strategy_registry.MaturityTier.PM_READY
-        assert ref_str not in strategy_registry.wired_import_tuple()
+        assert strategy_registry.tier_for(ref_str) == strategy_registry.MaturityTier.WIRED
+        assert ref_str in strategy_registry.wired_import_tuple()
