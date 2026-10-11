@@ -9,7 +9,6 @@ import yaml
 from alpha.live import reference_compare, runner, scheduler_service, scheduler_utils
 from alpha.live.execution_engine import build_broker_order_request_list_from_vplan
 from alpha.live.daily_broker import DailyExecutionSnapshot
-from alpha.live.order_clerk import BrokerAdapter
 from alpha.live.release_manifest import load_release_list, validate_release_list, validate_release_manifest
 from alpha.live.state_store_v2 import LiveStateStore
 import test_live_core5_adapter as core5_helper
@@ -141,8 +140,8 @@ def test_qualified_live_fake_cycle_preserves_intent_and_commits_after_close(
         return original_claim_fn(vplan_id_int)
 
     monkeypatch.setattr(broker_obj, "get_core5_account_snapshot", account_fn)
-    monkeypatch.setattr(broker_obj, "get_core5_funding_evidence",
-        lambda *_argument_tuple: pytest.fail("Funding previews were removed (owner decision 2026-10-11)"))
+    # Owner decision 2026-10-11: no funding preview exists any more.
+    assert not hasattr(broker_obj, "get_core5_funding_evidence")
     monkeypatch.setattr(store_obj, "claim_vplan_for_submission", claim_fn)
     prior_state_dict = dict(store_obj.get_pod_state(release_obj.pod_id_str).strategy_state_dict)
     result_dict = runner.submit_ready_vplans(store_obj, broker_obj, decision_obj.submission_timestamp_ts,
@@ -179,11 +178,6 @@ def test_qualified_live_fake_cycle_preserves_intent_and_commits_after_close(
     assert result_dict["completed_vplan_count_int"] == 1
     assert restarted_store_obj.get_pod_state(release_obj.pod_id_str).strategy_state_dict == core5_helper._committed_state_dict(decision_obj)
     assert restarted_store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str).status_str == "completed"
-
-
-def test_base_adapter_cannot_invent_core5_funding_evidence():
-    with pytest.raises(NotImplementedError):
-        BrokerAdapter.get_core5_funding_evidence(object(), "U_CORE5_TEST", [], {})
 
 
 def test_failed_paper_preflight_cannot_downgrade_another_process_submission_claim(

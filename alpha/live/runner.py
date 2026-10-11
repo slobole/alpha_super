@@ -3328,7 +3328,6 @@ def submit_ready_vplans(
             validate_mr_capsule_release(release_obj)
         broker_adapter_obj = broker_adapter_resolver_obj.get_adapter(release_obj)
         guarded_dispatch_bool = is_guarded_release_bool(release_obj)
-        suppressed_request_list = []
         if guarded_dispatch_bool:
             broker_order_request_list = build_broker_order_request_list_from_vplan(vplan_obj)
             if as_of_ts >= moo_dispatch_deadline_ts(vplan_obj):
@@ -3414,11 +3413,6 @@ def submit_ready_vplans(
             # Cash postings may change; never resize the saved Close-T intent.
             decision_plan_obj = state_store_obj.get_decision_plan_by_id(int(vplan_obj.decision_plan_id_int))
             capsule_block_reason_str = "mr_capsule_pre_submit_account_changed"
-            if decision_plan_obj.snapshot_metadata_dict.get("funding_buys_dropped_bool"):
-                suppressed_request_list = [request_obj for request_obj in broker_order_request_list
-                    if request_obj.amount_float > 0]
-                broker_order_request_list = [request_obj for request_obj in broker_order_request_list
-                    if request_obj.amount_float < 0]
             try:
                 fresh_capsule_snapshot_obj = broker_adapter_obj.get_capsule_account_snapshot(vplan_obj.account_route_str)
                 validate_mr_capsule_execution_contract(
@@ -3460,18 +3454,6 @@ def submit_ready_vplans(
             broker_order_request_list = build_broker_order_request_list_from_vplan(vplan_obj)
         send_started_bool = False
         try:
-            if release_obj.strategy_import_str in MR_CAPSULE_STRATEGY_IMPORT_TUPLE:
-                with state_store_obj._connect() as connection_obj:
-                    metadata_row_obj = connection_obj.execute("SELECT snapshot_metadata_json_str FROM decision_plan WHERE decision_plan_id_int=?",
-                        (vplan_obj.decision_plan_id_int,)).fetchone()
-                    metadata_dict = json.loads(metadata_row_obj[0])
-                    # Another capsule preflight may have latched a drop before
-                    # our claim. Refresh it here; never clear a cycle's drop.
-                    if metadata_dict.get("funding_buys_dropped_bool"):
-                        suppressed_request_list.extend(request_obj for request_obj in broker_order_request_list
-                            if request_obj.amount_float > 0)
-                        broker_order_request_list = [request_obj for request_obj in broker_order_request_list
-                            if request_obj.amount_float < 0]
             if guarded_dispatch_bool:
                 broker_order_request_list = [replace(request_obj,
                     submission_deadline_timestamp_str=moo_dispatch_deadline_ts(vplan_obj).isoformat())
@@ -4109,7 +4091,6 @@ def _reconcile_daily_cycles(state_store_obj, broker_adapter_resolver_obj, as_of_
             settlement_snapshot_obj = None if as_of_ts >= target_close_ts else initial_daily_snapshot_obj
             daily_result_obj = reconcile_daily_cycle(state_store_obj, broker_adapter_obj, release_obj,
                 decision_plan_obj, as_of_ts, vplan_obj=vplan_obj, vplan_sent_bool=vplan_sent_bool,
-                funding_buys_dropped_bool=bool(decision_plan_obj.snapshot_metadata_dict.get("funding_buys_dropped_bool")),
                 initial_daily_snapshot_obj=settlement_snapshot_obj)
             for report_obj in daily_result_obj.reporting_result_list:
                 try:

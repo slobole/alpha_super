@@ -233,7 +233,7 @@ def _read_daily_cycle_dict(connection_obj, release_obj, decision_plan_id_int, as
     result_dict = {"status_str": "ok", "reason_str": "", "as_of_timestamp_str": as_of_ts.isoformat(),
         "current_bool": selected_obj is not None and selected_obj["decision_plan_id_int"] == latest_id_int,
         "decision_dict": {}, "vplan_dict": {}, "opening_dispatch_dict": {}, "execution_result_dict": {},
-        "funding_buys_dropped_bool": False, "completion_request_list": [], "pod_alert_list": [],
+        "completion_request_list": [], "pod_alert_list": [],
         "execution_alert_list": [], "post_close_report_dict": {}, "open_previous_list": [],
         "open_previous_truncated_bool": False, "last_closed_dict": {}, "signal_session_dict": signal_session_dict,
         "session_close_timestamp_str": None, "next_open_timestamp_str": _next_open_ts(as_of_ts, calendar_id_str).isoformat()}
@@ -252,7 +252,6 @@ def _read_daily_cycle_dict(connection_obj, release_obj, decision_plan_id_int, as
     metadata_dict = _metadata_dict(selected_obj)
     result_dict.update(decision_dict=decision_dict, opening_dispatch_dict=_opening_dispatch_dict(metadata_dict),
         execution_result_dict=_execution_result_dict(metadata_dict),
-        funding_buys_dropped_bool=metadata_dict.get("funding_buys_dropped_bool") is True,
         session_close_timestamp_str=_session_close_ts(decision_dict["target_execution_timestamp_str"], calendar_id_str).isoformat())
 
     vplan_obj = connection_obj.execute(

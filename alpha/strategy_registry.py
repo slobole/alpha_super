@@ -113,8 +113,8 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     # Five fixed macro sleeves independently gated by a drawdown-adaptive
     # moving average, with inactive sleeves in BIL and a capped DBC short.
     # Daily Close_T fixed shares, next-open MOO, dedicated USD margin account.
-    # Activation requires account-bound qualification plus fresh funding/borrow
-    # checks; the example remains disabled. Research borrow remains fixed at 1%.
+    # IBKR's own pre-trade checks decide funding and DBC borrow; the example
+    # remains disabled. Research borrow remains fixed at 1%.
     "strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5": MaturityTier.WIRED,
     # Monthly four-regime Inflation Compass using SPY SMA200, FRED T5YIE,
     # sector-ratio confirmation, and causal next-open ETF rebalancing. PM-only:

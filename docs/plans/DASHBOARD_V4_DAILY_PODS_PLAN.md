@@ -34,9 +34,8 @@ the same root with no extra settings.
 | 13 | Deciding | working | data ready, decision not built yet, before the cutoff |
 
 Exception reasons: `decision_intent_not_dispatched` Not sent; `actual_holding_differs_from_decision` Holding differs
-from decision; `actual_holding_differs_from_vplan` Not filled / holding differs from plan; `funding_buys_dropped`
-Buy dropped (funding); `bil_buy_withheld_after_funding_buys_dropped` BIL buy withheld (funding);
-`bil_sale_withheld_after_funding_buys_dropped` BIL sale withheld (funding).
+from decision; `actual_holding_differs_from_vplan` Not filled / holding differs from plan. (The three funding-drop
+reasons were removed with the funding checks, owner decision 2026-10-11.)
 
 ## Phases
 0. Golden hashes of the monthly/demo pages (`tests/test_dashboard_v4_monthly_golden.py`).

@@ -176,8 +176,8 @@ availability check, or permission to trade. It changes no scheduler or order gat
   `DAILY_STRATEGY_IMPORT_TUPLE`, or it carries `daily_cycle_dict`; the
   `next_open_moo` policy alone never does. `daily_data.py` reads the cycle in one
   SQLite `mode=ro` snapshot: the decision (status, signal/target times, opening
-  dispatch result as counts, close result with its exception rows, funding
-  drop), the latest VPlan with opening order/ACK/fill counts, completion claims,
+  dispatch result as counts, close result with its exception rows), the latest
+  VPlan with opening order/ACK/fill counts, completion claims,
   daily and capsule alerts, the post-close report, older open decisions, the last
   close and the owed decision for the latest completed session. Optional tables
   are checked first, so older DBs read. Reads are bounded; error text, request

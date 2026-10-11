@@ -22,7 +22,7 @@ from test_live_daily_watchdog import _alerts
 
 
 TOP_KEY_SET = {"status_str", "reason_str", "as_of_timestamp_str", "current_bool", "decision_dict", "vplan_dict",
-    "opening_dispatch_dict", "execution_result_dict", "funding_buys_dropped_bool", "completion_request_list",
+    "opening_dispatch_dict", "execution_result_dict", "completion_request_list",
     "pod_alert_list", "execution_alert_list", "post_close_report_dict", "open_previous_list",
     "open_previous_truncated_bool", "last_closed_dict", "signal_session_dict", "session_close_timestamp_str",
     "next_open_timestamp_str"}

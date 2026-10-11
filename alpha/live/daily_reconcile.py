@@ -149,7 +149,7 @@ def claim_daily_completion_request(state_store_obj, release_obj, decision_plan_o
         return cursor_obj.rowcount == 1
 
 
-def _exception_list(decision_plan_obj, vplan_obj, snapshot_obj, *, vplan_sent_bool, funding_buys_dropped_bool):
+def _exception_list(decision_plan_obj, vplan_obj, snapshot_obj, *, vplan_sent_bool):
     exception_list = []
     if vplan_obj is None or not vplan_sent_bool:
         # Unsized weight intentions are reported as such. Do not invent a quote,
@@ -194,21 +194,15 @@ def _exception_list(decision_plan_obj, vplan_obj, snapshot_obj, *, vplan_sent_bo
         residual_float = expected_float - actual_float
         if abs(residual_float) <= QUANTITY_TOLERANCE_FLOAT:
             continue
-        reason_str = "actual_holding_differs_from_vplan"
-        if funding_buys_dropped_bool and (residual_float > 0 or asset_str == "BIL"):
-            reason_str = ("funding_buys_dropped" if asset_str != "BIL" else
-                "bil_buy_withheld_after_funding_buys_dropped" if residual_float > 0 else
-                "bil_sale_withheld_after_funding_buys_dropped")
         exception_list.append({"asset_str": asset_str, "quantity_float": abs(residual_float),
-            "side_str": "BUY" if residual_float > 0 else "SELL", "reason_str": reason_str,
+            "side_str": "BUY" if residual_float > 0 else "SELL", "reason_str": "actual_holding_differs_from_vplan",
             "expected_share_float": expected_float, "actual_share_float": actual_float,
             "residual_amount_float": residual_float})
     return exception_list
 
 
 def reconcile_daily_cycle(state_store_obj, broker_adapter_obj, release_obj, decision_plan_obj, as_of_ts,
-        *, vplan_obj=None, vplan_sent_bool=True, funding_buys_dropped_bool=False,
-        initial_daily_snapshot_obj=None):
+        *, vplan_obj=None, vplan_sent_bool=True, initial_daily_snapshot_obj=None):
     """Poll within the session; after its close return actual holdings for commit.
 
     The caller commits final holdings, strategy memory, status and one exception
@@ -243,7 +237,7 @@ def reconcile_daily_cycle(state_store_obj, broker_adapter_obj, release_obj, deci
                 raise
         snapshot_obj = daily_snapshot_obj.broker_snapshot_obj
         exception_list = _exception_list(decision_plan_obj, vplan_obj, snapshot_obj,
-            vplan_sent_bool=vplan_sent_bool, funding_buys_dropped_bool=funding_buys_dropped_bool)
+            vplan_sent_bool=vplan_sent_bool)
         return DailyReconcileResult("completed_with_exceptions" if exception_list else "completed", snapshot_obj, exception_list)
     if vplan_obj is not None and vplan_sent_bool and target_ts < as_of_ts:
         # Freeze the candidate set from this poll's first observation. Later
@@ -251,7 +245,7 @@ def reconcile_daily_cycle(state_store_obj, broker_adapter_obj, release_obj, deci
         first_snapshot_obj = daily_snapshot_obj
         candidate_list = []
         for asset_str, target_float in sorted(vplan_obj.target_share_map.items()):
-            if (asset_str == "BIL" and (funding_buys_dropped_bool or target_float < 0)) or (
+            if (asset_str == "BIL" and target_float < 0) or (
                     asset_str != "BIL" and abs(target_float) > QUANTITY_TOLERANCE_FLOAT):
                 continue
             snapshot_obj = first_snapshot_obj.broker_snapshot_obj
@@ -303,5 +297,5 @@ def reconcile_daily_cycle(state_store_obj, broker_adapter_obj, release_obj, deci
             daily_snapshot_obj = _refresh(broker_adapter_obj, release_obj, as_of_ts)
     return DailyReconcileResult("pending", daily_snapshot_obj.broker_snapshot_obj,
         _exception_list(decision_plan_obj, vplan_obj, daily_snapshot_obj.broker_snapshot_obj,
-            vplan_sent_bool=vplan_sent_bool, funding_buys_dropped_bool=funding_buys_dropped_bool),
+            vplan_sent_bool=vplan_sent_bool),
         completion_request_list, reporting_result_list)

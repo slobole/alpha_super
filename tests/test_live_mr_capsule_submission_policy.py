@@ -43,8 +43,8 @@ def test_capsule_account_read_precedes_claim_and_dispatch_preserves_request_ids(
         assert {request_obj.order_request_key_str for request_obj in request_list} == {request_obj.order_request_key_str for request_obj in original_request_list}
         return original_submit_fn(**submit_kwarg_dict)
     monkeypatch.setattr(broker_adapter_obj, "get_capsule_account_snapshot", account_fn)
-    monkeypatch.setattr(broker_adapter_obj, "get_capsule_funding_evidence",
-        lambda *_: pytest.fail("Funding previews were removed (owner decision 2026-10-11)"))
+    # Owner decision 2026-10-11: no funding preview exists any more.
+    assert not hasattr(broker_adapter_obj, "get_capsule_funding_evidence")
     monkeypatch.setattr(state_store_obj, "claim_vplan_for_submission", claim_fn)
     monkeypatch.setattr(broker_adapter_obj, "submit_order_request_list", submit_fn)
     result_dict = runner_module.submit_ready_vplans(state_store_obj, broker_adapter_obj,
@@ -129,9 +129,7 @@ def test_capsule_daily_reconcile_runs_even_when_fill_reporting_is_unavailable(ca
     assert not runner_module.is_vplan_execution_exception_parked(state_store_obj, vplan_obj)
 
 
-def test_base_adapter_refuses_unimplemented_funding_and_gateway_uses_opt_in_methods():
-    with pytest.raises(NotImplementedError, match="margin verification"):
-        BrokerAdapter.get_capsule_funding_evidence(object(), "DU_TEST", [])
+def test_gateway_uses_the_capsule_opt_in_methods():
     called_method_list = []
     class FakeSocket:
         def get_capsule_account_snapshot(self, account_route_str):
@@ -140,79 +138,9 @@ def test_base_adapter_refuses_unimplemented_funding_and_gateway_uses_opt_in_meth
         def get_capsule_order_state_snapshot(self, account_route_str, since_timestamp_ts, **kwarg_dict):
             called_method_list.append(("orders", account_route_str, since_timestamp_ts, kwarg_dict))
             return [], [], []
-        def get_capsule_funding_evidence(self, account_route_str, request_list):
-            called_method_list.append(("funding", account_route_str, request_list))
-            return {"required_bool": False}
     adapter_obj = IBKRGatewayBrokerAdapter.__new__(IBKRGatewayBrokerAdapter)
     adapter_obj.socket_client_obj = FakeSocket()
     assert adapter_obj.get_capsule_account_snapshot("DU_TEST") == "account snapshot"
     assert adapter_obj.get_capsule_order_state_snapshot("DU_TEST", SUBMIT_TIMESTAMP_TS, submission_key_str="plan", allowed_broker_order_id_set={"one"}) == ([], [], [])
-    assert adapter_obj.get_capsule_funding_evidence("DU_TEST", []) == {"required_bool": False}
-    assert [entry_tuple[0] for entry_tuple in called_method_list] == ["snapshot", "orders", "funding"]
-
-
-def test_legacy_buy_drop_retry_keeps_sales_only_and_withholds_daily_bil_completion(capsule_case, monkeypatch):
-    from alpha.live.capsule_funding import persist_capsule_buy_drop
-
-    store_obj, broker_obj, release_obj, plan_obj, option_dict, _ = capsule_case
-    # Cycles saved before 2026-10-11 may carry a funding buy drop.
-    assert persist_capsule_buy_drop(store_obj, release_obj, plan_obj)
-    original_trace_fn = runner_module._emit_live_trace_event
-    trace_count_int = 0
-
-    def trace_fn(*arg_tuple, **kwarg_dict):
-        nonlocal trace_count_int
-        if arg_tuple[0] == "vplan.submit_request":
-            trace_count_int += 1
-            if trace_count_int == 1:
-                raise TimeoutError("Trace failed before any send")
-        return original_trace_fn(*arg_tuple, **kwarg_dict)
-
-    monkeypatch.setattr(runner_module, "_emit_live_trace_event", trace_fn)
-    first_dict = runner_module.submit_ready_vplans(store_obj, broker_obj,
-        SUBMIT_TIMESTAMP_TS, "paper", False, **option_dict)
-    assert first_dict["reason_count_map_dict"]["dispatch_retry_pending"] == 1
-    assert store_obj.get_vplan_by_id(plan_obj.vplan_id_int).status_str == "ready"
-    assert broker_obj.submitted_order_request_list == []
-    assert store_obj.get_decision_plan_by_id(plan_obj.decision_plan_id_int).snapshot_metadata_dict["funding_buys_dropped_bool"] is True
-
-    assert runner_module.submit_ready_vplans(store_obj, broker_obj,
-        SUBMIT_TIMESTAMP_TS, "paper", False, **option_dict)["submitted_vplan_count_int"] == 1
-    assert [request_obj.asset_str for request_obj in broker_obj.submitted_order_request_list] == ["BIL"]
-    assert store_obj.get_decision_plan_by_id(plan_obj.decision_plan_id_int).snapshot_metadata_dict["funding_buys_dropped_bool"] is True
-
-    # No supplemental BIL sale is allowed after this cycle's buys were dropped.
-    snapshot_obj = broker_obj.get_account_snapshot(release_obj.account_route_str)
-    broker_obj.seed_account_snapshot(release_obj.account_route_str, snapshot_obj.cash_float,
-        snapshot_obj.net_liq_float, {**snapshot_obj.position_amount_map, "BIL": plan_obj.target_share_map["BIL"] + 60},
-        RECONCILE_TIMESTAMP_TS, session_mode_str="paper")
-    runner_module.post_execution_reconcile(store_obj, broker_obj, RECONCILE_TIMESTAMP_TS, "paper", **option_dict)
-    assert len(broker_obj.submitted_order_request_list) == 1
-    assert runner_module.submit_ready_vplans(store_obj, broker_obj,
-        SUBMIT_TIMESTAMP_TS, "paper", False, **option_dict)["submitted_vplan_count_int"] == 0
-    assert len(broker_obj.submitted_order_request_list) == 1
-
-
-def test_drop_from_concurrent_preflight_is_reloaded_after_claim(capsule_case, monkeypatch):
-    from alpha.live.capsule_funding import persist_capsule_buy_drop
-
-    store_obj, broker_obj, release_obj, plan_obj, option_dict, _ = capsule_case
-    original_claim_fn = store_obj.claim_vplan_for_submission
-
-    def concurrent_claim_fn(vplan_id_int):
-        assert persist_capsule_buy_drop(store_obj, release_obj, plan_obj)
-        return original_claim_fn(vplan_id_int)
-
-    monkeypatch.setattr(store_obj, "claim_vplan_for_submission", concurrent_claim_fn)
-    assert runner_module.submit_ready_vplans(store_obj, broker_obj,
-        SUBMIT_TIMESTAMP_TS, "paper", False, **option_dict)["submitted_vplan_count_int"] == 1
-    assert [request_obj.asset_str for request_obj in broker_obj.submitted_order_request_list] == ["BIL"]
-
-
-def test_losing_funding_preflight_cannot_change_already_claimed_batch(capsule_case):
-    from alpha.live.capsule_funding import persist_capsule_buy_drop
-
-    store_obj, _, release_obj, plan_obj, _, _ = capsule_case
-    assert store_obj.claim_vplan_for_submission(plan_obj.vplan_id_int)
-    assert not persist_capsule_buy_drop(store_obj, release_obj, plan_obj)
-    assert not store_obj.get_decision_plan_by_id(plan_obj.decision_plan_id_int).snapshot_metadata_dict.get("funding_buys_dropped_bool")
+    assert [entry_tuple[0] for entry_tuple in called_method_list] == ["snapshot", "orders"]
+    assert not hasattr(BrokerAdapter, "get_capsule_funding_evidence")

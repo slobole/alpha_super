@@ -62,12 +62,6 @@ class FakeAdapter:
         now_ts = datetime.now(UTC)
         return self._call("get_daily_execution_snapshot", DailyExecutionSnapshot(self._snapshot(), [], now_ts, now_ts))
 
-    def get_core5_funding_evidence(self, *_args):
-        raise AssertionError("Funding previews were removed (owner decision 2026-10-11).")
-
-    def get_capsule_funding_evidence(self, *_args):
-        raise AssertionError("Funding previews were removed (owner decision 2026-10-11).")
-
     def submit_order_request_list(self, **_kwargs):
         raise AssertionError("The probe must never reach an order call.")
 
@@ -171,9 +165,8 @@ def test_daily_checks_refuse_before_connecting(tmp_path, capsys, monkeypatch, ca
     assert exit_int == 2 and "daily pod checks:" in capsys.readouterr().err
 
 
-def test_read_only_wrapper_blocks_every_order_and_preview_call():
+def test_read_only_wrapper_blocks_every_order_call():
     broker_obj = probe_module.ReadOnlyBroker(FakeAdapter())
-    for name_str in ("submit_order_request_list", "cancel_daily_owned_orders", "submit_manual_order",
-                     "get_core5_funding_evidence", "get_capsule_funding_evidence"):
+    for name_str in ("submit_order_request_list", "cancel_daily_owned_orders", "submit_manual_order"):
         with pytest.raises(AttributeError, match="read-only"):
             getattr(broker_obj, name_str)

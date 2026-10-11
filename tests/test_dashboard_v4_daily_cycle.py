@@ -33,7 +33,7 @@ def _daily_dict(*, decision_status_str="submitted", vplan_status_str="submitted"
             "submission_key_str": "daily:7", "submission_timestamp_str": (TARGET_TS - timedelta(minutes=8)).isoformat(),
             "target_execution_timestamp_str": TARGET_TS.isoformat(), "missing_ack_count_int": 0,
             "submit_ack_status_str": "complete", "sent_order_count_int": 3, "ack_count_int": 3, "fill_count_int": 3},
-        "opening_dispatch_dict": {}, "execution_result_dict": {}, "funding_buys_dropped_bool": False,
+        "opening_dispatch_dict": {}, "execution_result_dict": {},
         "completion_request_list": [], "pod_alert_list": [], "execution_alert_list": [], "post_close_report_dict": {},
         "open_previous_list": [], "open_previous_truncated_bool": False, "last_closed_dict": {},
         "signal_session_dict": {"session_date_str": "2026-10-02", "decision_cutoff_timestamp_str": (TARGET_TS - timedelta(minutes=2)).isoformat(),
@@ -93,7 +93,7 @@ CASE_LIST = [
     # Row 1-3: terminal decisions (data still pending, so the owed decision is not yet current).
     ("closed", lambda: _closed("completed"), CLOSE_TS + timedelta(minutes=10), False, "closed", "Closed"),
     ("exceptions", lambda: _closed("completed_with_exceptions", [_exception("actual_holding_differs_from_vplan"),
-        _exception("funding_buys_dropped")]), CLOSE_TS + timedelta(minutes=10), False, "closed_with_exceptions", "Closed with exceptions (2)"),
+        _exception("actual_holding_differs_from_decision")]), CLOSE_TS + timedelta(minutes=10), False, "closed_with_exceptions", "Closed with exceptions (2)"),
     ("exceptions_not_sent", lambda: _closed("completed_with_exceptions", [_exception("decision_intent_not_dispatched")]),
         CLOSE_TS + timedelta(minutes=10), False, "closed_with_exceptions", "Not sent · closed with exceptions (1)"),
     ("superseded", lambda: _daily_dict(decision_status_str="superseded", vplan_status_str=None, current_bool=False),

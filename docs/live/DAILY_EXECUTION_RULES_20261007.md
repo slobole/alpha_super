@@ -98,16 +98,14 @@ Owner decision 2026-10-11: like the monthly pods, CORE5 and the capsule run no
 funding, margin or borrow preview before sending. IBKR's own pre-trade checks
 accept or reject each order; the daily close records a rejected order as an
 exception. Known transient errors before any attempted send retain the complete
-batch for retry. A capsule cycle saved before this change with the old funding
-buy drop keeps it for the whole cycle: sells only, and no BIL completion sale.
+batch for retry.
 
 After the target open and strictly before its exchange close, an already-sent
 cycle may make **one claimed MKT SELL attempt per decision and asset**:
 
 - A non-BIL asset is eligible only when its frozen target is zero and actual
   positive shares remain. No buy, short cover or nonzero-target top-up is added.
-- BIL may sell `max(actual_BIL - frozen_target_BIL, 0)` with a nonnegative target,
-  except in a cycle saved with the old (pre-2026-10-11) funding buy drop.
+- BIL may sell `max(actual_BIL - frozen_target_BIL, 0)` with a nonnegative target.
 - A fresh complete all-client order list must show **no open order for that
   symbol**. An unrelated symbol does not block this asset. Refresh again before
   each asset; quantity is `max(actual_shares - frozen_target_shares, 0)`.

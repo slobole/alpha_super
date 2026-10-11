@@ -155,13 +155,6 @@ def test_any_client_open_order_for_symbol_blocks_only_that_symbol(daily_case):
     assert [request_obj.asset_str for request_obj in broker_obj.sent_request_list] == ["BIL"]
 
 
-def test_funding_dropped_buys_preserve_bil_but_keep_stock_exit(daily_case):
-    _, _, _, _, broker_obj = daily_case
-    reconcile_case(daily_case, funding_buys_dropped_bool=True)
-    assert [(request_obj.asset_str, request_obj.amount_float) for request_obj in broker_obj.sent_request_list] == [("MSFT", -5.0)]
-    assert broker_obj.position_dict["BIL"] == 100.0
-
-
 def test_no_completion_candidate_uses_only_first_poll_snapshot(daily_case):
     _, _, _, plan_obj, broker_obj = daily_case
     broker_obj.position_dict.update(plan_obj.target_share_map)
@@ -176,20 +169,6 @@ def test_daily_submitting_vplan_has_no_intraday_stuck_alert(daily_case):
     message_list = _build_stuck_operator_message_spec_list(state_store_obj=store_obj,
         as_of_ts=INTRADAY_TS, reconcile_grace_seconds_int=300)
     assert all(row_dict["phase_action_str"] != "submit_vplan.stuck" for row_dict in message_list)
-
-
-@pytest.mark.parametrize("target_float,expected_side_str,expected_reason_str", [
-    (120.0, "BUY", "bil_buy_withheld_after_funding_buys_dropped"),
-    (80.0, "SELL", "bil_sale_withheld_after_funding_buys_dropped"),
-])
-def test_bil_funding_drop_label_uses_residual_side(daily_case, target_float, expected_side_str, expected_reason_str):
-    store_obj, release_obj, decision_obj, plan_obj, broker_obj = daily_case
-    broker_obj.as_of_ts = CLOSE_TS
-    plan_obj = replace(plan_obj, target_share_map={**plan_obj.target_share_map, "BIL": target_float})
-    result_obj = reconcile_daily_cycle(store_obj, broker_obj, release_obj, decision_obj, CLOSE_TS,
-        vplan_obj=plan_obj, funding_buys_dropped_bool=True)
-    bil_row_dict = next(row_dict for row_dict in result_obj.exception_list if row_dict["asset_str"] == "BIL")
-    assert (bil_row_dict["side_str"], bil_row_dict["reason_str"]) == (expected_side_str, expected_reason_str)
 
 
 def test_never_buy_or_complete_nonzero_stock_reduction_or_short_target(daily_case):

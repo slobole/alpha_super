@@ -52,9 +52,6 @@ EXCEPTION_REASON_LABEL_DICT = {
     "decision_intent_not_dispatched": "Not sent",
     "actual_holding_differs_from_decision": "Holding differs from decision",
     "actual_holding_differs_from_vplan": "Not filled / holding differs from plan",
-    "funding_buys_dropped": "Buy dropped (funding)",
-    "bil_buy_withheld_after_funding_buys_dropped": "BIL buy withheld (funding)",
-    "bil_sale_withheld_after_funding_buys_dropped": "BIL sale withheld (funding)",
 }
 # key: (tone, pill). Tones are the existing V4 state tones.
 STATUS_STYLE_DICT = {
