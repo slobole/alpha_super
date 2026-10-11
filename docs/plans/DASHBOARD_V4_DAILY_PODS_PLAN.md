@@ -48,7 +48,8 @@ reasons were removed with the funding checks, owner decision 2026-10-11.)
    fill proof.
 4. Next-trade forecast after an exceptions day (`next_operation.py`, `dashboard.py:1433` status tuple).
 5. System page: daily watchdog report, receipt, `.daily.sqlite3` alert keys, pod outboxes.
-6. Activity labels for daily events; pending reconciles quiet; mode filter.
+6. Done 2026-10-11: Activity labels for daily events; pending reconciles quiet (a sent completion stays its own
+   row); closed daily cycles read as days. The existing LIVE-only mode filter already applies to daily events.
 7. BIL/SPMO shown as "Parked" (SPMO never "Cash").
 8. Dropped: no extra source exists with one folder.
 

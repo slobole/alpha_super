@@ -99,12 +99,24 @@ def _project_list(overview_dict, pod_dict, source_dict, cycle_dict, *, as_of_ts,
     # Pod view deliberately withholds that value as an actual observation.
     if submission_ts is not None and ack_time_list and all(ack_ts is not None and submission_ts < ack_ts <= as_of_ts for ack_ts in ack_time_list):
         timestamp_dict["Submit"] = max(ack_time_list)
-    row_dict = _row_dict(pod_dict, cycle_dict, stage_str="cycle", timestamp_ts=reconcile_ts,
-        title_str=("Close" if policy_str == "same_day_moc" else "Open") + " cycle completed.",
-        detail_str=step_list[4]["fact_str"] + " · Positions checked", tab_str="plan")
+    daily_dict = saved_row_dict.get("daily_cycle_dict")
+    if daily_dict is not None:
+        # Daily pods close from holdings; fills are records, not the close condition.
+        result_dict = daily_dict.get("execution_result_dict") or {}
+        count_obj = result_dict.get("exception_count_int")
+        exception_count_int = count_obj if type(count_obj) is int and count_obj >= 0 else len(result_dict.get("exception_list") or [])
+        row_dict = _row_dict(pod_dict, cycle_dict, stage_str="cycle", timestamp_ts=reconcile_ts,
+            title_str=f"Day closed with exceptions ({exception_count_int})." if exception_count_int else "Day closed from holdings.",
+            detail_str=step_list[4]["fact_str"], tab_str="exceptions" if exception_count_int else "reconcile")
+    else:
+        row_dict = _row_dict(pod_dict, cycle_dict, stage_str="cycle", timestamp_ts=reconcile_ts,
+            title_str=("Close" if policy_str == "same_day_moc" else "Open") + " cycle completed.",
+            detail_str=step_list[4]["fact_str"] + " · Positions checked", tab_str="plan")
     row_dict["fold_candidate_bool"] = True  # Caller must retain/block on exact-cycle historical problems.
     title_dict = {"Data": "Data ready.", "Decide": "Decision saved.", "Plan": "Plan saved.",
         "Submit": "Orders acknowledged.", "Fill": "Orders filled.", "Reconcile": "Positions checked."}
+    if daily_dict is not None:
+        title_dict.update(Fill="Fills recorded.", Reconcile="Day closed.")
     for step_dict in step_list[:6]:
         label_str = step_dict["label_str"]
         child_dict = _row_dict(pod_dict, cycle_dict, stage_str=label_str.lower(),

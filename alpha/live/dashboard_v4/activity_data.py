@@ -122,6 +122,11 @@ def _event_dict(record_dict, identity_dict, *, source_str, as_of_ts, from_date_s
     quiet_bool = level_str not in {"WARNING", "ERROR", "CRITICAL"} and not issue_bool
     if event_type_str in QUIET_EVENT_SET and quiet_bool:
         return None
+    # A daily pod polls its open cycle about every 30 s; a pending poll that sent
+    # no same-day completion is routine.
+    if (event_type_str == "daily_cycle_reconciled" and quiet_bool and field_dict.get("status_str") == "pending"
+            and not field_dict.get("completion_asset_list")):
+        return None
     if event_type_str == "norgate_snapshot_sync_skipped" and quiet_bool and (
         field_dict.get("reason_code_str"), field_dict.get("status_str")) in {
             ("direct_norgate_mode", "direct"), ("no_enabled_releases", "ready"), ("local_snapshot_ready", "ready")}:
@@ -208,6 +213,15 @@ def _event_dict(record_dict, identity_dict, *, source_str, as_of_ts, from_date_s
     asset_str = field_dict.get("asset_str")
     if isinstance(asset_str, str) and re.fullmatch(r"[A-Z0-9][A-Z0-9.^_-]{0,19}", asset_str):
         payload_dict["asset_str"] = asset_str
+    # Daily close: the symbols of same-day completions sent, and only the count of exceptions.
+    completion_list = field_dict.get("completion_asset_list")
+    if isinstance(completion_list, list):
+        completion_list = [value_obj for value_obj in completion_list
+            if isinstance(value_obj, str) and re.fullmatch(r"[A-Z0-9][A-Z0-9.^_-]{0,19}", value_obj)][:20]
+        if completion_list:
+            payload_dict["completion_asset_list"] = completion_list
+    if isinstance(field_dict.get("exception_list"), list):
+        payload_dict["exception_count_int"] = len(field_dict["exception_list"])
     for field_str, allowed_set in (("side_str", {"BUY", "SELL"}),
             ("broker_order_type_str", {"MKT", "LMT", "MOO", "MOC", "LOO", "LOC", "STP", "STP LMT"})):
         if isinstance(field_dict.get(field_str), str) and field_dict[field_str] in allowed_set:

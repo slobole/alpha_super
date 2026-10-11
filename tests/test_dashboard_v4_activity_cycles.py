@@ -244,3 +244,20 @@ def test_bad_period_and_read_failures_do_not_escape_raw_errors(saved_fixture_tup
     result_dict = build_activity_cycles_dict(provider_obj, overview_dict,
         as_of_ts=DEMO_NOW_TS, from_ts=DEMO_NOW_TS - timedelta(days=7))
     assert result_dict["warning_list"] and "private" not in str(result_dict)
+
+
+def test_daily_cycles_read_as_closed_days_in_the_demo():
+    import re
+    from types import SimpleNamespace
+    from unittest import mock
+
+    from alpha.live.dashboard_v4.demo import create_demo_app
+
+    with mock.patch("alpha.live.dashboard_v3.health.shutil.disk_usage", lambda path_str: SimpleNamespace(total=100, used=50, free=50)):
+        response_obj = create_demo_app(demo_daily_bool=True).test_client().get("/activity/body?days=7")
+    assert response_obj.status_code == 200
+    text_str = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", response_obj.get_data(as_text=True)))
+    assert "Capsule · Last close exceptions Day closed with exceptions (2)." in text_str
+    assert "CORE5 · Not sent Day closed from holdings." in text_str
+    # Monthly demo pods keep their wording.
+    assert "Open cycle completed." in text_str

@@ -555,3 +555,27 @@ def test_manual_ticket_uses_actual_safe_payload_fields_and_hides_operator_reason
     assert {field_str: payload_dict[field_str] for field_str in ("ticket_id_str", "asset_str", "side_str", "broker_order_type_str", "quantity_int")} == {
         "ticket_id_str": "manual_20260921", "asset_str": "BKR", "side_str": "BUY", "broker_order_type_str": "LMT", "quantity_int": 19}
     assert "private" not in json.dumps(event_dict)
+
+
+def test_daily_pending_polls_are_quiet_and_close_facts_keep_only_symbols_and_a_count(tmp_path):
+    provider_obj = _provider_obj(tmp_path)
+    exception_list = [{"asset_str": "AAPL", "side_str": "BUY", "quantity_float": 4.0, "reason_str": "actual_holding_differs_from_vplan"},
+        {"asset_str": "BIL", "side_str": "SELL", "quantity_float": 10.0, "reason_str": "actual_holding_differs_from_vplan"}]
+    _write_records(Path(provider_obj.event_log_path_str),
+        _record_dict("daily_cycle_reconciled", status_str="pending", exception_list=[], completion_asset_list=[]),
+        _record_dict("daily_cycle_reconciled", event_ts=BASE_TS - timedelta(minutes=1), status_str="pending",
+            exception_list=[], completion_asset_list=["DBC", "bad symbol!", 7]),
+        _record_dict("daily_cycle_reconciled", event_ts=BASE_TS - timedelta(minutes=2), status_str="completed_with_exceptions",
+            exception_list=exception_list, completion_asset_list=[]),
+        _record_dict("daily_cycle_reconciled", event_ts=BASE_TS - timedelta(minutes=3), status_str="pending",
+            severity_str="error", error_str="private broker text"))
+    event_list = _load_dict(provider_obj)["event_list"]
+    # The routine pending poll is gone; a sent completion, the close and a failing poll stay.
+    observed_dict = {(event_dict["payload_dict"].get("status_str"), event_dict["level_str"]):
+        (event_dict["payload_dict"].get("completion_asset_list"), event_dict["payload_dict"].get("exception_count_int"))
+        for event_dict in event_list}
+    assert len(event_list) == 3 and observed_dict == {("completed_with_exceptions", "INFO"): (None, 2),
+        ("pending", "ERROR"): (None, None), ("pending", "INFO"): (["DBC"], 0)}
+    text_str = json.dumps(event_list)
+    for private_str in ("AAPL", "bad symbol", "private broker text", "actual_holding_differs_from_vplan"):
+        assert private_str not in text_str

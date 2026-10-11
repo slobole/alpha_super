@@ -30,6 +30,23 @@ EVENT_DICT = {
     "core5_decision_blocked": ("alerts", "fail", "Decision blocked by a safety check.", "decision"),
     "core5_eod_source_untrusted": ("alerts", "fail", "Closing snapshot source could not be verified.", "events"),
     "core5_pre_submit_account_changed": ("alerts", "fail", "Account changed before submission. Orders blocked.", "orders"),
+    # Daily pods (CORE5, MR capsule). daily_cycle_reconciled is worded by its status below.
+    "daily_cycle_reconciled": ("cycles", "done", "Daily check recorded.", "reconcile"),
+    "daily_cycle_reconcile_retry": ("alerts", "fail", "Daily close check failed. Retrying.", "reconcile"),
+    "daily_cycle_load_failed": ("alerts", "fail", "Daily cycle could not be read.", "events"),
+    "daily_alert_enqueue_failed": ("alerts", "fail", "Daily alert could not be queued.", "events"),
+    "daily_fill_reporting_unavailable": ("alerts", "unk", "Fill report unavailable. The day still closes from holdings.", "fills"),
+    "daily_open_price_reporting_unavailable": ("alerts", "unk", "Opening price report unavailable.", "fills"),
+    "daily_report_audit_unavailable": ("alerts", "unk", "Post-close report check unavailable.", "events"),
+    "mr_capsule_decision_blocked": ("alerts", "fail", "Decision blocked by a safety check.", "decision"),
+    "mr_capsule_eod_source_untrusted": ("alerts", "fail", "Closing snapshot source could not be verified.", "events"),
+    "mr_capsule_vplan_blocked": ("alerts", "fail", "Order plan blocked.", "plan"),
+    "mr_capsule_pre_submit_account_changed": ("alerts", "fail", "Account changed before submission. Orders blocked.", "orders"),
+    "build_retry_pending": ("alerts", "unk", "Order plan retrying after a broker error.", "plan"),
+    "opening_build_parked": ("alerts", "fail", "Order plan not built. Nothing was sent; the day closes from holdings.", "plan"),
+    "dispatch_retry_pending": ("alerts", "unk", "Order send retrying after a broker error.", "orders"),
+    "opening_dispatch_incomplete": ("alerts", "fail", "Opening orders not fully sent. Check the broker; do not resend.", "orders"),
+    "submission_claim_failed": ("alerts", "unk", "Send attempt stopped: another run holds this plan.", "orders"),
     "scheduler_started": ("system", "done", "Scheduler started.", "events"),
     "scheduler_error_retry": ("system", "fail", "Scheduler error. Retry scheduled.", "events"),
     "operator_action_requested": ("operator", "now", "Operator action requested.", "events"),
@@ -43,7 +60,8 @@ EVENT_DICT = {
     "norgate_snapshot_sync_waiting": ("system", "unk", "Data sync is waiting.", "events"),
     "norgate_snapshot_sync_skipped": ("system", "unk", "Data sync skipped.", "events"),
 }
-FOLDABLE_EVENT_SET = {"build_decision_plan_created", "build_vplan_created", "submit_vplan_completed", "post_execution_reconcile_completed"}
+FOLDABLE_EVENT_SET = {"build_decision_plan_created", "build_vplan_created", "submit_vplan_completed", "post_execution_reconcile_completed",
+    "daily_cycle_reconciled"}
 ACTION_LABEL_DICT = {"tick": "Trading check", "submit_vplan": "Order submission", "post_execution_reconcile": "Position check",
     "eod_snapshot": "Closing snapshot", "export_trade_sheet": "Trade sheet export", "doctor": "System check",
     "build_decision_plan": "Decision", "build_vplan": "Order plan", "cancel_vplan": "Order cancellation"}
@@ -96,6 +114,19 @@ def _event_row_dict(event_dict, pod_map_dict, verified_cycle_list):
     if code_str == "operator_action_requested":
         action_str = payload_dict.get("action_name_str") or payload_dict.get("action_str")
         title_str = ACTION_LABEL_DICT.get(action_str, "Operator action") + " requested."
+    keep_bool = False
+    if code_str == "daily_cycle_reconciled":
+        daily_status_str = payload_dict.get("status_str")
+        completion_list = [value_str for value_str in payload_dict.get("completion_asset_list") or [] if isinstance(value_str, str)]
+        count_obj = payload_dict.get("exception_count_int")
+        if daily_status_str == "completed":
+            title_str = "Day closed from holdings."
+        elif daily_status_str == "completed_with_exceptions":
+            title_str = "Day closed with exceptions" + (f" ({count_obj})" if type(count_obj) is int else "") + "."
+            tab_str = "exceptions"
+        elif completion_list:
+            # A sent completion stays its own row; a healthy cycle never absorbs it.
+            title_str, tab_str, keep_bool = "Same-day exit sent (MKT): " + ", ".join(completion_list) + ".", "orders", True
     if event_dict.get("notification_delivery_str") in {"delivered", "failed", "queued"}:
         delivery_str = event_dict["notification_delivery_str"]
         type_str, state_str = "alerts", {"delivered": "done", "failed": "fail", "queued": "now"}[delivery_str]
@@ -124,7 +155,7 @@ def _event_row_dict(event_dict, pod_map_dict, verified_cycle_list):
         "pod_id_str": pod_id_str, "pod_name_str": pod_map_dict.get(pod_id_str, "System"), "type_str": type_str,
         "related_pod_id_list": payload_dict.get("related_pod_id_list", []),
         "state_str": state_str, "title_str": title_str, "detail_str": " · ".join(detail_list), "code_str": code_str,
-        "evidence_list": evidence_list, "evidence_url_str": evidence_url_str, "child_list": [],
+        "evidence_list": evidence_list, "evidence_url_str": evidence_url_str, "child_list": [], "keep_bool": keep_bool,
         "other_event_bool": code_str not in EVENT_DICT and level_str not in {"warning", "warn", "critical", "error", "fatal"}
             and state_str == "unk" and type_str not in {"alerts", "operator"}}
 
@@ -176,7 +207,8 @@ def build_activity_page_dict(overview_dict, source_dict, cycle_dict, *, as_of_ts
             folded_list.append(row_dict)
         row_list.append(row_dict)
     for event_dict, row_dict in paired_list:
-        if row_dict["code_str"] in FOLDABLE_EVENT_SET and row_dict["state_str"] == "done" and any(_cycle_matches_bool(event_dict, group_dict) for group_dict in folded_list):
+        if (row_dict["code_str"] in FOLDABLE_EVENT_SET and row_dict["state_str"] == "done" and not row_dict.get("keep_bool")
+                and any(_cycle_matches_bool(event_dict, group_dict) for group_dict in folded_list)):
             continue
         row_list.append(row_dict)
     row_list = _group_other_events_list(row_list)

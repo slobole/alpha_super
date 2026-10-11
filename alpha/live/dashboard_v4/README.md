@@ -352,6 +352,17 @@ current header does not alter independently verified historical facts. Planned
 times do not become actual event times; operator requests do not imply completion,
 and notification delivery needs an explicit saved receipt.
 
+Daily pods (CORE5, MR capsule) read as days. A closed daily cycle is `Day closed
+from holdings` or `Day closed with exceptions (n)`, its Fill step `Fills recorded`
+and its Reconcile step `Day closed`; it links to Exceptions when there are any.
+The daily serve logs `daily_cycle_reconciled` on every open-cycle poll: a pending
+poll that sent nothing is routine and hidden, a poll that sent a same-day
+completion stays its own row (`Same-day exit sent (MKT): DBC.`) and is never
+folded, and a terminal close folds into a healthy matching cycle. The reader keeps
+only the completion symbols and the exception count, never exception details or
+error text. Daily dispatch, build, report and alert events have plain sentences;
+a not fully sent opening batch says to check the broker and not resend.
+
 The Operator category includes saved V3 dashboard requests and manual-order
 request/submission/failure events. CLI commands are not comprehensively recorded
 in the operator journal. A completed manual submission is not proof of a fill.

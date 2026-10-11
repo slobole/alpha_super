@@ -140,3 +140,36 @@ def test_global_events_have_inline_evidence_without_dead_system_link():
     row_dict = _page_dict([_event_dict("scheduler_started", pod_id_str="", decision_plan_id_int=None, vplan_id_int=None)])["row_list"][0]
     assert row_dict["type_str"] == "system" and row_dict["pod_name_str"] == "System"
     assert row_dict["evidence_url_str"] == "" and row_dict["evidence_list"]
+
+
+DAILY_ALERT_CODE_TUPLE = ("daily_cycle_reconcile_retry", "daily_cycle_load_failed", "daily_alert_enqueue_failed",
+    "daily_fill_reporting_unavailable", "daily_open_price_reporting_unavailable", "daily_report_audit_unavailable",
+    "mr_capsule_decision_blocked", "mr_capsule_eod_source_untrusted", "mr_capsule_vplan_blocked",
+    "mr_capsule_pre_submit_account_changed", "build_retry_pending", "opening_build_parked", "dispatch_retry_pending",
+    "opening_dispatch_incomplete", "submission_claim_failed")
+
+
+def test_daily_events_read_as_plain_sentences_and_stay_individual():
+    for code_str in DAILY_ALERT_CODE_TUPLE:
+        row_dict, = _page_dict([_event_dict(code_str, level_str="warning")], [_group_dict()])["row_list"]
+        assert row_dict["code_str"] == code_str and row_dict["type_str"] == "alerts"
+        assert row_dict["title_str"] not in {"Event needs review.", "Saved event.", "Alert event recorded."}
+    failed_dict, = _page_dict([_event_dict("opening_dispatch_incomplete", level_str="critical")])["row_list"]
+    assert (failed_dict["state_str"], failed_dict["title_str"]) == ("fail", "Opening orders not fully sent. Check the broker; do not resend.")
+
+
+def test_daily_close_is_worded_by_status_and_a_sent_completion_stays_visible():
+    payload_dict = {"release_id_str": "release-1", "status_str": "completed_with_exceptions", "exception_count_int": 2}
+    closed_dict = _event_dict("daily_cycle_reconciled", payload_dict=payload_dict)
+    row_dict, = _page_dict([closed_dict])["row_list"]
+    assert (row_dict["type_str"], row_dict["state_str"], row_dict["title_str"]) == ("cycles", "done", "Day closed with exceptions (2).")
+    clean_dict, = _page_dict([_event_dict("daily_cycle_reconciled", payload_dict={**payload_dict, "status_str": "completed"})])["row_list"]
+    assert clean_dict["title_str"] == "Day closed from holdings."
+    # A healthy matching cycle absorbs the routine close record, never a sent completion.
+    group_dict = _group_dict()
+    assert _page_dict([closed_dict], [group_dict])["row_list"] == [group_dict]
+    sent_dict = _event_dict("daily_cycle_reconciled", timestamp_str="2026-09-08T13:40:00+00:00",
+        payload_dict={"release_id_str": "release-1", "status_str": "pending", "completion_asset_list": ["DBC", "MSFT"]})
+    row_list = _page_dict([sent_dict], [group_dict])["row_list"]
+    assert len(row_list) == 2 and group_dict in row_list
+    assert next(item_dict for item_dict in row_list if item_dict is not group_dict)["title_str"] == "Same-day exit sent (MKT): DBC, MSFT."
