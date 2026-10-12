@@ -24,6 +24,7 @@ NDX_E2_STRATEGY_IMPORT_TUPLE = (
     "strategies.momentum.strategy_mo_natr20_ndx_vxn_scaled_sector_cap:SectorCapNatr20VxnScaledNdxStrategy",
 )
 NDX_E2_SIZING_CONTRACT_STR = "legacy_monthly_preopen_v1"
+NDX_E2_DECISION_HISTORY_MONTHS_INT = 36
 
 
 def validate_ndx_e2_release(release_obj: LiveRelease) -> None:
@@ -92,7 +93,15 @@ def build_ndx_e2_decision_plan(
 
     module_name_str, class_name_str = release_obj.strategy_import_str.split(":")
     strategy_module = import_module(module_name_str)
+    # *** CRITICAL *** The decision reads only a trailing window of the frozen
+    # snapshot. The longest lookback is ROC over 12 month-ends; SMA200, SMA100
+    # and ATR20 are shorter. The snapshot keeps full 1999+ history for
+    # references. A window that is too short raises below (NaN regime or
+    # features); it cannot change selections silently.
+    history_start_ts = signal_date_ts - pd.DateOffset(months=NDX_E2_DECISION_HISTORY_MONTHS_INT)
     config_obj = replace(strategy_module.DEFAULT_CONFIG, end_date_str=signal_date_str,
+        history_start_date_str=history_start_ts.date().isoformat(),
+        backtest_start_date_str=(history_start_ts + pd.Timedelta(days=1)).date().isoformat(),
         capital_base_float=float(release_obj.params_dict.get("capital_base_float", strategy_module.DEFAULT_CONFIG.capital_base_float)))
     natr_bool = release_obj.strategy_import_str == NDX_E2_STRATEGY_IMPORT_TUPLE[1]
     data_loader_fn = (strategy_module.get_natr20_vxn_scaled_ndx_data if natr_bool

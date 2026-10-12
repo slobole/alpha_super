@@ -246,3 +246,38 @@ def test_preopen_nav_and_quote_resize_shares_without_changing_frozen_weights(e2_
         assert all(request_obj.broker_order_type_str == "MOO" for request_obj in build_broker_order_request_list_from_vplan(plan_obj))
         assert decision_obj.full_target_weight_map_dict == weight_dict
     assert quantity_list == [50.0, 60.0, 40.0]
+
+
+def _wrap_loader(e2_case, monkeypatch, wrapper_fn):
+    release_obj = e2_case[0]
+    strategy_module = import_module(release_obj.strategy_import_str.split(":")[0])
+    loader_name_str = ("get_natr20_vxn_scaled_ndx_data" if release_obj.strategy_import_str == adapter_module.NDX_E2_STRATEGY_IMPORT_TUPLE[1]
+        else "get_vxn_scaled_atr_normalized_ndx_data")
+    inner_fn = getattr(strategy_module, loader_name_str)
+    monkeypatch.setattr(strategy_module, loader_name_str, lambda config_obj: wrapper_fn(inner_fn, config_obj))
+
+
+def test_decision_requests_only_the_trailing_history_window(e2_case, monkeypatch):
+    config_list = []
+    _wrap_loader(e2_case, monkeypatch, lambda inner_fn, config_obj: (config_list.append(config_obj), inner_fn(config_obj))[1])
+    _build(e2_case)
+    assert [(config_obj.history_start_date_str, config_obj.backtest_start_date_str, config_obj.end_date_str)
+        for config_obj in config_list] == [("2010-06-28", "2010-06-29", "2013-06-28")]
+
+
+def test_trailing_window_matches_full_history_and_a_too_short_window_fails_closed(e2_case, monkeypatch):
+    def windowed_frames(inner_fn, config_obj):
+        start_ts = pd.Timestamp(config_obj.history_start_date_str)
+        pricing_df, universe_df, _, vxn_df = inner_fn(config_obj)
+        return (pricing_df.loc[pricing_df.index >= start_ts], universe_df.loc[universe_df.index >= start_ts],
+            None, vxn_df.loc[vxn_df.index >= start_ts])
+    _wrap_loader(e2_case, monkeypatch, windowed_frames)
+    weight_by_months_dict = {}
+    for months_int in (24, 600):
+        monkeypatch.setattr(adapter_module, "NDX_E2_DECISION_HISTORY_MONTHS_INT", months_int)
+        weight_by_months_dict[months_int] = _build(e2_case).full_target_weight_map_dict
+    assert weight_by_months_dict[24] and weight_by_months_dict[24] == weight_by_months_dict[600]
+    for months_int in (6, 11):
+        monkeypatch.setattr(adapter_module, "NDX_E2_DECISION_HISTORY_MONTHS_INT", months_int)
+        with pytest.raises(ValueError, match="requires (a )?valid"):
+            _build(e2_case)
