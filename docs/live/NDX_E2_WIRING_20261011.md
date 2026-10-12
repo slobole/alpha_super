@@ -74,7 +74,7 @@ New profile: `norgate_eod_ndx_e2_pit_plus_vxn_helper`, schema v2.
 - A complete GICS map is captured on the licensed Norgate producer with `classification_at_level(symbol, "GICS", "ClassificationId", 1)`. Native eight-digit IDs are preserved. A successful missing classification becomes UNKNOWN; provider errors abort export.
 - The map, canonical SHA256, current-at-export basis, snapshot date and UTC capture timestamp travel in the manifest and DecisionPlan. The client never calls Norgate for classifications.
 - Invalid map coverage/hash/provenance, missing raw-close anchors, invalid current-member prices, internal stock/benchmark session gaps, missing SPY history, unavailable monthly regime/features, or a snapshot other than exact T stop new decisions. Legitimate pre-IPO and post-delisting absence is retained. Valid regime-off remains an all-cash target.
-- Manifest/file validation is repeated for E2. Identity is checked before and after decision/reference generation. No cached successful manifest may conceal a damaged new input.
+- Manifest and file SHA256 validation is repeated on every E2 read. The full content check runs once per exact manifest per process, because the manifest pins both file hashes, the sector map and the Close_T endpoint attestations. A failed check is never reused. Identity is checked before and after decision/reference generation. No cached result may conceal a damaged new input.
 
 GICS labels are current at export, not historical PIT labels. Replaying past months using one such map remains a historical classification approximation (G-025). Capturing a past-date price artifact today does not establish what sector labels were available back then.
 

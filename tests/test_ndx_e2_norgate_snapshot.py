@@ -197,3 +197,70 @@ def test_actual_both_parent_reference_loaders_can_read_total_return_benchmark(e2
             pricing_data_df, _, _, _ = loader_fn(config_obj, include_total_return_benchmark_bool=True)
         assert (config_obj.performance_benchmark_data_symbol_str, "Close") in pricing_data_df.columns
         assert pricing_data_df[(config_obj.performance_benchmark_data_symbol_str, "Close")].notna().all()
+
+
+def count_content_checks(monkeypatch):
+    call_list = []
+    original_fn = snapshot_module._check_ndx_e2_snapshot_content
+    def counted_fn(*args, **kwargs):
+        call_list.append(args[0])
+        return original_fn(*args, **kwargs)
+    monkeypatch.setattr(snapshot_module, "_check_ndx_e2_snapshot_content", counted_fn)
+    return call_list
+
+
+def test_content_check_runs_once_per_manifest_while_file_hashes_run_every_read(e2_snapshot, monkeypatch):
+    _, snapshot_path_obj = e2_snapshot
+    check_list = count_content_checks(monkeypatch)
+    hash_list = []
+    original_hash_fn = snapshot_module._validate_file_hash
+    monkeypatch.setattr(snapshot_module, "_validate_file_hash",
+        lambda path_obj, manifest_dict, name_str: (hash_list.append(name_str), original_hash_fn(path_obj, manifest_dict, name_str))[1])
+    for _ in range(3):
+        assert snapshot_module.load_latest_snapshot_session_label_ts(snapshot_module.NDX_E2_PROFILE_STR) == pd.Timestamp("2024-01-31")
+    assert check_list == [snapshot_path_obj]
+    assert hash_list.count("prices.parquet") >= 3 and hash_list.count("universe.parquet") >= 3
+
+
+@pytest.mark.parametrize("file_name_str", ["prices.parquet", "universe.parquet"])
+def test_file_replaced_after_a_green_check_is_still_refused(e2_snapshot, file_name_str):
+    _, snapshot_path_obj = e2_snapshot
+    snapshot_module.load_valid_snapshot_manifest(snapshot_module.NDX_E2_PROFILE_STR)
+    file_path_obj = snapshot_path_obj / file_name_str
+    frame_df = pd.read_parquet(file_path_obj)
+    numeric_column_str = "Close" if file_name_str == "prices.parquet" else frame_df.select_dtypes("number").columns[0]
+    frame_df.loc[frame_df.index[0], numeric_column_str] = frame_df[numeric_column_str].iloc[0] + 1
+    frame_df.to_parquet(file_path_obj, index=False)
+    with pytest.raises(snapshot_module.NorgateSnapshotValidationError, match="SHA256 mismatch"):
+        snapshot_module.load_valid_snapshot_manifest(snapshot_module.NDX_E2_PROFILE_STR)
+    assert snapshot_module.load_latest_snapshot_session_label_ts(snapshot_module.NDX_E2_PROFILE_STR) is None
+
+
+def test_new_manifest_and_new_snapshot_date_each_get_the_full_check(e2_snapshot, monkeypatch, tmp_path):
+    _, snapshot_path_obj = e2_snapshot
+    check_list = count_content_checks(monkeypatch)
+    snapshot_module.load_valid_snapshot_manifest(snapshot_module.NDX_E2_PROFILE_STR)
+    price_df = pd.read_parquet(snapshot_path_obj / "prices.parquet")
+    price_df["Volume"] = price_df["Volume"] + 1.0
+    rewrite_prices(snapshot_path_obj, price_df)
+    snapshot_module.load_valid_snapshot_manifest(snapshot_module.NDX_E2_PROFILE_STR)
+    new_path_obj = export_module.export_profile_snapshot(snapshot_root_str=str(tmp_path),
+        profile_str=snapshot_module.NDX_E2_PROFILE_STR, snapshot_date_str="2024-01-30")
+    check_list.clear()
+    snapshot_module.load_valid_snapshot_manifest(snapshot_module.NDX_E2_PROFILE_STR, snapshot_date_str="2024-01-30")
+    snapshot_module.load_valid_snapshot_manifest(snapshot_module.NDX_E2_PROFILE_STR, snapshot_date_str="2024-01-30")
+    assert check_list == [new_path_obj]
+
+
+def test_failed_content_check_is_never_remembered(e2_snapshot, monkeypatch):
+    _, snapshot_path_obj = e2_snapshot
+    check_list = count_content_checks(monkeypatch)
+    good_df = pd.read_parquet(snapshot_path_obj / "prices.parquet")
+    rewrite_prices(snapshot_path_obj, pd.concat([good_df, good_df.iloc[[0]]]))
+    for _ in range(2):
+        with pytest.raises(snapshot_module.NorgateSnapshotValidationError, match="duplicated"):
+            snapshot_module.load_valid_snapshot_manifest(snapshot_module.NDX_E2_PROFILE_STR)
+    assert len(check_list) == 2
+    rewrite_prices(snapshot_path_obj, good_df)
+    snapshot_module.load_valid_snapshot_manifest(snapshot_module.NDX_E2_PROFILE_STR)
+    assert len(check_list) == 3

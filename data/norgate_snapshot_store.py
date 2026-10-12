@@ -317,7 +317,39 @@ def ndx_e2_sector_map_hash_str(sector_by_symbol_dict: dict[str, str]) -> str:
     ).encode("utf-8")).hexdigest()
 
 
+_NDX_E2_CHECKED_CONTENT_KEY_SET: set[tuple[str, str, str]] = set()
+_NDX_E2_CHECKED_CONTENT_LOCK_OBJ = Lock()
+
+
+def _ndx_e2_content_key_tuple(
+    snapshot_dir_path_obj: Path, manifest_dict: dict[str, Any], snapshot_date_ts: pd.Timestamp,
+) -> tuple[str, str, str]:
+    manifest_sha256_str = hashlib.sha256(json.dumps(
+        manifest_dict, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")).hexdigest()
+    return (str(Path(snapshot_dir_path_obj).resolve()), snapshot_date_ts.date().isoformat(), manifest_sha256_str)
+
+
 def _validate_ndx_e2_snapshot_contract(
+    snapshot_dir_path_obj: Path, manifest_dict: dict[str, Any], snapshot_date_ts: pd.Timestamp,
+) -> None:
+    # *** CRITICAL *** Both files' SHA256 are verified against the manifest on
+    # every read. The manifest pins those hashes, the sector map and the Close_T
+    # endpoint attestations, so the content rules below are a pure function of
+    # the exact manifest. One green result per manifest is reused in this
+    # process; a failed check is never remembered.
+    _validate_file_hash(snapshot_dir_path_obj, manifest_dict, PRICE_FILE_NAME_STR)
+    _validate_file_hash(snapshot_dir_path_obj, manifest_dict, UNIVERSE_FILE_NAME_STR)
+    content_key_tuple = _ndx_e2_content_key_tuple(snapshot_dir_path_obj, manifest_dict, snapshot_date_ts)
+    with _NDX_E2_CHECKED_CONTENT_LOCK_OBJ:
+        if content_key_tuple in _NDX_E2_CHECKED_CONTENT_KEY_SET:
+            return
+    _check_ndx_e2_snapshot_content(snapshot_dir_path_obj, manifest_dict, snapshot_date_ts)
+    with _NDX_E2_CHECKED_CONTENT_LOCK_OBJ:
+        _NDX_E2_CHECKED_CONTENT_KEY_SET.add(content_key_tuple)
+
+
+def _check_ndx_e2_snapshot_content(
     snapshot_dir_path_obj: Path, manifest_dict: dict[str, Any], snapshot_date_ts: pd.Timestamp,
 ) -> None:
     if manifest_dict.get("schema_version") != SNAPSHOT_SCHEMA_VERSION_INT:
