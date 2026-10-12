@@ -264,3 +264,39 @@ def test_failed_content_check_is_never_remembered(e2_snapshot, monkeypatch):
     rewrite_prices(snapshot_path_obj, good_df)
     snapshot_module.load_valid_snapshot_manifest(snapshot_module.NDX_E2_PROFILE_STR)
     assert len(check_list) == 3
+
+
+def test_e2_price_reads_retain_only_the_latest_snapshot(e2_snapshot, tmp_path, monkeypatch):
+    _, snapshot_path_obj = e2_snapshot
+    snapshot_module.clear_snapshot_manifest_cache()
+    generic_cache_size_int = snapshot_module._read_prices_cached_df.cache_info().currsize
+    def read_aaa_df():
+        with snapshot_module.use_norgate_data_profile(snapshot_module.NDX_E2_PROFILE_STR):
+            return snapshot_module.load_raw_prices_df(["AAA"], [], start_date_str="2024-01-02", end_date_str="2024-01-30")
+    first_df = read_aaa_df()
+    first_df.iloc[:, :] = -1.0
+    assert read_aaa_df().equals(read_aaa_df()) and not read_aaa_df().equals(first_df)
+    retained_key_tuple = snapshot_module._MR_CAPSULE_PRICE_CACHE_DICT[snapshot_module.NDX_E2_PROFILE_STR][0]
+    assert retained_key_tuple[0] == str(snapshot_path_obj)
+    second_root_path_obj = tmp_path / "second_root"
+    second_path_obj = export_module.export_profile_snapshot(snapshot_root_str=str(second_root_path_obj),
+        profile_str=snapshot_module.NDX_E2_PROFILE_STR, snapshot_date_str="2024-01-30")
+    monkeypatch.setenv("NORGATE_SNAPSHOT_ROOT", str(second_root_path_obj))
+    read_aaa_df()
+    e2_entry_list = [key_str for key_str in snapshot_module._MR_CAPSULE_PRICE_CACHE_DICT if key_str == snapshot_module.NDX_E2_PROFILE_STR]
+    assert e2_entry_list == [snapshot_module.NDX_E2_PROFILE_STR]
+    assert snapshot_module._MR_CAPSULE_PRICE_CACHE_DICT[snapshot_module.NDX_E2_PROFILE_STR][0][0] == str(second_path_obj)
+    assert snapshot_module._read_prices_cached_df.cache_info().currsize == generic_cache_size_int
+
+
+def test_other_profiles_keep_the_shared_price_cache(monkeypatch, tmp_path):
+    call_list = []
+    monkeypatch.setattr(snapshot_module, "_read_prices_cached_df",
+        lambda dir_str, hash_str: (call_list.append((dir_str, hash_str)), pd.DataFrame({"Close": [1.0]}))[1])
+    for profile_str in ("norgate_eod_ndx_pit_plus_vxn_helper", "norgate_eod_etf_plus_vix_helper", snapshot_module.CORE5_PROFILE_STR):
+        manifest_obj = snapshot_module.NorgateSnapshotManifest(profile_str=profile_str, snapshot_date_ts=pd.Timestamp("2024-01-31"),
+            snapshot_dir_path_obj=tmp_path / profile_str, manifest_dict={}, manifest_hash_str=f"hash-{profile_str}")
+        snapshot_module._read_prices_df(manifest_obj)
+        assert profile_str not in snapshot_module._MR_CAPSULE_PRICE_CACHE_DICT
+    assert [hash_str for _, hash_str in call_list] == [
+        "hash-norgate_eod_ndx_pit_plus_vxn_helper", "hash-norgate_eod_etf_plus_vix_helper", f"hash-{snapshot_module.CORE5_PROFILE_STR}"]

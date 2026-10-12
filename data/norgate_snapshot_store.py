@@ -920,9 +920,9 @@ def _read_prices_cached_df(snapshot_dir_str: str, manifest_hash_str: str) -> pd.
 
 
 def _read_prices_df(snapshot_manifest_obj: NorgateSnapshotManifest) -> pd.DataFrame:
-    if snapshot_manifest_obj.profile_str in MR_CAPSULE_PROFILE_SET:
+    if snapshot_manifest_obj.profile_str in MR_CAPSULE_PROFILE_SET or snapshot_manifest_obj.profile_str == NDX_E2_PROFILE_STR:
         cache_key_tuple = (str(snapshot_manifest_obj.snapshot_dir_path_obj), snapshot_manifest_obj.manifest_hash_str)
-        # Each large capsule profile retains only its last requested snapshot.
+        # Each large capsule or E2 profile retains only its last requested snapshot.
         # Lock loading and copying together: concurrent pods cannot duplicate
         # the retained load or mutate a frame while another caller copies it.
         with _MR_CAPSULE_PRICE_CACHE_LOCK_OBJ:
