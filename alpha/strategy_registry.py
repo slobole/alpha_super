@@ -63,6 +63,8 @@ TIER_LABEL_DICT: dict[MaturityTier, str] = {
 STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     # ── wired: live account routes ──────────────────────────────────────────
     "strategies.dv2.strategy_mr_dv2:DVO2Strategy": MaturityTier.WIRED,
+    # DV2-IND plumbing only; disabled template, forward qualification pending.
+    "strategies.dv2.strategy_mr_dv2_industry_etf:DVO2IndustryEtfStrategy": MaturityTier.WIRED,
     # QPI (strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy)
     # was demoted from WIRED to RESEARCH on 2026-09-28 by owner decision; it
     # was not running live on any VPS. HPI covers the same role. The readiness

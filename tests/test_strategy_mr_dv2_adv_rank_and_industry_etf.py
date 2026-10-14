@@ -87,19 +87,20 @@ def test_history_universe_uses_only_past_closes():
     assert universe_df["BBB"].iloc[MIN_HISTORY_SESSION_INT - 1] == 0
 
 
-def test_research_variants_have_no_live_or_portfolio_route():
+def test_only_industry_etf_variant_has_wiring():
     for module_str, class_str in (
         ("strategies.dv2.strategy_mr_dv2_liquidity_floor_adv_rank", "DVO2LiquidityFloorAdvRankStrategy"),
         ("strategies.dv2.strategy_mr_dv2_industry_etf", "DVO2IndustryEtfStrategy"),
     ):
         entry_obj = catalog.get_strategy_by_module(module_str)
         assert entry_obj is not None
-        assert entry_obj.maturity_key_str == "research"
-        assert not entry_obj.is_wired_bool
+        wired_bool = "industry_etf" in module_str
+        assert entry_obj.maturity_key_str == ("wired" if wired_bool else "research")
+        assert entry_obj.is_wired_bool == wired_bool
         assert entry_obj.has_run_variant_bool
         assert entry_obj.has_capacity_analysis_bool
         assert entry_obj.has_timing_analysis_bool
         import_str = f"{module_str}:{class_str}"
-        assert tier_for(import_str) is MaturityTier.RESEARCH
-        assert import_str not in release_manifest.SUPPORTED_STRATEGY_IMPORT_TUPLE
-        assert import_str not in portfolio_manager.SUPPORTED_STRATEGY_IMPORT_TUPLE
+        assert tier_for(import_str) is (MaturityTier.WIRED if wired_bool else MaturityTier.RESEARCH)
+        assert (import_str in release_manifest.SUPPORTED_STRATEGY_IMPORT_TUPLE) == wired_bool
+        assert (import_str in portfolio_manager.SUPPORTED_STRATEGY_IMPORT_TUPLE) == wired_bool

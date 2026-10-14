@@ -49,6 +49,7 @@ RELEASE_TEMPLATE_PATH_TUPLE: tuple[Path, ...] = (
     Path("docs/live/release_templates/pod_mr_hpi_vote_vix_gated_spmo_daily_moo.yaml.example"),
     Path("docs/live/release_templates/pod_ndx_atr_normalized_vxn_scaled_sector_cap_monthly_open.yaml.example"),
     Path("docs/live/release_templates/pod_ndx_natr20_vxn_scaled_sector_cap_monthly_open.yaml.example"),
+    Path("docs/live/release_templates/pod_dv2_industry_etf_daily_moo.yaml.example"),
 )
 
 
@@ -218,11 +219,13 @@ def test_release_template_parses_and_starts_disabled(template_path_obj: Path):
         assert release_obj.broker_client_id_int in range(41, 47)
     elif release_obj.strategy_import_str in NDX_E2_STRATEGY_IMPORT_TUPLE:
         assert release_obj.broker_client_id_int in (48, 49)
+    elif release_obj.strategy_import_str == "strategies.dv2.strategy_mr_dv2_industry_etf:DVO2IndustryEtfStrategy":
+        assert release_obj.broker_client_id_int == 50
     else:
         assert release_obj.broker_client_id_int == 31
     assert release_obj.broker_timeout_seconds_float == 4.0
     assert release_obj.session_calendar_id_str == "XNYS"
-    expected_budget_float = 1.0 if release_obj.strategy_import_str == "strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5" or release_obj.strategy_import_str.startswith("strategies.mr_capsule.") or release_obj.strategy_import_str in NDX_E2_STRATEGY_IMPORT_TUPLE else 0.03
+    expected_budget_float = 1.0 if release_obj.strategy_import_str == "strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5" or release_obj.strategy_import_str.startswith("strategies.mr_capsule.") or release_obj.strategy_import_str in NDX_E2_STRATEGY_IMPORT_TUPLE or release_obj.strategy_import_str == "strategies.dv2.strategy_mr_dv2_industry_etf:DVO2IndustryEtfStrategy" else 0.03
     assert release_obj.pod_budget_fraction_float == expected_budget_float
     if core5_template_bool:
         assert release_obj.params_dict == {}

@@ -69,6 +69,7 @@ from alpha.engine.strategy import Strategy
 from alpha.live import scheduler_utils
 from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR, build_core5_decision_plan
 from alpha.live.models import DecisionPlan, LiveRelease, PodState
+from alpha.live.dv2_ind_adapter import DV2_IND_STRATEGY_IMPORT_STR, build_dv2_ind_decision_plan
 from alpha.live.mr_capsule_adapter import MR_CAPSULE_STRATEGY_IMPORT_TUPLE, build_mr_capsule_decision_plan
 from alpha.live.ndx_e2_adapter import NDX_E2_STRATEGY_IMPORT_TUPLE, build_ndx_e2_decision_plan
 from data.norgate_loader import build_data_source_metadata_dict, use_norgate_data_profile
@@ -81,6 +82,7 @@ HPI_LIVE_TRADABLE_OPEN_MARKER_FLOAT = 1.0
 
 
 INCREMENTAL_DECISION_STRATEGY_IMPORT_SET: set[str] = {
+    DV2_IND_STRATEGY_IMPORT_STR,
     *MR_CAPSULE_STRATEGY_IMPORT_TUPLE,
     "strategies.dv2.strategy_mr_dv2:DVO2Strategy",
     "strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote",
@@ -1244,6 +1246,8 @@ def build_decision_plan_for_release(
     pod_state_obj: PodState | None,
 ) -> DecisionPlan:
     with use_norgate_data_profile(release_obj.data_profile_str):
+        if release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR:
+            return build_dv2_ind_decision_plan(release_obj, as_of_ts, pod_state_obj)
         if release_obj.strategy_import_str in NDX_E2_STRATEGY_IMPORT_TUPLE:
             return build_ndx_e2_decision_plan(release_obj, as_of_ts, pod_state_obj)
         if release_obj.strategy_import_str in MR_CAPSULE_STRATEGY_IMPORT_TUPLE:

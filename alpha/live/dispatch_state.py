@@ -4,12 +4,13 @@ from dataclasses import replace
 import json
 
 from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR
+from alpha.live.dv2_ind_adapter import DV2_IND_STRATEGY_IMPORT_STR
 from alpha.live.guarded_dispatch import DispatchFailure, is_transient_broker_error_bool, moo_dispatch_deadline_ts
 from alpha.live.mr_capsule_adapter import MR_CAPSULE_STRATEGY_IMPORT_TUPLE
 
 
 def is_guarded_release_bool(release_obj):
-    return (release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR
+    return (release_obj.strategy_import_str in (CORE5_STRATEGY_IMPORT_STR, DV2_IND_STRATEGY_IMPORT_STR)
         or release_obj.strategy_import_str in MR_CAPSULE_STRATEGY_IMPORT_TUPLE)
 
 

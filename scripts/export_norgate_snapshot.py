@@ -18,6 +18,9 @@ repo_root_str = str(repo_root_path)
 if repo_root_str not in sys.path:
     sys.path.insert(0, repo_root_str)
 
+from data.dv2_ind_snapshot_contract import (
+    DV2_IND_PROFILE_STR, DV2_IND_ETF_TUPLE, DV2_IND_HISTORY_START_STR, DV2_IND_DATA_CONTRACT_DICT, dv2_ind_price_coverage_dict,
+)
 from data.norgate_snapshot_store import (
     CAPITALSPECIAL_ADJUSTMENT_STR,
     CORE5_CAPITAL_SYMBOL_TUPLE,
@@ -62,6 +65,9 @@ class NorgateExportProfileSpec:
 
 
 PROFILE_EXPORT_SPEC_DICT: dict[str, NorgateExportProfileSpec] = {
+    DV2_IND_PROFILE_STR: NorgateExportProfileSpec(
+        capital_symbol_tuple=DV2_IND_ETF_TUPLE, total_return_symbol_tuple=("$SPXTR",),
+    ),
     CORE5_PROFILE_STR: NorgateExportProfileSpec(
         capital_symbol_tuple=CORE5_CAPITAL_SYMBOL_TUPLE,
         total_return_symbol_tuple=CORE5_TOTAL_RETURN_SYMBOL_TUPLE,
@@ -268,6 +274,7 @@ def _build_price_snapshot_df(
     padding_type_by_symbol_dict: dict[str, str] | None = None,
     start_date_by_symbol_dict: dict[str, str] | None = None,
     empty_history_fallback_by_symbol_dict: dict[str, str] | None = None,
+    capture_source_request_bool: bool = False,
 ) -> pd.DataFrame:
     price_frame_list: list[pd.DataFrame] = []
     for symbol_str in tqdm(list(dict.fromkeys(capital_symbol_list)), desc="exporting CAPITALSPECIAL prices"):
@@ -304,7 +311,7 @@ def _build_price_snapshot_df(
         f"{frame_df['symbol_str'].iloc[0]}|{frame_df['adjustment_str'].iloc[0]}": frame_df.attrs["source_dtype_dict"]
         for frame_df in price_frame_list
     }
-    if empty_history_fallback_by_symbol_dict is not None:
+    if empty_history_fallback_by_symbol_dict is not None or capture_source_request_bool:
         price_df.attrs["source_request_by_pair_dict"] = {
             f"{frame_df['symbol_str'].iloc[0]}|{frame_df['adjustment_str'].iloc[0]}": frame_df.attrs["source_request_dict"]
             for frame_df in price_frame_list
@@ -347,6 +354,10 @@ def _export_profile_to_root_path(
         start_date_str != CORE5_HISTORY_START_DATE_STR or end_date_str != snapshot_date_str
     ):
         raise ValueError("CORE5 export must request history from 1990-01-01 through the snapshot date.")
+    if profile_str == DV2_IND_PROFILE_STR:
+        if end_date_str != snapshot_date_str:
+            raise ValueError("DV2-IND export must end on the snapshot session.")
+        start_date_str = DV2_IND_HISTORY_START_STR
     profile_spec_obj = PROFILE_EXPORT_SPEC_DICT[profile_str]
     universe_df: pd.DataFrame | None = None
     pit_symbol_list: list[str] = []
@@ -382,6 +393,8 @@ def _export_profile_to_root_path(
             "start_date_by_symbol_dict": {"$VIX": MR_CAPSULE_VIX_HISTORY_START_DATE_STR},
             "empty_history_fallback_by_symbol_dict": {symbol_str: MR_CAPSULE_EMPTY_HISTORY_FALLBACK_START_DATE_STR for symbol_str in pit_symbol_list},
         }
+    if profile_str == DV2_IND_PROFILE_STR:
+        capsule_override_dict["capture_source_request_bool"] = True
     price_df = _build_price_snapshot_df(
         capital_symbol_list=symbol_list + helper_symbol_list,
         total_return_symbol_list=benchmark_symbol_list,
@@ -444,6 +457,33 @@ def _export_profile_to_root_path(
         data_contract_dict["series_coverage_dict"] = mr_capsule_price_coverage_dict(
             price_df, pd.Timestamp(snapshot_date_str),
         )
+    if profile_str == DV2_IND_PROFILE_STR:
+        data_contract_dict.update(DV2_IND_DATA_CONTRACT_DICT)
+        for field_str in ("source_field_by_pair_dict", "source_dtype_by_pair_dict", "source_index_name_str"):
+            data_contract_dict[field_str] = price_df.attrs[field_str]
+        data_contract_dict["source_request_by_pair_dict"] = price_df.attrs["source_request_by_pair_dict"]
+        data_contract_dict["series_coverage_dict"] = dv2_ind_price_coverage_dict(price_df)
+        observed_endpoint_dict = {}
+        for symbol_str in required_symbol_list:
+            adjustment_str = CAPITALSPECIAL_ADJUSTMENT_STR if symbol_str in symbol_list else TOTALRETURN_ADJUSTMENT_STR
+            # *** CRITICAL *** Keep historical padding for exact research parity,
+            # but establish Close_T freshness with a separate unpadded observation.
+            observed_price_df = _load_price_frame_df(symbol_str=symbol_str, adjustment_str=adjustment_str,
+                start_date_str=snapshot_date_str, end_date_str=snapshot_date_str, padding_type_name_str="NONE")
+            if len(observed_price_df) != 1 or pd.Timestamp(observed_price_df["date"].iloc[0]) != pd.Timestamp(snapshot_date_str):
+                raise ValueError(f"DV2-IND missing unpadded endpoint for {symbol_str}.")
+            exported_endpoint_df = price_df.loc[price_df["symbol_str"].eq(symbol_str)
+                & price_df["adjustment_str"].eq(adjustment_str)
+                & pd.to_datetime(price_df["date"]).eq(pd.Timestamp(snapshot_date_str))]
+            endpoint_field_list = ["Open", "High", "Low", "Close"]
+            if symbol_str in DV2_IND_ETF_TUPLE:
+                endpoint_field_list += ["Turnover", "Unadjusted Close"]
+            if len(exported_endpoint_df) != 1 or any(
+                float(exported_endpoint_df[field_str].iloc[0]) != float(observed_price_df[field_str].iloc[0])
+                for field_str in endpoint_field_list):
+                raise ValueError(f"DV2-IND exported endpoint differs from source for {symbol_str}.")
+            observed_endpoint_dict[symbol_str] = snapshot_date_str
+        data_contract_dict["observed_endpoint_date_by_symbol_dict"] = observed_endpoint_dict
     if profile_str == CORE5_PROFILE_STR:
         data_contract_dict.update(CORE5_DATA_CONTRACT_DICT)
         data_contract_dict["source_field_by_pair_dict"] = price_df.attrs["source_field_by_pair_dict"]
@@ -518,7 +558,7 @@ def export_profile_snapshot(
     if final_snapshot_dir_path_obj.exists() and not overwrite_bool:
         manifest_path_obj = final_snapshot_dir_path_obj / "manifest.json"
         if manifest_path_obj.exists():
-            if profile_str in {CORE5_PROFILE_STR, NDX_E2_PROFILE_STR} or profile_str in MR_CAPSULE_PROFILE_SET:
+            if profile_str in {CORE5_PROFILE_STR, NDX_E2_PROFILE_STR, DV2_IND_PROFILE_STR} or profile_str in MR_CAPSULE_PROFILE_SET:
                 load_valid_snapshot_manifest(
                     profile_str, snapshot_date_str=resolved_snapshot_date_str,
                     snapshot_root_str=str(snapshot_root_path_obj),
@@ -544,7 +584,7 @@ def export_profile_snapshot(
             end_date_str=resolved_end_date_str,
             overwrite_bool=False,
         )
-        if profile_str in {CORE5_PROFILE_STR, NDX_E2_PROFILE_STR} or profile_str in MR_CAPSULE_PROFILE_SET:
+        if profile_str in {CORE5_PROFILE_STR, NDX_E2_PROFILE_STR, DV2_IND_PROFILE_STR} or profile_str in MR_CAPSULE_PROFILE_SET:
             load_valid_snapshot_manifest(
                 profile_str, snapshot_date_str=resolved_snapshot_date_str,
                 snapshot_root_str=str(staging_root_path_obj),

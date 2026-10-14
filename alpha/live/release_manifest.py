@@ -11,6 +11,8 @@ from alpha.live.models import LiveRelease
 from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR, validate_core5_release
 from alpha.live.mr_capsule_adapter import MR_CAPSULE_PROFILE_TUPLE, MR_CAPSULE_STRATEGY_IMPORT_TUPLE, validate_mr_capsule_release
 from alpha.live.ndx_e2_adapter import NDX_E2_STRATEGY_IMPORT_TUPLE, validate_ndx_e2_release
+from alpha.live.dv2_ind_adapter import DV2_IND_STRATEGY_IMPORT_STR, validate_dv2_ind_release
+from data.dv2_ind_snapshot_contract import DV2_IND_PROFILE_STR
 from alpha.live.order_clerk import validate_account_route_matches_mode
 from data.norgate_snapshot_store import CORE5_PROFILE_STR, HPI_SP500_PROFILE_STR, NDX_E2_PROFILE_STR
 
@@ -19,6 +21,7 @@ HPI_STRATEGY_IMPORT_TUPLE: tuple[str, ...] = (
     "strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote",
 )
 SUPPORTED_STRATEGY_IMPORT_TUPLE: tuple[str, ...] = (
+    DV2_IND_STRATEGY_IMPORT_STR,
     *NDX_E2_STRATEGY_IMPORT_TUPLE,
     *MR_CAPSULE_STRATEGY_IMPORT_TUPLE,
     CORE5_STRATEGY_IMPORT_STR,
@@ -39,6 +42,7 @@ SUPPORTED_EXECUTION_POLICY_TUPLE: tuple[str, ...] = (
 SUPPORTED_MODE_TUPLE: tuple[str, ...] = ("incubation", "paper", "live")
 SUPPORTED_SIGNAL_CLOCK_TUPLE: tuple[str, ...] = scheduler_utils.SUPPORTED_SIGNAL_CLOCK_TUPLE
 SUPPORTED_DATA_PROFILE_TUPLE: tuple[str, ...] = (
+    DV2_IND_PROFILE_STR,
     NDX_E2_PROFILE_STR,
     *MR_CAPSULE_PROFILE_TUPLE,
     CORE5_PROFILE_STR,
@@ -225,6 +229,10 @@ def parse_release_manifest(manifest_path_str: str) -> LiveRelease:
 
 
 def validate_release_manifest(release_obj: LiveRelease, *, require_live_qualification_bool: bool = True) -> None:
+    if release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR:
+        validate_dv2_ind_release(release_obj)
+    elif release_obj.data_profile_str == DV2_IND_PROFILE_STR:
+        raise ValueError("The DV2-IND snapshot profile is reserved for DV2-IND.")
     if release_obj.strategy_import_str in NDX_E2_STRATEGY_IMPORT_TUPLE:
         validate_ndx_e2_release(release_obj)
     elif release_obj.data_profile_str == NDX_E2_PROFILE_STR:
@@ -490,6 +498,15 @@ def validate_release_list(release_list: list[LiveRelease]) -> None:
             )
         account_key_tuple = (release_obj.mode_str, release_obj.account_route_str.strip().upper())
         prior_release_obj = enabled_account_release_dict.get(account_key_tuple)
+        if prior_release_obj is not None and (
+            release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR
+            or prior_release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR
+        ):
+            raise ValueError(
+                "DV2-IND requires one dedicated account per pod. "
+                f"Enabled pods '{prior_release_obj.pod_id_str}' and '{release_obj.pod_id_str}' "
+                f"share account_route_str '{release_obj.account_route_str}' in mode '{release_obj.mode_str}'."
+            )
         if prior_release_obj is not None and (
             release_obj.strategy_import_str in NDX_E2_STRATEGY_IMPORT_TUPLE
             or prior_release_obj.strategy_import_str in NDX_E2_STRATEGY_IMPORT_TUPLE

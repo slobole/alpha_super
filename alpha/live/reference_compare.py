@@ -13,6 +13,7 @@ import pandas as pd
 
 from alpha.engine.strategy import Strategy, dividend_cash_ledger_disabled_context
 from alpha.live.models import LiveRelease
+from alpha.live.dv2_ind_adapter import DV2_IND_STRATEGY_IMPORT_STR, DV2_IND_SIZING_CONTRACT_STR, validate_dv2_ind_release
 from alpha.live.ndx_e2_adapter import (
     NDX_E2_SIZING_CONTRACT_STR,
     NDX_E2_STRATEGY_IMPORT_TUPLE,
@@ -28,6 +29,38 @@ REFERENCE_RUN_VARIANT_PARAMETER_NAME_LIST: list[str] = [
     "end_date_str",
 ]
 LIVE_REFERENCE_ACCOUNTING_CONTRACT_VERSION_STR = "price_return_ledger_v1"
+
+DV2_IND_REFERENCE_NOTE_STR = (
+    "Live entries freeze Close_T NAV dollars and use pre-submit reference quotes; "
+    "the automatic research reference starts flat from deployment NAV and uses next-open prices. "
+    "Cash postings, rounding and fills can differ even when signals match. "
+    "This price-return reference omits actual broker dividend cash. The ETF list "
+    "is fixed by prior research. This is diagnostic, not exact share or P&L parity."
+)
+
+
+def get_dv2_ind_reference_provenance_dict(reference_maps_dict: dict[str, Any]) -> dict[str, Any]:
+    stored_provenance_dict = reference_maps_dict.get("reference_provenance_dict") or {}
+    provenance_dict = {
+        "scope_str": "diagnostic_current_snapshot_reconstruction",
+        "provenance_available_bool": False,
+        "data_profile_str": None, "snapshot_date_str": None, "snapshot_manifest_hash_str": None,
+        "live_sizing_contract_str": DV2_IND_SIZING_CONTRACT_STR,
+        "reference_initial_capital_basis_str": "unverified_reference_initial_capital",
+        "exact_share_parity_bool": False, "exact_pnl_parity_bool": False,
+        "broker_dividend_cash_parity_bool": False,
+        "note_str": DV2_IND_REFERENCE_NOTE_STR,
+    }
+    lineage_field_tuple = ("data_profile_str", "snapshot_date_str", "snapshot_manifest_hash_str")
+    if (isinstance(stored_provenance_dict, dict)
+            and stored_provenance_dict.get("provenance_available_bool") is True
+            and all(stored_provenance_dict.get(field_str) for field_str in lineage_field_tuple)):
+        provenance_dict.update({field_str: stored_provenance_dict[field_str] for field_str in lineage_field_tuple})
+        provenance_dict["provenance_available_bool"] = True
+        provenance_dict["reference_initial_capital_basis_str"] = stored_provenance_dict.get(
+            "reference_initial_capital_basis_str", "unverified_reference_initial_capital")
+    return provenance_dict
+
 
 NDX_E2_REFERENCE_NOTE_STR = (
     "Research fixes whole-share quantities from Close_T NAV and prices; live uses "
@@ -168,6 +201,13 @@ def run_auto_reference_strategy(
     if "output_dir_str" in signature_obj.parameters:
         run_kwarg_dict["output_dir_str"] = str(output_dir_path_obj)
 
+    dv2_ind_snapshot_obj = None
+    if release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR:
+        validate_dv2_ind_release(release_obj)
+        if not snapshot_module.is_snapshot_mode_enabled_bool():
+            raise RuntimeError("DV2-IND references require the validated snapshot profile.")
+        dv2_ind_snapshot_obj = snapshot_module.load_valid_snapshot_manifest(
+            release_obj.data_profile_str, minimum_snapshot_date_str=reference_end_date_str)
     e2_snapshot_obj = None
     if release_obj.strategy_import_str in NDX_E2_STRATEGY_IMPORT_TUPLE:
         validate_ndx_e2_release(release_obj)
@@ -191,6 +231,17 @@ def run_auto_reference_strategy(
             f"Strategy module '{module_import_str}' run_variant(...) returned "
             f"{type(strategy_obj).__name__}, expected Strategy."
         )
+    if dv2_ind_snapshot_obj is not None:
+        after_snapshot_obj = snapshot_module.load_valid_snapshot_manifest(release_obj.data_profile_str)
+        if after_snapshot_obj.manifest_hash_str != dv2_ind_snapshot_obj.manifest_hash_str:
+            raise RuntimeError("DV2-IND reference snapshot changed during the run.")
+        provenance_dict = get_dv2_ind_reference_provenance_dict({})
+        provenance_dict.update({"provenance_available_bool": True,
+            "reference_initial_capital_basis_str": "first_pre_submit_broker_budget",
+            "data_profile_str": dv2_ind_snapshot_obj.profile_str,
+            "snapshot_date_str": dv2_ind_snapshot_obj.snapshot_date_ts.date().isoformat(),
+            "snapshot_manifest_hash_str": dv2_ind_snapshot_obj.manifest_hash_str})
+        strategy_obj.reference_provenance_dict = provenance_dict
     if e2_snapshot_obj is not None:
         after_snapshot_obj = snapshot_module.load_valid_snapshot_manifest(release_obj.data_profile_str)
         if after_snapshot_obj.manifest_hash_str != e2_snapshot_obj.manifest_hash_str:
@@ -305,6 +356,9 @@ def build_reference_maps_dict(reference_strategy_obj: Strategy) -> dict[str, Any
     provenance_field_dict = {}
     strategy_class_obj = type(reference_strategy_obj)
     strategy_import_str = f"{strategy_class_obj.__module__}:{strategy_class_obj.__name__}"
+    if strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR:
+        provenance_field_dict["reference_provenance_dict"] = get_dv2_ind_reference_provenance_dict({
+            "reference_provenance_dict": getattr(reference_strategy_obj, "reference_provenance_dict", None)})
     if strategy_import_str in NDX_E2_STRATEGY_IMPORT_TUPLE:
         provenance_field_dict["reference_provenance_dict"] = get_ndx_e2_reference_provenance_dict({
             "reference_provenance_dict": getattr(reference_strategy_obj, "reference_provenance_dict", None),
@@ -654,6 +708,8 @@ def write_reference_compare_artifacts(
     }
     if release_obj.strategy_import_str in NDX_E2_STRATEGY_IMPORT_TUPLE:
         summary_dict["reference_provenance_dict"] = get_ndx_e2_reference_provenance_dict(reference_maps_dict)
+    if release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR:
+        summary_dict["reference_provenance_dict"] = get_dv2_ind_reference_provenance_dict(reference_maps_dict)
     summary_json_path_obj.write_text(json.dumps(summary_dict, indent=2, sort_keys=True), encoding="utf-8")
 
     _write_html_report(
@@ -935,6 +991,14 @@ def _write_html_report(
     raw_position_table_html_str = _df_to_html_table_str(position_compare_df)
 
     reference_note_html_str = ""
+    if release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR:
+        provenance_dict = get_dv2_ind_reference_provenance_dict(summary_dict)
+        reference_note_html_str = (
+            "<p><strong>DV2-IND diagnostic reference.</strong> "
+            f"{html.escape(DV2_IND_REFERENCE_NOTE_STR)} "
+            f"Snapshot {html.escape(str(provenance_dict['snapshot_date_str']))}; "
+            f"manifest {html.escape(str(provenance_dict['snapshot_manifest_hash_str']))}.</p>"
+        )
     if release_obj.strategy_import_str in NDX_E2_STRATEGY_IMPORT_TUPLE:
         provenance_dict = get_ndx_e2_reference_provenance_dict(summary_dict)
         provenance_label_str = (

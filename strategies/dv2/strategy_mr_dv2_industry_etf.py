@@ -27,9 +27,10 @@ Research record: docs/research/DV2_DEEP_RESEARCH_20260925.md (ETF block).
 -10%, daily correlation 0.49 with stock DV2. The $50M screen and the 19-ETF list
 are research choices (today's ETFs: mild survivorship bias); forward-test first.
 
-Bench displays WIRED for this module. That display does not authorize a LIVE
-release, broker route, or portfolio allocation; the registry tier stays
-RESEARCH until the owner approves a live route.
+The owner-requested 2026-10-14 wiring adds a guarded daily adapter and a disabled
+release template. WIRED describes engineering support; it does not authorize
+account enablement or capital allocation. Research limitations remain. See
+docs/live/DV2_IND_WIRING_20261014.md.
 """
 
 from __future__ import annotations

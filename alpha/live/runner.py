@@ -22,6 +22,7 @@ from alpha.live.core5_adapter import (
     CORE5_STRATEGY_IMPORT_STR, require_core5_position_match,
     validate_core5_release,
 )
+from alpha.live.dv2_ind_adapter import DV2_IND_STRATEGY_IMPORT_STR, validate_dv2_ind_execution_contract
 from alpha.live.dispatch_state import is_guarded_release_bool, record_dispatch_failure
 from alpha.live.guarded_dispatch import is_transient_broker_error_bool, moo_dispatch_deadline_ts
 from alpha.live.execution_engine import (
@@ -2544,7 +2545,7 @@ def expire_stale_decision_plans(
         ):
             continue
         if not _mark_unsubmitted_decision_terminal(state_store_obj, release_obj, int(decision_plan_obj.decision_plan_id_int or 0), "expired"):
-            reason_counter_obj["core5_prior_cycle_unresolved" if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR else "mr_capsule_prior_cycle_unresolved"] += 1
+            reason_counter_obj["dv2_ind_prior_cycle_unresolved" if release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR else "core5_prior_cycle_unresolved" if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR else "mr_capsule_prior_cycle_unresolved"] += 1
             continue
         latest_vplan_obj = state_store_obj.get_latest_vplan_for_decision(int(decision_plan_obj.decision_plan_id_int or 0))
         if latest_vplan_obj is not None and latest_vplan_obj.status_str == "ready":
@@ -2682,10 +2683,11 @@ def build_decision_plans(
 
         except (ValueError, RuntimeError) as exception_obj:
             capsule_bool = release_obj.strategy_import_str.startswith("strategies.mr_capsule.")
-            if release_obj.strategy_import_str != CORE5_STRATEGY_IMPORT_STR and not capsule_bool:
+            if release_obj.strategy_import_str not in (CORE5_STRATEGY_IMPORT_STR, DV2_IND_STRATEGY_IMPORT_STR) and not capsule_bool:
                 raise
             skipped_decision_plan_count_int += 1
-            reason_code_str = "mr_capsule_decision_blocked" if capsule_bool else "core5_decision_blocked"
+            reason_code_str = ("dv2_ind_decision_blocked" if release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR
+                else "mr_capsule_decision_blocked" if capsule_bool else "core5_decision_blocked")
             if capsule_bool:
                 from alpha.live.mr_capsule_adapter import CapsuleHoldingMismatchError
                 if isinstance(exception_obj, CapsuleHoldingMismatchError):
@@ -3036,7 +3038,12 @@ def build_vplans(
             broker_position_map_dict=broker_snapshot_obj.position_amount_map,
         )
         try:
-            if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
+            if release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR and not touched_asset_list:
+                live_price_snapshot_obj = LivePriceSnapshot(
+                    account_route_str=decision_plan_obj.account_route_str,
+                    snapshot_timestamp_ts=as_of_ts, price_source_str="dv2_ind.empty_intent",
+                    asset_reference_price_map={})
+            elif release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
                 # CORE5 quantities were frozen at Close_T. Quotes are optional
                 # diagnostics, not a dependency or a reason to resize/block them.
                 close_price_dict = dict(decision_plan_obj.snapshot_metadata_dict["sizing_close_price_map_dict"])
@@ -3187,26 +3194,27 @@ def build_vplans(
             )
             inserted_vplan_obj = state_store_obj.insert_vplan(vplan_obj)
         except ValueError as exception_obj:
-            if not release_obj.strategy_import_str.startswith("strategies.mr_capsule."):
+            if not (release_obj.strategy_import_str.startswith("strategies.mr_capsule.") or release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR):
                 raise
+            reason_code_str = "dv2_ind_vplan_blocked" if release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR else "mr_capsule_vplan_blocked"
             blocked_action_count_int += 1
-            reason_counter_obj["mr_capsule_vplan_blocked"] += 1
+            reason_counter_obj[reason_code_str] += 1
             if vplan_obj is None:
                 # A competing worker may already have created the valid VPlan.
                 # Only an invalid candidate can abandon this unsubmitted cycle.
                 state_store_obj.block_unsubmitted_daily_cycle(int(decision_plan_obj.decision_plan_id_int), "blocked")
             log_event(
-                "mr_capsule_vplan_blocked",
+                reason_code_str,
                 _build_decision_plan_log_payload_dict(release_obj, decision_plan_obj, as_of_ts, {"error_str": str(exception_obj)}),
                 log_path_str=log_path_str,
             )
             _emit_live_trace_event(
                 "vplan.build", release_obj=release_obj, decision_plan_obj=decision_plan_obj, as_of_ts=as_of_ts,
-                status_str="BLOCK", reason_code_str="mr_capsule_vplan_blocked", payload_dict={"error_str": str(exception_obj)},
+                status_str="BLOCK", reason_code_str=reason_code_str, payload_dict={"error_str": str(exception_obj)},
                 trace_enabled_bool=trace_enabled_bool, trace_log_root_path_str=trace_log_root_path_str,
             )
             continue
-        if not release_obj.strategy_import_str.startswith("strategies.mr_capsule."):
+        if not (release_obj.strategy_import_str.startswith("strategies.mr_capsule.") or release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR):
             state_store_obj.mark_decision_plan_status(int(decision_plan_obj.decision_plan_id_int or 0), "vplan_ready")
         created_vplan_count_int += 1
         log_event(
@@ -3432,6 +3440,36 @@ def submit_ready_vplans(
                     continue
                 state_store_obj.block_unsubmitted_daily_cycle(int(vplan_obj.decision_plan_id_int), "blocked")
                 log_event(capsule_block_reason_str, _build_vplan_log_payload_dict(
+                    release_obj, vplan_obj, as_of_ts, {"error_str": str(exception_obj)}), log_path_str=log_path_str)
+                continue
+        if release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR:
+            # *** CRITICAL *** A saved VPlan may wait after it was built. Recheck
+            # broker holdings/open orders immediately before claiming submission.
+            # Cash postings may change; never resize the saved Close-T intent.
+            decision_plan_obj = state_store_obj.get_decision_plan_by_id(int(vplan_obj.decision_plan_id_int))
+            dv2_ind_block_reason_str = "dv2_ind_pre_submit_account_changed"
+            try:
+                if not release_obj.enabled_bool:
+                    dv2_ind_block_reason_str = "dv2_ind_release_disabled"
+                    raise ValueError("DV2-IND release is disabled.")
+                fresh_dv2_ind_snapshot_obj = broker_adapter_obj.get_capsule_account_snapshot(vplan_obj.account_route_str)
+                validate_dv2_ind_execution_contract(
+                    release_obj, decision_plan_obj, fresh_dv2_ind_snapshot_obj
+                )
+                # Owner decision 2026-10-11: like the monthly pods, no buying
+                # power or margin preview before sending. IBKR's own pre-trade
+                # checks accept or reject each buy; the daily close records a
+                # rejected buy as an exception.
+            except Exception as exception_obj:
+                blocked_action_count_int += 1
+                reason_counter_obj[dv2_ind_block_reason_str] += 1
+                if is_transient_broker_error_bool(exception_obj):
+                    reason_str = record_dispatch_failure(state_store_obj, release_obj, vplan_obj,
+                        broker_order_request_list, exception_obj, as_of_ts, before_send_bool=True)
+                    reason_counter_obj[reason_str] += 1
+                    continue
+                state_store_obj.block_unsubmitted_daily_cycle(int(vplan_obj.decision_plan_id_int), "blocked")
+                log_event(dv2_ind_block_reason_str, _build_vplan_log_payload_dict(
                     release_obj, vplan_obj, as_of_ts, {"error_str": str(exception_obj)}), log_path_str=log_path_str)
                 continue
         if not state_store_obj.claim_vplan_for_submission(int(vplan_obj.vplan_id_int or 0)):
@@ -3810,13 +3848,14 @@ def eod_snapshot(
             if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR
             else broker_adapter_for_release_obj.get_capsule_account_snapshot(
                 release_obj.account_route_str, include_portfolio_valuation_bool=release_obj.mode_str == "live")
-            if release_obj.strategy_import_str.startswith("strategies.mr_capsule.")
+            if (release_obj.strategy_import_str.startswith("strategies.mr_capsule.") or release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR)
             else broker_adapter_for_release_obj.get_eod_account_snapshot(release_obj.account_route_str)
             if release_obj.mode_str == "live"
             else broker_adapter_for_release_obj.get_account_snapshot(release_obj.account_route_str))
         requires_close_snapshot_bool = (
             release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR
             or release_obj.strategy_import_str.startswith("strategies.mr_capsule.")
+            or release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR
         )
         if requires_close_snapshot_bool:
             # The broker stamps its reply after the request. Compare with the
@@ -3832,7 +3871,7 @@ def eod_snapshot(
                 or broker_snapshot_obj.open_order_id_list
             ):
                 blocked_action_count_int += 1
-                reason_code_str = "mr_capsule_eod_source_untrusted" if release_obj.strategy_import_str.startswith("strategies.mr_capsule.") else "core5_eod_source_untrusted"
+                reason_code_str = "dv2_ind_eod_source_untrusted" if release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR else "mr_capsule_eod_source_untrusted" if release_obj.strategy_import_str.startswith("strategies.mr_capsule.") else "core5_eod_source_untrusted"
                 reason_counter_obj[reason_code_str] += 1
                 log_event(reason_code_str, _build_release_log_payload_dict(release_obj, as_of_ts, {"broker_snapshot_timestamp_str": broker_snapshot_obj.snapshot_timestamp_ts.isoformat(), "open_order_id_list": broker_snapshot_obj.open_order_id_list}), log_path_str=log_path_str)
                 continue
@@ -5483,6 +5522,8 @@ def get_compare_reference_summary(
             compare_report_dict["reference_provenance_dict"] = reference_compare.get_ndx_e2_reference_provenance_dict(
                 reference_maps_dict
             )
+        if release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR:
+            compare_report_dict["reference_provenance_dict"] = reference_compare.get_dv2_ind_reference_provenance_dict(reference_maps_dict)
         compare_report_dict["trade_fill_diff_row_dict_list"] = (
             reference_compare.build_trade_fill_diff_row_dict_list(
                 target_session_date_str=target_session_date_str,

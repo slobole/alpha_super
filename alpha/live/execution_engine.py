@@ -4,6 +4,7 @@ import math
 from dataclasses import replace
 
 from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR, validated_core5_target_share_dict
+from alpha.live.dv2_ind_adapter import DV2_IND_STRATEGY_IMPORT_STR, validate_dv2_ind_execution_contract
 
 from alpha.live.models import (
     BrokerOrderRequest,
@@ -161,6 +162,9 @@ def _build_incremental_entry_exit_vplan(
 
     pod_budget_float = float(broker_snapshot_obj.net_liq_float) * float(release_obj.pod_budget_fraction_float)
     entry_sizing_value_float = pod_budget_float if capsule_nav_float is None else capsule_nav_float
+    if release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR:
+        entry_sizing_value_float = validate_dv2_ind_execution_contract(
+            release_obj, decision_plan_obj, broker_snapshot_obj, live_price_snapshot_obj)
     target_share_map: dict[str, float] = {}
     order_delta_map: dict[str, float] = {}
     vplan_row_list: list[VPlanRow] = []
@@ -376,6 +380,8 @@ def build_vplan(
     broker_snapshot_obj: BrokerSnapshot,
     live_price_snapshot_obj: LivePriceSnapshot,
 ) -> VPlan:
+    if release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR:
+        validate_dv2_ind_execution_contract(release_obj, decision_plan_obj, broker_snapshot_obj, live_price_snapshot_obj)
     if (
         release_obj.strategy_import_str.startswith("strategies.mr_capsule.")
         and decision_plan_obj.decision_book_type_str != "incremental_entry_exit_book"

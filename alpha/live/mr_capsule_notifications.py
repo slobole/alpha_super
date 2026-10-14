@@ -121,15 +121,14 @@ class ExecutionAlertDelivery:
 
 def _configured_scope_list(summary_dict: dict[str, Any], mode_str: str | None) -> list[tuple]:
     # Reuse DashboardApp's configured paths; do not instantiate a mutable store.
-    from alpha.live.mr_capsule_adapter import MR_CAPSULE_STRATEGY_IMPORT_TUPLE
-    from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR
+    from alpha.live.daily_reconcile import DAILY_STRATEGY_IMPORT_TUPLE
 
     scope_list: list[tuple] = []
     scope_set: set[tuple] = set()
     pod_scope_dict: dict[tuple, tuple] = {}
     account_scope_dict: dict[tuple, tuple] = {}
     for row_dict in summary_dict.get("pod_row_dict_list") or []:
-        if row_dict.get("strategy_import_str") not in (*MR_CAPSULE_STRATEGY_IMPORT_TUPLE, CORE5_STRATEGY_IMPORT_STR):
+        if row_dict.get("strategy_import_str") not in DAILY_STRATEGY_IMPORT_TUPLE:
             continue
         if mode_str not in {None, "all"} and row_dict.get("mode_str") != mode_str:
             continue
@@ -209,9 +208,8 @@ def _current_cycle_context_dict(connection_obj: sqlite3.Connection, alert_dict: 
     """, (alert_dict["vplan_id_int"], alert_dict["pod_id_str"], alert_dict["account_route_str"], alert_dict["mode_str"])).fetchone()
     if row_obj is None:
         return None
-    from alpha.live.mr_capsule_adapter import MR_CAPSULE_STRATEGY_IMPORT_TUPLE
-    from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR
-    if row_obj[3] not in (*MR_CAPSULE_STRATEGY_IMPORT_TUPLE, CORE5_STRATEGY_IMPORT_STR):
+    from alpha.live.daily_reconcile import DAILY_STRATEGY_IMPORT_TUPLE
+    if row_obj[3] not in DAILY_STRATEGY_IMPORT_TUPLE:
         return None
     result_dict = json.loads(row_obj[2]).get("mr_capsule_execution_result_dict")
     return {"completed_bool": row_obj[0] == row_obj[1] == "completed",

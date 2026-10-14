@@ -385,15 +385,13 @@ def run_daily_pod_checks(release_obj: Any, broker_obj: Any) -> list[dict[str, An
 
 def _daily_pod_release_obj(parsed_args_obj: argparse.Namespace) -> Any:
     """Preconditions for --daily-pod-checks; raises ValueError with an operator message."""
-    from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR
-    from alpha.live.mr_capsule_adapter import MR_CAPSULE_STRATEGY_IMPORT_TUPLE
+    from alpha.live.daily_reconcile import DAILY_STRATEGY_IMPORT_TUPLE
 
     if parsed_args_obj.release_manifest_path_str is None:
-        raise ValueError("--daily-pod-checks requires --release-manifest-path for a CORE5 or MR capsule pod.")
+        raise ValueError("--daily-pod-checks requires --release-manifest-path for a supported daily pod.")
     release_obj = parse_release_manifest(parsed_args_obj.release_manifest_path_str)
-    if (release_obj.strategy_import_str != CORE5_STRATEGY_IMPORT_STR
-            and release_obj.strategy_import_str not in MR_CAPSULE_STRATEGY_IMPORT_TUPLE):
-        raise ValueError("--daily-pod-checks is for CORE5 and MR capsule releases only.")
+    if release_obj.strategy_import_str not in DAILY_STRATEGY_IMPORT_TUPLE:
+        raise ValueError("--daily-pod-checks is for supported daily releases only (CORE5, MR capsule, DV2-IND).")
     client_id_obj = parsed_args_obj.client_id_int
     if client_id_obj is None or client_id_obj <= 0 or client_id_obj == release_obj.broker_client_id_int:
         raise ValueError("--daily-pod-checks requires an explicit --client-id that no other process uses "
@@ -434,7 +432,7 @@ def parse_args(argv_list: list[str] | None = None) -> argparse.Namespace:
     parser_obj.add_argument("--traceback", dest="traceback_bool", action="store_true")
     parser_obj.add_argument(
         "--daily-pod-checks", dest="daily_pod_checks_bool", action="store_true",
-        help="CORE5/MR capsule only: also run the serve's own account reads and daily close read "
+        help="CORE5/MR capsule/DV2-IND: also run the serve's own account reads and daily close read "
              "(read-only, no order sent). Requires --release-manifest-path and an unused --client-id.",
     )
     return parser_obj.parse_args(argv_list)

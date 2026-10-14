@@ -705,9 +705,9 @@ class LiveStateStore(CoreLiveStateStore):
 
     def get_pending_daily_decision_plan_id_list(self, *, pod_id_str: str | None = None,
             env_mode_str: str | None = None) -> list[int]:
-        from alpha.live.daily_reconcile import CORE5_STRATEGY_IMPORT_STR, MR_CAPSULE_STRATEGY_IMPORT_TUPLE
+        from alpha.live.daily_reconcile import DAILY_STRATEGY_IMPORT_TUPLE
 
-        strategy_tuple = (*MR_CAPSULE_STRATEGY_IMPORT_TUPLE, CORE5_STRATEGY_IMPORT_STR)
+        strategy_tuple = DAILY_STRATEGY_IMPORT_TUPLE
         strategy_placeholders_str = ",".join("?" for _strategy_str in strategy_tuple)
         with self._connect() as connection_obj:
             # Identify daily releases from scalar columns before touching any
@@ -998,10 +998,12 @@ class LiveStateStore(CoreLiveStateStore):
         return expirable_decision_plan_list
 
     def insert_vplan(self, vplan_obj: VPlan) -> VPlan:
-        from alpha.live.mr_capsule_adapter import MR_CAPSULE_CONTRACT_STR, MR_CAPSULE_STRATEGY_IMPORT_TUPLE
-        from alpha.live.core5_adapter import CORE5_CONTRACT_STR, CORE5_STRATEGY_IMPORT_STR
+        from alpha.live.mr_capsule_adapter import MR_CAPSULE_CONTRACT_STR
+        from alpha.live.core5_adapter import CORE5_CONTRACT_STR
 
-        daily_import_tuple = (*MR_CAPSULE_STRATEGY_IMPORT_TUPLE, CORE5_STRATEGY_IMPORT_STR)
+        from alpha.live.daily_reconcile import DAILY_STRATEGY_IMPORT_TUPLE
+        from alpha.live.dv2_ind_adapter import DV2_IND_SIZING_CONTRACT_STR
+        daily_import_tuple = DAILY_STRATEGY_IMPORT_TUPLE
         daily_placeholder_str = ",".join("?" for _ in daily_import_tuple)
 
         created_timestamp_str = _serialize_timestamp_str(_utc_now_ts())
@@ -1035,7 +1037,8 @@ class LiveStateStore(CoreLiveStateStore):
             ).get("sizing_contract_str") == MR_CAPSULE_CONTRACT_STR
             core5_bool = decision_row_obj is not None and json.loads(
                 decision_row_obj["snapshot_metadata_json_str"]).get("sizing_contract_str") == CORE5_CONTRACT_STR
-            if capsule_bool or core5_bool:
+            if capsule_bool or core5_bool or (decision_row_obj is not None and json.loads(
+                    decision_row_obj["snapshot_metadata_json_str"]).get("sizing_contract_str") == DV2_IND_SIZING_CONTRACT_STR):
                 # Serialize creation with abandonment and another worker's creation.
                 connection_obj.execute("BEGIN IMMEDIATE")
                 decision_row_obj = connection_obj.execute(
@@ -1146,7 +1149,8 @@ class LiveStateStore(CoreLiveStateStore):
                         str(vplan_row_obj.live_reference_source_str or vplan_obj.live_price_source_str),
                     ),
                 )
-            if capsule_bool or core5_bool:
+            if capsule_bool or core5_bool or (decision_row_obj is not None and json.loads(
+                    decision_row_obj["snapshot_metadata_json_str"]).get("sizing_contract_str") == DV2_IND_SIZING_CONTRACT_STR):
                 connection_obj.execute(
                     "UPDATE decision_plan SET status_str = 'vplan_ready', updated_timestamp_str = ? WHERE decision_plan_id_int = ?",
                     (created_timestamp_str, int(vplan_obj.decision_plan_id_int)),
@@ -1205,10 +1209,12 @@ class LiveStateStore(CoreLiveStateStore):
         return self._row_to_vplan(row_obj)
 
     def claim_vplan_for_submission(self, vplan_id_int: int) -> bool:
-        from alpha.live.mr_capsule_adapter import MR_CAPSULE_CONTRACT_STR, MR_CAPSULE_STRATEGY_IMPORT_TUPLE
-        from alpha.live.core5_adapter import CORE5_CONTRACT_STR, CORE5_STRATEGY_IMPORT_STR
+        from alpha.live.mr_capsule_adapter import MR_CAPSULE_CONTRACT_STR
+        from alpha.live.core5_adapter import CORE5_CONTRACT_STR
 
-        daily_import_tuple = (*MR_CAPSULE_STRATEGY_IMPORT_TUPLE, CORE5_STRATEGY_IMPORT_STR)
+        from alpha.live.daily_reconcile import DAILY_STRATEGY_IMPORT_TUPLE
+        from alpha.live.dv2_ind_adapter import DV2_IND_SIZING_CONTRACT_STR
+        daily_import_tuple = DAILY_STRATEGY_IMPORT_TUPLE
         daily_placeholder_str = ",".join("?" for _ in daily_import_tuple)
 
         with self._connect() as connection_obj:
@@ -1223,7 +1229,8 @@ class LiveStateStore(CoreLiveStateStore):
             ).get("sizing_contract_str") == MR_CAPSULE_CONTRACT_STR
             core5_bool = decision_row_obj is not None and json.loads(
                 decision_row_obj["snapshot_metadata_json_str"]).get("sizing_contract_str") == CORE5_CONTRACT_STR
-            if capsule_bool or core5_bool:
+            if capsule_bool or core5_bool or (decision_row_obj is not None and json.loads(
+                    decision_row_obj["snapshot_metadata_json_str"]).get("sizing_contract_str") == DV2_IND_SIZING_CONTRACT_STR):
                 connection_obj.execute("BEGIN IMMEDIATE")
                 decision_row_obj = connection_obj.execute(
                     "SELECT d.status_str, d.snapshot_metadata_json_str FROM decision_plan d JOIN vplan v "
@@ -1304,9 +1311,9 @@ class LiveStateStore(CoreLiveStateStore):
 
     def get_submitted_vplan_list(self, *, exclude_daily_reconcile_bool: bool = False) -> list[VPlan]:
         if exclude_daily_reconcile_bool:
-            from alpha.live.daily_reconcile import CORE5_STRATEGY_IMPORT_STR, MR_CAPSULE_STRATEGY_IMPORT_TUPLE
+            from alpha.live.daily_reconcile import DAILY_STRATEGY_IMPORT_TUPLE
 
-            strategy_tuple = (*MR_CAPSULE_STRATEGY_IMPORT_TUPLE, CORE5_STRATEGY_IMPORT_STR)
+            strategy_tuple = DAILY_STRATEGY_IMPORT_TUPLE
             placeholders_str = ",".join("?" for _strategy_str in strategy_tuple)
             with self._connect() as connection_obj:
                 row_list = connection_obj.execute(
@@ -2315,12 +2322,12 @@ class LiveStateStore(CoreLiveStateStore):
         metadata_dict = decision_plan_obj.snapshot_metadata_dict
         if not isinstance(metadata_dict, dict):
             return decision_plan_obj
-        from alpha.live.daily_reconcile import CORE5_STRATEGY_IMPORT_STR, MR_CAPSULE_STRATEGY_IMPORT_TUPLE
+        from alpha.live.daily_reconcile import DAILY_STRATEGY_IMPORT_TUPLE
 
         # New inserts freeze verified release identity. Older column-backed
         # capsule decisions already saved their strategy import in snapshot metadata.
         strategy_import_str = metadata_dict.get("daily_target_strategy_import_str", metadata_dict.get("strategy_import_str"))
-        if strategy_import_str not in (*MR_CAPSULE_STRATEGY_IMPORT_TUPLE, CORE5_STRATEGY_IMPORT_STR):
+        if strategy_import_str not in DAILY_STRATEGY_IMPORT_TUPLE:
             return decision_plan_obj
         target_share_dict = json.loads(row_obj["target_share_json_str"]) if "target_share_json_str" in row_obj.keys() else {}
         # c8d4997 stored daily targets in metadata. Keep that immutable history

@@ -10,11 +10,12 @@ from alpha.live import scheduler_utils
 from alpha.live.core5_adapter import CORE5_CONTRACT_STR, CORE5_STRATEGY_IMPORT_STR
 from alpha.live.execution_engine import build_broker_order_request_list_from_vplan
 from alpha.live.models import BrokerOrderRequest, BrokerSnapshot
+from alpha.live.dv2_ind_adapter import DV2_IND_STRATEGY_IMPORT_STR
 from alpha.live.mr_capsule_adapter import MR_CAPSULE_STRATEGY_IMPORT_TUPLE
 
 
 DAILY_TERMINAL_STATUS_SET = {"completed", "completed_with_exceptions"}
-DAILY_STRATEGY_IMPORT_TUPLE = (*MR_CAPSULE_STRATEGY_IMPORT_TUPLE, CORE5_STRATEGY_IMPORT_STR)
+DAILY_STRATEGY_IMPORT_TUPLE = (*MR_CAPSULE_STRATEGY_IMPORT_TUPLE, DV2_IND_STRATEGY_IMPORT_STR, CORE5_STRATEGY_IMPORT_STR)
 QUANTITY_TOLERANCE_FLOAT = 1e-9
 
 

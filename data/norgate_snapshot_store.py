@@ -17,6 +17,8 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from data.dv2_ind_snapshot_contract import DV2_IND_PROFILE_STR, validate_dv2_ind_snapshot
+
 
 ALPHA_USE_NORGATE_SNAPSHOT_ENV_STR = "ALPHA_USE_NORGATE_SNAPSHOT_BOOL"
 NORGATE_SNAPSHOT_ROOT_ENV_STR = "NORGATE_SNAPSHOT_ROOT"
@@ -829,6 +831,11 @@ def _load_valid_snapshot_manifest_cached(
         schema_version_int,
         profile_str,
     )
+    if profile_str == DV2_IND_PROFILE_STR:
+        try:
+            validate_dv2_ind_snapshot(pq.read_table(snapshot_dir_path_obj / PRICE_FILE_NAME_STR).to_pandas(), manifest_dict, snapshot_date_ts)
+        except ValueError as error_obj:
+            raise NorgateSnapshotValidationError(str(error_obj)) from error_obj
     if profile_str == NDX_E2_PROFILE_STR:
         _validate_ndx_e2_snapshot_contract(snapshot_dir_path_obj, manifest_dict, snapshot_date_ts)
     if profile_str == CORE5_PROFILE_STR:
@@ -868,7 +875,7 @@ def load_valid_snapshot_manifest(
     # replacing/corrupting a previously read artifact cannot reuse a green cache.
     manifest_loader_fn = (
         _load_valid_snapshot_manifest_cached.__wrapped__
-        if profile_str in {CORE5_PROFILE_STR, NDX_E2_PROFILE_STR}
+        if profile_str in {CORE5_PROFILE_STR, NDX_E2_PROFILE_STR, DV2_IND_PROFILE_STR}
         else _load_valid_snapshot_manifest_cached
     )
     return manifest_loader_fn(
@@ -920,6 +927,8 @@ def _read_prices_cached_df(snapshot_dir_str: str, manifest_hash_str: str) -> pd.
 
 
 def _read_prices_df(snapshot_manifest_obj: NorgateSnapshotManifest) -> pd.DataFrame:
+    if snapshot_manifest_obj.profile_str == DV2_IND_PROFILE_STR:
+        return _read_prices_uncached_df(str(snapshot_manifest_obj.snapshot_dir_path_obj))
     if snapshot_manifest_obj.profile_str in MR_CAPSULE_PROFILE_SET or snapshot_manifest_obj.profile_str == NDX_E2_PROFILE_STR:
         cache_key_tuple = (str(snapshot_manifest_obj.snapshot_dir_path_obj), snapshot_manifest_obj.manifest_hash_str)
         # Each large capsule or E2 profile retains only its last requested snapshot.
@@ -998,7 +1007,7 @@ def load_price_timeseries_df(
     if profile_str in MR_CAPSULE_PROFILE_SET:
         symbol_price_df.index.name = snapshot_manifest_obj.manifest_dict["data_contract"].get("source_index_name_str")
         return _restore_mr_capsule_native_fields(symbol_price_df, snapshot_manifest_obj.manifest_dict["data_contract"], f"{symbol_str}|{normalized_adjustment_str}")
-    if profile_str == CORE5_PROFILE_STR:
+    if profile_str in {CORE5_PROFILE_STR, DV2_IND_PROFILE_STR}:
         symbol_price_df.index.name = snapshot_manifest_obj.manifest_dict["data_contract"].get("source_index_name_str")
         field_name_list = snapshot_manifest_obj.manifest_dict["data_contract"]["source_field_by_pair_dict"][
             f"{symbol_str}|{normalized_adjustment_str}"
@@ -1047,7 +1056,7 @@ def load_raw_prices_df(
     # benchmark as the direct loader. Older live profiles retain their contract.
     data_symbol_dict = {
         symbol_str: (
-            "$SPXTR" if (profile_str == CORE5_PROFILE_STR or profile_str in MR_CAPSULE_PROFILE_SET) and symbol_str == "$SPX"
+            "$SPXTR" if (profile_str in {CORE5_PROFILE_STR, DV2_IND_PROFILE_STR} or profile_str in MR_CAPSULE_PROFILE_SET) and symbol_str == "$SPX"
             and symbol_str in benchmark_set else symbol_str
         )
         for symbol_str in symbol_list
@@ -1119,13 +1128,13 @@ def load_raw_prices_df(
         )
         symbol_price_df.index.name = None
         symbol_field_list = field_name_list
-        if profile_str == CORE5_PROFILE_STR:
+        if profile_str in {CORE5_PROFILE_STR, DV2_IND_PROFILE_STR}:
             symbol_price_df.index.name = snapshot_manifest_obj.manifest_dict["data_contract"].get("source_index_name_str")
             symbol_field_list = snapshot_manifest_obj.manifest_dict["data_contract"]["source_field_by_pair_dict"][
                 f"{data_symbol_dict[symbol_str]}|{adjustment_str}"
             ]
         symbol_price_df = symbol_price_df[symbol_field_list]
-        if profile_str == CORE5_PROFILE_STR:
+        if profile_str in {CORE5_PROFILE_STR, DV2_IND_PROFILE_STR}:
             symbol_price_df = symbol_price_df.astype(
                 snapshot_manifest_obj.manifest_dict["data_contract"]["source_dtype_by_pair_dict"][f"{data_symbol_dict[symbol_str]}|{adjustment_str}"]
             )
