@@ -25,7 +25,7 @@ pods:
   strategy_import_str: strategies.taa_beyond_6040.strategy_taa_month_end_rebalancing_flow
   weight_float: 0.237
 - pod_id_str: pod_dv2_industry_etf
-  strategy_import_str: strategies.dv2.strategy_mr_dv2_industry_etf
+  strategy_import_str: strategies.dv2.strategy_mr_dv2_industry_etf:DVO2IndustryEtfStrategy
   weight_float: 0.237
 - pod_id_str: pod_downshock_vox_iyr
   strategy_import_str: strategies.mean_reversion.strategy_mr_us_sector_etf_ibs_downshock_vox_iyr

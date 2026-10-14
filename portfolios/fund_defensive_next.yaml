@@ -22,5 +22,5 @@ pods:
   strategy_import_str: strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash
   weight_float: 0.333
 - pod_id_str: pod_dv2_industry_etf
-  strategy_import_str: strategies.dv2.strategy_mr_dv2_industry_etf
+  strategy_import_str: strategies.dv2.strategy_mr_dv2_industry_etf:DVO2IndustryEtfStrategy
   weight_float: 0.333
