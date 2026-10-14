@@ -27,10 +27,10 @@ MECHANICAL = {"DEF": "DEF-7 | D* + G*", "DEF10": "DEF-10 | D* + G*", "BAL": "BAL
 VERDICTS = {
     "yaml:00_0": ("acc", "מוחלף ב״הגנה״"), "yaml:0_1": ("", "ארכיון"), "yaml:0_3": ("acc", "קרוב ל״מאוזן״"),
     "yaml:0_4": ("warn", "חלופה פשוטה ל״צמיחה+״"), "yaml:0_allin": ("", "ארכיון"),
-    "yaml:fund_menu_aggressive": ("", "ארכיון"), "yaml:fund_menu_balanced": ("", "ארכיון (מורכב, EOM)"),
-    "yaml:fund_menu_defensive": ("", "ארכיון (מורכב, EOM)"), "yaml:fund_menu_growth": ("", "ארכיון"),
-    "yaml:fund_menu_low_touch_balanced": ("", "ארכיון"), "yaml:fund_menu_low_touch_defensive": ("", "ארכיון"),
-    "yaml:fund_menu_low_touch_growth": ("", "ארכיון"), "yaml:ladder_1_defensive": ("acc", "מוחלף ב״הגנה״"),
+    "yaml:menu0923_aggressive": ("", "ארכיון"), "yaml:menu0923_balanced": ("", "ארכיון (מורכב, EOM)"),
+    "yaml:menu0923_defensive": ("", "ארכיון (מורכב, EOM)"), "yaml:menu0923_growth": ("", "ארכיון"),
+    "yaml:menu0923_low_touch_balanced": ("", "ארכיון"), "yaml:menu0923_low_touch_defensive": ("", "ארכיון"),
+    "yaml:menu0923_low_touch_growth": ("", "ארכיון"), "yaml:ladder_1_defensive": ("acc", "מוחלף ב״הגנה״"),
     "yaml:ladder_1_defensive_proxy_2008": ("", "ארכיון"), "yaml:ladder_2_balanced": ("acc", "מוחלף ב״מאוזן״"),
     "yaml:ladder_2_balanced_proxy_2008": ("", "ארכיון"), "yaml:ladder_3_growth": ("", "ארכיון"),
     "yaml:ladder_3b_growth_2x": ("", "ארכיון"), "yaml:ladder_3c_growth_2x_btal": ("", "ארכיון"),
@@ -120,9 +120,9 @@ def main() -> int:
                   "CORE5 alone": data["long"]["core5"].loc[LONG_START:END]}
     yaml_books, _ = part_m.yaml_books()
     for book in yaml_books:
-        if book.name.replace("yaml:", "") in ("ladder_4_growth", "loren", "0_4", "00_0", "fund_menu_defensive",
-                                              "fund_menu_low_touch_defensive", "fund_menu_aggressive",
-                                              "fund_menu_growth", "ladder_1_defensive"):
+        if book.name.replace("yaml:", "") in ("ladder_4_growth", "loren", "0_4", "00_0", "menu0923_defensive",
+                                              "menu0923_low_touch_defensive", "menu0923_aggressive",
+                                              "menu0923_growth", "ladder_1_defensive"):
             if max(data["long"][p].first_valid_index() for p in book.pods) <= LONG_START:
                 ref_series[book.name] = lib.book_returns(data["long"], book, LONG_START)
     ref_frame = pd.DataFrame(ref_series)

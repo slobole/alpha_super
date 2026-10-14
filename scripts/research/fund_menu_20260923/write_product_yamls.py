@@ -37,7 +37,9 @@ def main() -> int:
         product_id_str = product_dict["product_id_str"]
         rows_df = weight_df[(weight_df["product_id_str"] == product_id_str) & weight_df["weight_float"].notna()]
         rows_df = rows_df.sort_values("weight_float", ascending=False)
-        file_name_str = product_dict["yaml_name_str"]
+        # The frozen spec still names the books fund_menu_*; they were renamed menu0923_* on 2026-10-14
+        # (the fund_* prefix is kept for the current fund products).
+        file_name_str = product_dict["yaml_name_str"].replace("fund_menu_", "menu0923_", 1)
         risk_label_str = (
             f"volatility target {product_dict['target_volatility_float']:.1%}"
             if "target_volatility_float" in product_dict

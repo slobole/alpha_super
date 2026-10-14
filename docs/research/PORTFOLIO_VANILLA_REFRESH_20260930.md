@@ -2,11 +2,13 @@
 
 The raw run artifacts are local under `results/research/portfolio/` and are gitignored; this tracked report records their outcomes and lineage. The local HTML paths below are not available in a fresh Git checkout.
 
+The seven `fund_menu_*` books were renamed `menu0923_*` on 2026-10-14 (the `fund_*` prefix is kept for the current fund products); the local run paths below keep the names they were run under.
+
 ## Scope and method
 
 - Bench displayed 30 `portfolios/*.yaml` configurations at the start of this run. All 30 were preflighted with `PortfolioManager.from_yaml`.
 - 26 configurations were valid and completed a fresh PortfolioManager Vanilla run. Four VIXM tail research configurations were rejected before execution because their strategy is not in the Portfolio Manager allowlist.
-- Three portfolio jobs ran concurrently with `--max-workers 1` per job. A transient Norgate SPY read error interrupted the first `fund_menu_balanced` attempt; its isolated retry passed. Both logs are preserved.
+- Three portfolio jobs ran concurrently with `--max-workers 1` per job. A transient Norgate SPY read error interrupted the first `menu0923_balanced` attempt; its isolated retry passed. Both logs are preserved.
 - No portfolio YAML, strategy rules, capital weights, LIVE release, scheduler, broker state, or allocation was changed by this refresh.
 - Validation: each passing portfolio has `summary.json`, `manager_metadata.json`, `metadata.json`, `run_info.json`, `report.html`, the configured pod count, and Bench `Current config` status.
 
@@ -19,13 +21,13 @@ The raw run artifacts are local under `results/research/portfolio/` and are giti
 | `0_3` | RESEARCH | Passed | 2012-10-01 to 2026-09-29 | 17.32% | 1.41 | -11.34% | local `results/research/portfolio/0_3/vanilla_backtest/2026-09-30_143638/report.html` |
 | `0_4` | RESEARCH | Passed | 2012-10-01 to 2026-09-29 | 21.52% | 1.34 | -16.28% | local `results/research/portfolio/0_4/vanilla_backtest/2026-09-30_143646/report.html` |
 | `0_allin` | RESEARCH | Passed | 2012-10-01 to 2026-09-29 | 17.50% | 1.44 | -12.65% | local `results/research/portfolio/0_allin/vanilla_backtest/2026-09-30_112114/report.html` |
-| `fund_menu_aggressive` | RESEARCH | Passed | 2012-10-02 to 2026-08-19 | 20.65% | 1.37 | -13.29% | local `results/research/portfolio/fund_menu_aggressive/vanilla_backtest/2026-09-30_112114/report.html` |
-| `fund_menu_balanced` | RESEARCH | Passed on retry | 2012-10-03 to 2026-08-19 | 13.16% | 1.60 | -7.58% | local `results/research/portfolio/fund_menu_balanced/vanilla_backtest/2026-09-30_144741/report.html` |
-| `fund_menu_defensive` | RESEARCH | Passed | 2012-10-03 to 2026-08-19 | 9.86% | 1.80 | -4.39% | local `results/research/portfolio/fund_menu_defensive/vanilla_backtest/2026-09-30_143652/report.html` |
-| `fund_menu_growth` | RESEARCH | Passed | 2012-10-03 to 2026-08-19 | 15.93% | 1.46 | -11.02% | local `results/research/portfolio/fund_menu_growth/vanilla_backtest/2026-09-30_112840/report.html` |
-| `fund_menu_low_touch_balanced` | RESEARCH | Passed | 2012-10-02 to 2026-08-19 | 11.86% | 1.52 | -6.91% | local `results/research/portfolio/fund_menu_low_touch_balanced/vanilla_backtest/2026-09-30_120146/report.html` |
-| `fund_menu_low_touch_defensive` | RESEARCH | Passed | 2012-10-02 to 2026-08-19 | 7.14% | 1.57 | -3.87% | local `results/research/portfolio/fund_menu_low_touch_defensive/vanilla_backtest/2026-09-30_120615/report.html` |
-| `fund_menu_low_touch_growth` | RESEARCH | Passed | 2012-10-02 to 2026-08-19 | 15.55% | 1.44 | -9.66% | local `results/research/portfolio/fund_menu_low_touch_growth/vanilla_backtest/2026-09-30_120909/report.html` |
+| `menu0923_aggressive` | RESEARCH | Passed | 2012-10-02 to 2026-08-19 | 20.65% | 1.37 | -13.29% | local `results/research/portfolio/fund_menu_aggressive/vanilla_backtest/2026-09-30_112114/report.html` |
+| `menu0923_balanced` | RESEARCH | Passed on retry | 2012-10-03 to 2026-08-19 | 13.16% | 1.60 | -7.58% | local `results/research/portfolio/fund_menu_balanced/vanilla_backtest/2026-09-30_144741/report.html` |
+| `menu0923_defensive` | RESEARCH | Passed | 2012-10-03 to 2026-08-19 | 9.86% | 1.80 | -4.39% | local `results/research/portfolio/fund_menu_defensive/vanilla_backtest/2026-09-30_143652/report.html` |
+| `menu0923_growth` | RESEARCH | Passed | 2012-10-03 to 2026-08-19 | 15.93% | 1.46 | -11.02% | local `results/research/portfolio/fund_menu_growth/vanilla_backtest/2026-09-30_112840/report.html` |
+| `menu0923_low_touch_balanced` | RESEARCH | Passed | 2012-10-02 to 2026-08-19 | 11.86% | 1.52 | -6.91% | local `results/research/portfolio/fund_menu_low_touch_balanced/vanilla_backtest/2026-09-30_120146/report.html` |
+| `menu0923_low_touch_defensive` | RESEARCH | Passed | 2012-10-02 to 2026-08-19 | 7.14% | 1.57 | -3.87% | local `results/research/portfolio/fund_menu_low_touch_defensive/vanilla_backtest/2026-09-30_120615/report.html` |
+| `menu0923_low_touch_growth` | RESEARCH | Passed | 2012-10-02 to 2026-08-19 | 15.55% | 1.44 | -9.66% | local `results/research/portfolio/fund_menu_low_touch_growth/vanilla_backtest/2026-09-30_120909/report.html` |
 | `ladder_1_defensive` | RESEARCH | Passed | 2012-10-01 to 2026-09-29 | 10.68% | 1.46 | -8.45% | local `results/research/portfolio/ladder_1_defensive/vanilla_backtest/2026-09-30_143802/report.html` |
 | `ladder_1_defensive_proxy_2008` | RESEARCH | Passed | 2008-03-03 to 2026-09-29 | 10.56% | 1.28 | -12.31% | local `results/research/portfolio/ladder_1_defensive_proxy_2008/vanilla_backtest/2026-09-30_121257/report.html` |
 | `ladder_2_balanced` | RESEARCH | Passed | 2012-10-01 to 2026-09-29 | 12.62% | 1.22 | -10.02% | local `results/research/portfolio/ladder_2_balanced/vanilla_backtest/2026-09-30_121518/report.html` |
@@ -58,13 +60,13 @@ The latest portfolio configuration commit (`36b6349`, 2026-09-29) added the foll
 | [0_3](../../portfolios/0_3.yaml) | annually / fixed | `pod_taa_df_btal_fallback_tqqq_vix_cash` 60%; `pod_taa_adaptive_macro_core5` 40% | 2026-09-29 |
 | [0_4](../../portfolios/0_4.yaml) | annually / fixed | `pod_taa_df_btal_1n_fallback_tqqq_vix_cash` 60%; `pod_taa_adaptive_macro_core5` 40% | 2026-09-29 |
 | [0_allin](../../portfolios/0_allin.yaml) | annually / equal | `pod_taa_df_btal_fallback_tqqq_vix_cash` 20%; `pod_taa_adaptive_macro_core5` 20%; `pod_mr_hpi_sp500_2_3_5_vote` 20%; `pod_mo_atr_normalized_ndx_vxn_scaled` 20%; `pod_mr_dv2` 20% | 2026-09-29 |
-| [fund_menu_aggressive](../../portfolios/fund_menu_aggressive.yaml) | annually / fixed | `pod_ndx_vxn` 33.33%; `pod_taa_btal_tqqq` 33.34%; `pod_infl_compass` 33.33% | 2026-08-19 |
-| [fund_menu_balanced](../../portfolios/fund_menu_balanced.yaml) | annually / fixed | `pod_core5` 19%; `pod_tactical_fi` 9%; `pod_eom_flow` 9%; `pod_sector_vox_iyr` 9%; `pod_dv2` 9%; `pod_hpi_vote` 9%; `pod_disp_kie_ihi_sma` 9%; `pod_taa_btal_tqqq` 9%; `pod_ndx_vxn` 9%; `pod_infl_compass` 9% | 2026-08-19 |
-| [fund_menu_defensive](../../portfolios/fund_menu_defensive.yaml) | annually / fixed | `pod_core5` 33%; `pod_tactical_fi` 17%; `pod_eom_flow` 17%; `pod_hpi_vote` 9%; `pod_sector_vox_iyr` 8%; `pod_ndx_vxn` 8%; `pod_taa_btal_tqqq` 8% | 2026-08-19 |
-| [fund_menu_growth](../../portfolios/fund_menu_growth.yaml) | annually / fixed | `pod_hpi_vote` 14%; `pod_dv2` 14%; `pod_disp_kie_ihi_sma` 14%; `pod_sector_vox_iyr` 12%; `pod_ndx_vxn` 12%; `pod_taa_btal_tqqq` 12%; `pod_infl_compass` 12%; `pod_core5` 10% | 2026-08-19 |
-| [fund_menu_low_touch_balanced](../../portfolios/fund_menu_low_touch_balanced.yaml) | annually / fixed | `pod_core5` 39%; `pod_tactical_fi` 19%; `pod_ndx_vxn` 14%; `pod_infl_compass` 14%; `pod_taa_btal_tqqq` 14% | 2026-08-19 |
-| [fund_menu_low_touch_defensive](../../portfolios/fund_menu_low_touch_defensive.yaml) | annually / fixed | `pod_core5` 59%; `pod_tactical_fi` 29%; `pod_ndx_vxn` 6%; `pod_taa_btal_tqqq` 6% | 2026-08-19 |
-| [fund_menu_low_touch_growth](../../portfolios/fund_menu_low_touch_growth.yaml) | annually / fixed | `pod_core5` 23%; `pod_ndx_vxn` 22%; `pod_taa_btal_tqqq` 22%; `pod_infl_compass` 22%; `pod_tactical_fi` 11% | 2026-08-19 |
+| [menu0923_aggressive](../../portfolios/menu0923_aggressive.yaml) | annually / fixed | `pod_ndx_vxn` 33.33%; `pod_taa_btal_tqqq` 33.34%; `pod_infl_compass` 33.33% | 2026-08-19 |
+| [menu0923_balanced](../../portfolios/menu0923_balanced.yaml) | annually / fixed | `pod_core5` 19%; `pod_tactical_fi` 9%; `pod_eom_flow` 9%; `pod_sector_vox_iyr` 9%; `pod_dv2` 9%; `pod_hpi_vote` 9%; `pod_disp_kie_ihi_sma` 9%; `pod_taa_btal_tqqq` 9%; `pod_ndx_vxn` 9%; `pod_infl_compass` 9% | 2026-08-19 |
+| [menu0923_defensive](../../portfolios/menu0923_defensive.yaml) | annually / fixed | `pod_core5` 33%; `pod_tactical_fi` 17%; `pod_eom_flow` 17%; `pod_hpi_vote` 9%; `pod_sector_vox_iyr` 8%; `pod_ndx_vxn` 8%; `pod_taa_btal_tqqq` 8% | 2026-08-19 |
+| [menu0923_growth](../../portfolios/menu0923_growth.yaml) | annually / fixed | `pod_hpi_vote` 14%; `pod_dv2` 14%; `pod_disp_kie_ihi_sma` 14%; `pod_sector_vox_iyr` 12%; `pod_ndx_vxn` 12%; `pod_taa_btal_tqqq` 12%; `pod_infl_compass` 12%; `pod_core5` 10% | 2026-08-19 |
+| [menu0923_low_touch_balanced](../../portfolios/menu0923_low_touch_balanced.yaml) | annually / fixed | `pod_core5` 39%; `pod_tactical_fi` 19%; `pod_ndx_vxn` 14%; `pod_infl_compass` 14%; `pod_taa_btal_tqqq` 14% | 2026-08-19 |
+| [menu0923_low_touch_defensive](../../portfolios/menu0923_low_touch_defensive.yaml) | annually / fixed | `pod_core5` 59%; `pod_tactical_fi` 29%; `pod_ndx_vxn` 6%; `pod_taa_btal_tqqq` 6% | 2026-08-19 |
+| [menu0923_low_touch_growth](../../portfolios/menu0923_low_touch_growth.yaml) | annually / fixed | `pod_core5` 23%; `pod_ndx_vxn` 22%; `pod_taa_btal_tqqq` 22%; `pod_infl_compass` 22%; `pod_tactical_fi` 11% | 2026-08-19 |
 
 ### Strategy import for each new portfolio pod
 
@@ -127,37 +129,37 @@ These seven files were new to the tracked catalog on 2026-09-29, but Bench had o
 - Reweighted: `pod_taa_df_btal_fallback_tqqq_vix_cash` 16.67% → 20%; `pod_taa_adaptive_macro_core5` 16.67% → 20%; `pod_mr_hpi_sp500_2_3_5_vote` 16.67% → 20%; `pod_mo_atr_normalized_ndx_vxn_scaled` 16.67% → 20%; `pod_mr_dv2` 16.65% → 20%.
 - CAGR 18.76% → 17.50%; Sharpe 1.51 → 1.44; Max DD -12.55% → -12.65%.
 
-### `fund_menu_aggressive`
+### `menu0923_aggressive`
 
 - Previous saved preview: `2026-09-24_011427`. Removed: `pod_mosaic` 25%.
 - Reweighted: `pod_ndx_vxn` 25% → 33.33%; `pod_taa_btal_tqqq` 25% → 33.34%; `pod_infl_compass` 25% → 33.33%.
 - CAGR 22.03% → 20.65%; Sharpe 1.49 → 1.37; Max DD -11.92% → -13.29%.
 
-### `fund_menu_balanced`
+### `menu0923_balanced`
 
 - Previous saved preview: `2026-09-24_105620`. Removed: `pod_mosaic` 8%.
 - Reweighted: `pod_core5` 18% → 19%; `pod_sector_vox_iyr` 8% → 9%; `pod_dv2` 8% → 9%; `pod_hpi_vote` 8% → 9%; `pod_disp_kie_ihi_sma` 8% → 9%; `pod_taa_btal_tqqq` 8% → 9%; `pod_ndx_vxn` 8% → 9%; `pod_infl_compass` 8% → 9%.
 - CAGR 14.08% → 13.16%; Sharpe 1.66 → 1.60; Max DD -7.75% → -7.58%.
 
-### `fund_menu_growth`
+### `menu0923_growth`
 
 - Previous saved preview: `2026-09-24_005652`. Removed: `pod_mosaic` 11%.
 - Reweighted: `pod_hpi_vote` 12% → 14%; `pod_dv2` 12% → 14%; `pod_disp_kie_ihi_sma` 12% → 14%; `pod_sector_vox_iyr` 11% → 12%; `pod_ndx_vxn` 11% → 12%; `pod_taa_btal_tqqq` 11% → 12%; `pod_infl_compass` 11% → 12%; `pod_core5` 9% → 10%.
 - CAGR 17.07% → 15.93%; Sharpe 1.52 → 1.46; Max DD -11.08% → -11.02%.
 
-### `fund_menu_low_touch_balanced`
+### `menu0923_low_touch_balanced`
 
 - Previous saved preview: `2026-09-24_111310`. Removed: `pod_mosaic` 12%.
 - Reweighted: `pod_core5` 35% → 39%; `pod_tactical_fi` 17% → 19%; `pod_ndx_vxn` 12% → 14%; `pod_infl_compass` 12% → 14%; `pod_taa_btal_tqqq` 12% → 14%.
 - CAGR 13.61% → 11.86%; Sharpe 1.62 → 1.52; Max DD -6.19% → -6.91%.
 
-### `fund_menu_low_touch_defensive`
+### `menu0923_low_touch_defensive`
 
 - Previous saved preview: `2026-09-24_111637`. Removed: `pod_mosaic` 6%, `pod_infl_compass` 6%.
 - Reweighted: `pod_core5` 51% → 59%; `pod_tactical_fi` 25% → 29%.
 - CAGR 9.60% → 7.14%; Sharpe 1.70 → 1.57; Max DD -4.32% → -3.87%.
 
-### `fund_menu_low_touch_growth`
+### `menu0923_low_touch_growth`
 
 - Previous saved preview: `2026-09-24_112427`. Removed: `pod_mosaic` 18%.
 - Reweighted: `pod_core5` 19% → 23%; `pod_ndx_vxn` 18% → 22%; `pod_taa_btal_tqqq` 18% → 22%; `pod_infl_compass` 18% → 22%; `pod_tactical_fi` 9% → 11%.
@@ -177,4 +179,4 @@ The following displayed YAMLs reference `strategies.tail_hedge.strategy_vixm_bac
 - A fresh run date and Bench `Current config` status do not mean that every portfolio contains market data through 2026-09-29. Eight completed runs end on 2026-08-19 and two on 2026-08-14 because of configured or effective pod cutoffs. `00_0` has no YAML end date but its common pod window ends on 2026-08-19.
 - Old-vs-new headline metrics above mix portfolio composition changes with later runs, data updates, and in some cases different end dates. They do not isolate the effect of removing MOSAIC or establish independent edge.
 - All 30 displayed portfolios are research artifacts here. The one `WIRED` tier (`loren`) denotes plumbing maturity only; this refresh did not approve capital allocation, PAPER, or LIVE deployment.
-- The failed first `fund_menu_balanced` attempt hit a Norgate `price_timeseries` access error while loading SPY in the TAA pod. A later isolated full retry passed, including that pod. See the two local logs in `results/research/portfolio_refresh_20260930/logs/`.
+- The failed first `menu0923_balanced` attempt hit a Norgate `price_timeseries` access error while loading SPY in the TAA pod. A later isolated full retry passed, including that pod. See the two local logs in `results/research/portfolio_refresh_20260930/logs/`.

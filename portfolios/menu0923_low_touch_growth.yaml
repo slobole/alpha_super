@@ -9,7 +9,8 @@
 # remainder with equal-weight pods moving together (the A1 rule). Not yet in
 # scripts/research/fund_menu_20260923/amendments.yaml: regenerating with write_product_yamls.py
 # would restore mosaic until the menu re-freeze records this drop.
-name_str: fund_menu_low_touch_growth
+# Renamed 2026-10-14 from fund_menu_low_touch_growth: the fund_* prefix is kept for the current fund products.
+name_str: menu0923_low_touch_growth
 capital_base_float: 1000000.0
 backtest_start_date_str: '2012-10-02'
 end_date_str: '2026-08-19'

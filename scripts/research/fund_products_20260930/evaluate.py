@@ -114,7 +114,7 @@ def main() -> int:
     # References: the fund menu YAMLs and ladder_4.
     rs = __import__("run_sleeves")
     alias_by_module = {v[0].split(":")[0]: k for k, v in rs.SLEEVE_DICT.items() if k not in rs.SENSITIVITY_ALIAS_SET}
-    for path in sorted((fp.ga.MAIN_REPO / "portfolios").glob("fund_menu_*.yaml")) + [fp.ga.MAIN_REPO / "portfolios" / "ladder_4_growth.yaml"]:
+    for path in sorted((fp.ga.MAIN_REPO / "portfolios").glob("menu0923_*.yaml")) + [fp.ga.MAIN_REPO / "portfolios" / "ladder_4_growth.yaml"]:
         spec = yaml.safe_load(path.read_text(encoding="utf-8"))
         w = {}
         for pod in spec["pods"]:
