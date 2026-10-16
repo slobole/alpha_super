@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='ops.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='performance_charts.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='donut_interaction.css') }}">
+  {%- if pod_page_dict is defined and pod_page_dict.orders_dict %}<link rel="stylesheet" href="{{ url_for('static', filename='orders.css') }}">{% endif %}
   {% if performance_page_dict is defined %}<link rel="stylesheet" href="{{ url_for('static', filename='performance_display.css') }}">{% endif %}
   {% if activity_page_dict is defined %}<link rel="stylesheet" href="{{ url_for('static', filename='activity.css') }}">{% endif %}
   {% if system_page_dict is defined %}<link rel="stylesheet" href="{{ url_for('static', filename='system.css') }}">{% endif %}
@@ -22,6 +23,7 @@
   <script src="{{ url_for('static', filename='overview.js') }}" defer></script>
   <script src="{{ url_for('static', filename='chart_interaction.js') }}" defer></script>
   <script src="{{ url_for('static', filename='donut_interaction.js') }}" defer></script>
+  {%- if pod_page_dict is defined and pod_page_dict.orders_dict %}<script src="{{ url_for('static', filename='orders.js') }}" defer></script>{% endif %}
   {% if performance_page_dict is defined %}<script src="{{ url_for('static', filename='performance.js') }}" defer></script>{% endif %}
   {% if activity_page_dict is defined %}<script src="{{ url_for('static', filename='activity.js') }}" defer></script>{% endif %}
   {% if tools_page_dict is defined %}<script src="{{ url_for('static', filename='tools.js') }}" defer></script>{% endif %}

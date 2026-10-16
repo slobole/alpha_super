@@ -1,4 +1,4 @@
-"""Run V4 beside V3. Default bind is local; this phase is always read-only."""
+"""Run V4 beside V3. Default bind is local and read-only; --enable-orders turns on the Pod order panel only."""
 
 import os
 
@@ -35,7 +35,9 @@ def main() -> int:
     parser_obj.add_argument("--demo-tools", action="store_true", help="Simulate Tools actions in memory; requires --demo.")
     parser_obj.add_argument("--demo-daily", action="store_true",
         help="Add five synthetic daily pods (CORE5, MR capsule) to the demo; requires --demo.")
-    parser_obj.add_argument("--read-only", action="store_true", default=True, help="Always enforced in this release.")
+    parser_obj.add_argument("--read-only", action="store_true", default=True, help="Everything except the order panel stays read-only.")
+    parser_obj.add_argument("--enable-orders", action="store_true",
+        help="Allow the Pod order panel (Complete a missing trade, New order) to send real IBKR orders.")
     parser_obj.add_argument("--skip-env-file", action="store_true")
     parser_obj.add_argument("--releases-root")
     parser_obj.add_argument("--config")
@@ -45,6 +47,8 @@ def main() -> int:
         parser_obj.error("--demo-tools requires --demo; production execution is not connected.")
     if args_obj.demo_daily and not args_obj.demo:
         parser_obj.error("--demo-daily requires --demo.")
+    if args_obj.enable_orders and args_obj.demo:
+        parser_obj.error("--enable-orders is for production; the demo order panel comes with --demo-tools.")
     if args_obj.demo:
         from alpha.live.dashboard_v4.demo import create_demo_app
         flask_app_obj = create_demo_app(demo_tools_bool=args_obj.demo_tools, console_appender_bool=True,
@@ -59,7 +63,8 @@ def main() -> int:
         if args_obj.config:
             provider_kwargs_dict["config_path_str"] = args_obj.config
         flask_app_obj = create_app(
-            LiveDataProvider(**provider_kwargs_dict), performance_db_path_str=args_obj.performance_db)
+            LiveDataProvider(**provider_kwargs_dict), performance_db_path_str=args_obj.performance_db,
+            orders_enabled_bool=args_obj.enable_orders)
     logging.getLogger("werkzeug").addFilter(QuietPollFilter())
     flask_app_obj.run(host=args_obj.host, port=args_obj.port, debug=False, use_reloader=False)
     return 0

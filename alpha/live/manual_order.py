@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+import math
 import re
 from typing import Any, Callable
 import uuid
@@ -16,7 +17,10 @@ from alpha.live.order_clerk import (
 
 
 MANUAL_ORDER_CONFIRMATION_TEXT_STR = "SUBMIT MANUAL ORDER"
-SUPPORTED_MANUAL_ORDER_TYPE_TUPLE = ("MKT", "LMT")
+SUPPORTED_MANUAL_ORDER_TYPE_TUPLE = ("MKT", "LMT", "MOC")
+# NYSE and Nasdaq accept MOC entries until 15:50 ET; 15 minutes before the
+# close leaves a 5-minute buffer for connect and contract qualification.
+MOC_CUTOFF_MINUTES_BEFORE_CLOSE_INT = 15
 SUPPORTED_MANUAL_SIDE_TUPLE = ("BUY", "SELL")
 SUPPORTED_MANUAL_TIF_TUPLE = ("DAY",)
 _ASSET_PATTERN_OBJ = re.compile(r"^[A-Z][A-Z0-9.\-]{0,15}$")
@@ -43,6 +47,11 @@ class ManualOrderTicket:
     submission_key_str: str
     order_request_key_str: str
     limit_price_float: float | None = None
+    # Optional completion reference (Dashboard V4 "Complete a missing trade").
+    # Pass-through only: logged with every manual_order_* event, never used to size.
+    completion_vplan_id_int: int | None = None
+    completion_target_share_float: float | None = None
+    completion_fresh_position_float: float | None = None
 
     @property
     def signed_quantity_float(self) -> float:
@@ -167,6 +176,9 @@ def build_manual_order_ticket_obj(
         request_body_dict.get("limit_price_float"),
         broker_order_type_str=broker_order_type_str,
     )
+    if broker_order_type_str == "MOC":
+        validate_moc_window(release_obj.session_calendar_id_str, submitted_timestamp_ts)
+    completion_dict = _parse_completion_dict(request_body_dict)
     ticket_id_str = uuid.uuid4().hex
     submission_key_str = f"manual:{release_obj.pod_id_str}:{ticket_id_str}"
     order_request_key_str = f"{submission_key_str}:{asset_str}:1"
@@ -187,7 +199,45 @@ def build_manual_order_ticket_obj(
         submission_key_str=submission_key_str,
         order_request_key_str=order_request_key_str,
         limit_price_float=limit_price_float,
+        **completion_dict,
     )
+
+
+def manual_order_session_window_dict(session_calendar_id_str: str, as_of_ts: datetime) -> dict[str, Any]:
+    """The session times that apply to a manual ticket (half days included).
+
+    ``session_bool`` is False on a weekend or holiday. ``next_open_ts`` is the
+    next regular session open strictly after ``as_of_ts``.
+    """
+    from alpha.live import scheduler_utils
+    import pandas as pd
+
+    if as_of_ts.tzinfo is None:
+        raise ValueError("as_of_ts must be timezone-aware.")
+    calendar_obj = scheduler_utils.get_exchange_calendar_obj(session_calendar_id_str)
+    market_ts = scheduler_utils.to_market_timestamp_ts(as_of_ts, session_calendar_id_str)
+    label_ts = pd.Timestamp(market_ts.date())
+    result_dict: dict[str, Any] = {"session_bool": bool(calendar_obj.is_session(label_ts)),
+        "open_ts": None, "close_ts": None, "moc_cutoff_ts": None}
+    if result_dict["session_bool"]:
+        open_ts = scheduler_utils.get_session_open_timestamp_ts(label_ts, session_calendar_id_str)
+        close_ts = scheduler_utils.get_session_close_timestamp_ts(label_ts, session_calendar_id_str)
+        result_dict.update(open_ts=open_ts, close_ts=close_ts,
+            moc_cutoff_ts=close_ts - timedelta(minutes=MOC_CUTOFF_MINUTES_BEFORE_CLOSE_INT))
+    next_label_ts = (label_ts if result_dict["session_bool"] and market_ts < result_dict["open_ts"]
+        else calendar_obj.date_to_session(label_ts + pd.Timedelta(days=1), direction="next"))
+    result_dict["next_open_ts"] = scheduler_utils.get_session_open_timestamp_ts(next_label_ts, session_calendar_id_str)
+    return result_dict
+
+
+def validate_moc_window(session_calendar_id_str: str, as_of_ts: datetime) -> None:
+    """MOC is accepted on a session day before the cutoff (pre-open included)."""
+    window_dict = manual_order_session_window_dict(session_calendar_id_str, as_of_ts)
+    if not window_dict["session_bool"]:
+        raise ValueError("Market closed today. MOC is not available.")
+    if as_of_ts >= window_dict["moc_cutoff_ts"]:
+        cutoff_str = window_dict["moc_cutoff_ts"].strftime("%H:%M")
+        raise ValueError(f"MOC cutoff passed at {cutoff_str} ET.")
 
 
 def build_manual_broker_order_request_obj(
@@ -253,6 +303,8 @@ def _normalize_order_type_str(order_type_obj: Any) -> str:
         order_type_str = "MKT"
     if order_type_str == "LIMIT":
         order_type_str = "LMT"
+    if order_type_str == "MARKET_ON_CLOSE":
+        order_type_str = "MOC"
     if order_type_str not in SUPPORTED_MANUAL_ORDER_TYPE_TUPLE:
         raise ValueError(
             f"broker_order_type_str must be one of {SUPPORTED_MANUAL_ORDER_TYPE_TUPLE}."
@@ -283,7 +335,7 @@ def _parse_limit_price_float(
     broker_order_type_str: str,
 ) -> float | None:
     limit_price_text_str = str(limit_price_obj or "").strip()
-    if broker_order_type_str == "MKT":
+    if broker_order_type_str != "LMT":
         return None
     if limit_price_text_str == "":
         raise ValueError("limit_price_float is required for LMT orders.")
@@ -294,6 +346,29 @@ def _parse_limit_price_float(
     if limit_price_float <= 0.0:
         raise ValueError("limit_price_float must be greater than zero.")
     return limit_price_float
+
+
+def _parse_completion_dict(request_body_dict: dict[str, Any]) -> dict[str, Any]:
+    vplan_id_obj = request_body_dict.get("completion_vplan_id_int")
+    if vplan_id_obj is None:
+        return {}
+    if isinstance(vplan_id_obj, bool) or not isinstance(vplan_id_obj, int) or vplan_id_obj <= 0:
+        raise ValueError("completion_vplan_id_int must be a positive integer.")
+    completion_dict: dict[str, Any] = {"completion_vplan_id_int": vplan_id_obj}
+    for key_str in ("completion_target_share_float", "completion_fresh_position_float"):
+        value_obj = request_body_dict.get(key_str)
+        if isinstance(value_obj, bool) or not isinstance(value_obj, (int, float)) or not math.isfinite(value_obj):
+            raise ValueError(f"{key_str} must be a finite number.")
+        completion_dict[key_str] = float(value_obj)
+    return completion_dict
+
+
+def _completion_payload_dict(manual_order_ticket_obj: ManualOrderTicket) -> dict[str, Any]:
+    if manual_order_ticket_obj.completion_vplan_id_int is None:
+        return {}
+    return {"completion_vplan_id_int": manual_order_ticket_obj.completion_vplan_id_int,
+        "completion_target_share_float": manual_order_ticket_obj.completion_target_share_float,
+        "completion_fresh_position_float": manual_order_ticket_obj.completion_fresh_position_float}
 
 
 def _require_nonempty_text_str(value_obj: Any, *, field_name_str: str) -> str:
@@ -336,6 +411,7 @@ def _manual_order_submit_result_dict(
         "broker_order_record_count_int": len(submit_batch_result_obj.broker_order_record_list),
         "broker_order_event_count_int": len(submit_batch_result_obj.broker_order_event_list),
         "broker_order_ack_count_int": len(submit_batch_result_obj.broker_order_ack_list),
+        **_completion_payload_dict(manual_order_ticket_obj),
     }
 
 
@@ -363,6 +439,7 @@ def _manual_order_log_payload_dict(
         "submission_key_str": manual_order_ticket_obj.submission_key_str,
         "order_request_key_str": manual_order_ticket_obj.order_request_key_str,
         "submitted_timestamp_str": manual_order_ticket_obj.submitted_timestamp_ts.isoformat(),
+        **_completion_payload_dict(manual_order_ticket_obj),
     }
     payload_dict.update(extra_payload_dict or {})
     return payload_dict

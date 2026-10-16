@@ -29,6 +29,8 @@ from alpha.live.dashboard_v4.system_data import load_system_source_dict
 from alpha.live.dashboard_v4.tools import build_tools_page_dict, resolve_tools_target_obj
 from alpha.live.dashboard_v4.tools_actions import ToolsActionService, register_tools_action_routes
 from alpha.live.dashboard_v4.tools_execution import SyntheticToolsActionProvider
+from alpha.live.dashboard_v4.missing_trades import load_missing_trades_dict, read_completion_event_list
+from alpha.live.dashboard_v4.orders import OrderTicketService, register_order_routes
 from alpha.live.dashboard_v3.client_operations import SOURCE_MAX_AGE_SECONDS_INT
 from alpha.live.dashboard_v3.filters import MARKET_TIMEZONE_OBJ
 from alpha.live.ops_report import parse_timestamp_ts
@@ -44,9 +46,12 @@ ASSET_SET = {
 
 def create_app(data_provider_obj=None, *, performance_db_path_str=None,
                workspace_snapshot_fn=None, operations_workspace_fn=None, now_fn=None, demo_bool=False,
-               demo_tools_bool=False) -> Flask:
+               demo_tools_bool=False, orders_enabled_bool=False, order_broker_factory_fn=None,
+               order_log_path_str=None) -> Flask:
     if demo_tools_bool and not demo_bool:
         raise ValueError("Tools simulation requires the isolated demo.")
+    if demo_bool and orders_enabled_bool and order_broker_factory_fn is None:
+        raise ValueError("Demo orders require a synthetic broker.")
     flask_app_obj = Flask(__name__)
     provider_obj = data_provider_obj if data_provider_obj is not None else LiveDataProvider()
     clock_fn = now_fn or (lambda: datetime.now(UTC))
@@ -73,12 +78,40 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         target_scope_fn=tools_target_obj, enabled_bool=demo_tools_bool, demo_bool=demo_bool, now_fn=clock_fn)
     flask_app_obj.config["tools_action_service_obj"] = tools_service_obj
 
+    def order_log_path_fn():
+        return order_log_path_str or getattr(provider_obj, "event_log_path_str", None)
+
+    def orders_supported_bool():
+        # Providers without release targets (some test fakes) show no order panel.
+        return all(callable(getattr(provider_obj, name_str, None)) for name_str in ("get_target_for_pod", "get_target_list"))
+
+    def missing_trades_dict(target_obj):
+        """Read-only Missing trades for one verified LIVE target (handoff §6)."""
+        account_str = target_obj.release_obj.account_route_str
+        shared_bool = sum(1 for item_obj in provider_obj.get_target_list()
+            if item_obj.release_obj.account_route_str == account_str) > 1
+        try:
+            log_path_str = order_log_path_fn()
+            event_list = read_completion_event_list(log_path_str, target_obj.release_obj.pod_id_str) if log_path_str else []
+        except OSError:
+            event_list = []
+        return load_missing_trades_dict(target_obj, as_of_ts=clock_fn(), shared_account_bool=shared_bool,
+            completion_event_list=event_list)
+
+    # Real orders only with --enable-orders; the demo uses a synthetic broker.
+    order_service_obj = OrderTicketService(target_fn=tools_target_obj, missing_fn=missing_trades_dict,
+        log_path_fn=order_log_path_fn, target_loader_fn=lambda pod_id_str: provider_obj.get_target_for_pod(pod_id_str),
+        enabled_bool=orders_enabled_bool, broker_factory_fn=order_broker_factory_fn, now_fn=clock_fn)
+    flask_app_obj.config["order_service_obj"] = order_service_obj
+
     @flask_app_obj.before_request
     def read_only_boundary():
         # Production rejects every write. Only explicitly enabled synthetic
         # demonstrations can accept the fixed Tools preview/confirm/cancel POSTs.
         if request.method not in {"GET", "HEAD", "OPTIONS"}:
-            if (not demo_tools_bool or request.method != "POST" or request.endpoint not in {
+            order_post_bool = (orders_enabled_bool and request.method == "POST"
+                and request.endpoint in {"order_check", "order_send"})
+            if not order_post_bool and (not demo_tools_bool or request.method != "POST" or request.endpoint not in {
                     "tools_action_preview", "tools_action_confirm", "tools_action_cancel"}):
                 return jsonify(error="read_only", message="This console is read-only."), 403
         if request.endpoint not in {"static", "assets"} and (
@@ -100,6 +133,7 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         return response_obj
 
     register_tools_action_routes(flask_app_obj, tools_service_obj)
+    register_order_routes(flask_app_obj, order_service_obj)
     # Console reads are bounded per request; these caps bound concurrency too.
     console_tail_semaphore_obj = threading.BoundedSemaphore(4)
     console_download_semaphore_obj = threading.BoundedSemaphore(1)
@@ -220,6 +254,8 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             finalize_system_dict(overview_dict, workspace_dict)
             attach_next_command_list(overview_dict["attention_list"], workspace_dict, provider_obj,
                 demo_bool=demo_bool, as_of_ts=clock_fn())
+            if overview_dict["source_fresh_bool"]:
+                attach_missing_trades_attention(overview_dict, workspace_dict)
             return {"overview_dict": overview_dict}
         if not any(item_dict["pod_id_str"] == pod_id_str for item_dict in overview_dict["pod_list"]):
             abort(404)
@@ -289,6 +325,8 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         finalize_system_dict(overview_dict, workspace_dict)
         pod_page_dict = build_pod_page_dict(overview_dict, source_dict, pod_finance_dict,
             pod_id_str=pod_id_str, as_of_ts=clock_fn(), tab_str=tab_str)
+        pod_page_dict["orders_dict"] = build_orders_dict(pod_id_str, workspace_dict,
+            overview_dict["source_fresh_bool"] and not pod_page_dict.get("historical_bool"))
         if pod_page_dict["attention_dict"] and not pod_page_dict["historical_bool"]:
             attach_next_command_list([pod_page_dict["attention_dict"]], workspace_dict, provider_obj,
                 demo_bool=demo_bool, as_of_ts=clock_fn())
@@ -319,6 +357,57 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         pod_page_dict.update(money_key_str=money_key_str, money_url_str=url_for("pod_money", pod_id_str=pod_id_str,
             period=period_str, cycle=cycle_str or None, tab=tab_str or None))
         return {"overview_dict": overview_dict, "pod_page_dict": pod_page_dict}
+
+    def attach_missing_trades_attention(overview_dict, workspace_dict):
+        """One Overview line per pod with missing trades: "2 trades missing · APX BUY 300, MDLZ SELL 41"."""
+        if not orders_supported_bool():
+            return
+        added_int = 0
+        for pod_dict in overview_dict["pod_list"]:
+            try:
+                missing_dict = missing_trades_dict(resolve_tools_target_obj(workspace_dict, provider_obj, pod_dict["pod_id_str"]))
+            except (ValueError, OSError, KeyError):
+                continue
+            row_list = [row_dict for row_dict in missing_dict.get("row_list") or [] if row_dict["state_str"] in {"missing", "off"}]
+            if missing_dict.get("status_str") != "ok" or not row_list:
+                continue
+            item_list = [f"{row_dict['asset_str']} {row_dict['side_str']} {row_dict['quantity_int']}" for row_dict in row_list]
+            detail_str = ", ".join(item_list[:3]) + (f" +{len(item_list) - 3}" if len(item_list) > 3 else "")
+            title_str = f"{len(row_list)} trade{'s' if len(row_list) > 1 else ''} missing"
+            existing_dict = next((item_dict for item_dict in overview_dict["attention_list"]
+                if item_dict["pod_id_str"] == pod_dict["pod_id_str"]), None)
+            if existing_dict is not None:
+                existing_dict["detail_str"] = (existing_dict.get("detail_str") or "").rstrip() + f" · {title_str} · {detail_str}"
+                continue
+            overview_dict["attention_list"].append({"state_str": "late", "pod_name_str": pod_dict.get("name_str") or pod_dict["pod_id_str"],
+                "pod_id_str": pod_dict["pod_id_str"], "title_str": title_str, "detail_str": "· " + detail_str,
+                "age_str": "—", "kind_str": "missing_trades", "next_command_list": []})
+            added_int += 1
+        if added_int and overview_dict.get("verdict_str") == "No action needed.":
+            overview_dict.update(verdict_str=f"{added_int} pod{'s' if added_int > 1 else ''} need{'' if added_int > 1 else 's'} review.",
+                verdict_detail_str="Trades are missing.")
+
+    def build_orders_dict(pod_id_str, workspace_dict, fresh_bool):
+        """Missing trades rows plus the order panel switches for one Pod page."""
+        if not orders_supported_bool():
+            return {}
+        orders_dict = {"enabled_bool": orders_enabled_bool, "token_str": order_service_obj.action_token_str,
+            "check_url_str": url_for("order_check", pod_id_str=pod_id_str),
+            "send_url_str": url_for("order_send", pod_id_str=pod_id_str),
+            "status_str": "unknown", "row_list": [], "meta_str": ""}
+        if not fresh_bool:
+            orders_dict["status_str"] = "stale"
+            return orders_dict
+        try:
+            missing_dict = missing_trades_dict(resolve_tools_target_obj(workspace_dict, provider_obj, pod_id_str))
+        except (ValueError, OSError, KeyError):
+            return orders_dict
+        orders_dict["status_str"] = missing_dict["status_str"]
+        if missing_dict["status_str"] == "ok":
+            orders_dict["row_list"] = missing_dict["row_list"]
+            orders_dict["meta_str"] = (f"VPlan #{missing_dict['vplan_id_int']} · positions "
+                + missing_dict["positions_timestamp_ts"].astimezone(MARKET_TIMEZONE_OBJ).strftime("%H:%M"))
+        return orders_dict
 
     @flask_app_obj.get("/")
     def index():

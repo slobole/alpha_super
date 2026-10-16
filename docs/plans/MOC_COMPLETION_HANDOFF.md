@@ -270,6 +270,47 @@ Full suite stays green (`.venv` python; note the known disk-reading flakiness on
    EOD. Screenshots of each state. Only then LIVE.
 4. Mockup parity: every state of `complete-states.html` reachable in the demo.
 
+## 12b. Implementation notes (built 2026-10-16 by Claude, branch `claude/moc-completion`)
+
+Where it lives:
+
+| Piece | File |
+|---|---|
+| MOC type, MOC time gate, session window, completion reference | `alpha/live/manual_order.py` |
+| Missing trades model (read-only) | `alpha/live/dashboard_v4/missing_trades.py` |
+| Check / send service and routes | `alpha/live/dashboard_v4/orders.py` |
+| Demo broker (no IBKR) | `alpha/live/dashboard_v4/orders_demo.py` |
+| Panel UI | `templates/_pod.html`, `static/orders.js`, `static/orders.css` |
+| Overview line, Pod wiring, write boundary | `alpha/live/dashboard_v4/app.py` |
+| Activity sentence | `activity.py`, `activity_data.py` (allowlists `completion_vplan_id_int`) |
+| Tests | `tests/test_dashboard_v4_orders.py` |
+
+Run it:
+
+* Production, real orders: `python -m alpha.live.dashboard_v4 --enable-orders`. Without the flag, V4 stays
+  read-only: the Missing trades panel still shows, but there are no buttons and every POST gets 403.
+* Demo with a synthetic broker: `python -m alpha.live.dashboard_v4 --demo --demo-tools`. The QPI demo pod shows
+  `MSFT · BUY 17 · Missing · no broker ACK`.
+
+Deliberate differences from §7–§9 (simpler, same guards):
+
+1. **Own module and routes**, not the synthetic `ToolsActionService`: `POST /api/pods/<pod>/order/check` and
+   `/order/send`. They use the same guards: action token header, same-origin, `confirmed_bool`, JSON
+   allowlist, one-use 120 s nonce, release/state hash (`validate_current_confirmation`), and a per-pod lock.
+   The generic Tools service is untouched and stays demo-only.
+2. **One broker check per ticket, then a second read just before sending.** Changing the type, shares, limit
+   or reason in the panel does not need a new check. The send re-validates every rule on the server, reads the
+   broker again, and refuses if the position changed or an order is now open on the symbol.
+3. **MKT/LMT backend behaviour is unchanged.** The "market closed" rule for those types lives in the V4
+   service, so V3 tickets behave exactly as before. MOC is gated in the backend (new type).
+4. **Operator id** = `ALPHA_OPERATOR_ID` env var, else the OS user.
+5. **LIVE pods only**: V4 resolves only enabled LIVE targets. The PAPER-first check in §12.3 therefore needs a
+   V4 instance pointed at a PAPER releases root, or one deliberately small LIVE ticket.
+6. A shared account hides the panel instead of showing a reason line.
+
+Not covered by automated tests: `orders.js` has no Node unit test. It was exercised in the browser on the demo:
+open, type switch, shares edit, panel kept across the 15 s refresh, send, New order with SELL and a reason.
+
 ## 13. Out of scope for v1
 
 Batch "complete all" · next-day MOO ticket · LOC / limit-on-close · automatic completion without the operator ·

@@ -141,6 +141,15 @@ def create_demo_app(*, demo_tools_bool=False, console_appender_bool=False, demo_
         # Only the interactive demo grows its console; tests keep a fixed file.
         from alpha.live.dashboard_v4.console_demo import start_demo_console_appender
         start_demo_console_appender(provider_obj, demo_now_ts)
+    order_kwargs_dict = {}
+    if demo_tools_bool:
+        # The demo order panel uses a synthetic broker and a temporary event log.
+        import tempfile
+        from alpha.live.dashboard_v4.orders_demo import DemoOrderBroker
+        log_path_str = tempfile.NamedTemporaryFile(prefix="v4_demo_orders_", suffix=".jsonl", delete=False).name
+        broker_obj = DemoOrderBroker(provider_obj)
+        order_kwargs_dict = {"orders_enabled_bool": True, "order_broker_factory_fn": lambda release_obj: broker_obj,
+            "order_log_path_str": log_path_str}
     return create_app(provider_obj, demo_bool=True, demo_tools_bool=demo_tools_bool,
                       workspace_snapshot_fn=workspace_snapshot_tuple,
-                      operations_workspace_fn=operations_workspace_dict, now_fn=demo_now_ts)
+                      operations_workspace_fn=operations_workspace_dict, now_fn=demo_now_ts, **order_kwargs_dict)
