@@ -4,11 +4,15 @@ import os
 import json
 import sqlite3
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
+from types import SimpleNamespace
 
 from alpha.live import scheduler_utils, strategy_host
+from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR
+from alpha.live.daily_reconcile import DAILY_TERMINAL_STATUS_SET, is_daily_reconcile_release_bool
+from alpha.live.guarded_dispatch import moo_dispatch_deadline_ts
 from alpha.live.execution_engine import (
     build_broker_order_request_list_from_vplan,
     build_vplan,
@@ -19,7 +23,7 @@ from alpha.live.logging_utils import (
     build_pod_trace_context_dict,
     log_pod_trace_event,
 )
-from alpha.live.models import DecisionPlan, LiveRelease, PodState, VPlan
+from alpha.live.models import DecisionPlan, LivePriceSnapshot, LiveRelease, PodState, VPlan
 from alpha.live.norgate_snapshot_sync import ensure_norgate_snapshots_for_live_tick
 from alpha.live.release_manifest import (
     account_route_placeholder_bool,
@@ -301,6 +305,7 @@ def inspect_persisted_lifecycle_read_only_dict(
     db_path_str: str | None,
     pod_id_str: str,
     as_of_ts: datetime,
+    release_obj: LiveRelease | None = None,
 ) -> dict[str, object]:
     if not db_path_str:
         return {
@@ -335,16 +340,23 @@ def inspect_persisted_lifecycle_read_only_dict(
         }
         latest_decision_plan_row_obj = None
         latest_vplan_row_obj = None
+        prior_active_vplan_row_obj = None
         if "decision_plan" in table_name_set:
+            decision_column_set = {
+                row_obj[1] for row_obj in connection_obj.execute("PRAGMA table_info(decision_plan)")
+            }
+            metadata_column_str = ("snapshot_metadata_json_str" if "snapshot_metadata_json_str" in decision_column_set
+                else "'{}' AS snapshot_metadata_json_str")
             latest_decision_plan_row_obj = connection_obj.execute(
-                """
+                f"""
                 SELECT
                     decision_plan_id_int,
                     status_str,
                     signal_timestamp_str,
                     submission_timestamp_str,
                     target_execution_timestamp_str,
-                    execution_policy_str
+                    execution_policy_str,
+                    {metadata_column_str}
                 FROM decision_plan
                 WHERE pod_id_str = ?
                 ORDER BY decision_plan_id_int DESC
@@ -353,8 +365,17 @@ def inspect_persisted_lifecycle_read_only_dict(
                 (pod_id_str,),
             ).fetchone()
         if "vplan" in table_name_set:
+            current_decision_bool = (
+                release_obj is not None and is_daily_reconcile_release_bool(release_obj)
+                and latest_decision_plan_row_obj is not None
+            )
+            decision_filter_str = "AND decision_plan_id_int = ?" if current_decision_bool else ""
+            vplan_parameter_tuple = (
+                (pod_id_str, latest_decision_plan_row_obj["decision_plan_id_int"])
+                if current_decision_bool else (pod_id_str,)
+            )
             latest_vplan_row_obj = connection_obj.execute(
-                """
+                f"""
                 SELECT
                     vplan_id_int,
                     decision_plan_id_int,
@@ -365,10 +386,20 @@ def inspect_persisted_lifecycle_read_only_dict(
                     execution_policy_str
                 FROM vplan
                 WHERE pod_id_str = ?
+                  {decision_filter_str}
                 ORDER BY vplan_id_int DESC
                 LIMIT 1
                 """,
-                (pod_id_str,),
+                vplan_parameter_tuple,
+            ).fetchone()
+
+        if "vplan" in table_name_set and current_decision_bool:
+            prior_active_vplan_row_obj = connection_obj.execute(
+                """SELECT vplan_id_int, decision_plan_id_int, status_str
+                   FROM vplan WHERE pod_id_str = ? AND decision_plan_id_int <> ?
+                   AND status_str IN ('ready','submitting','submitted','parked','blocked','expired')
+                   ORDER BY vplan_id_int DESC LIMIT 1""",
+                (pod_id_str, latest_decision_plan_row_obj["decision_plan_id_int"]),
             ).fetchone()
 
     latest_decision_plan_dict: dict[str, object] = (
@@ -377,6 +408,15 @@ def inspect_persisted_lifecycle_read_only_dict(
     latest_vplan_dict: dict[str, object] = (
         {} if latest_vplan_row_obj is None else dict(latest_vplan_row_obj)
     )
+    if prior_active_vplan_row_obj is not None:
+        return {
+            "db_path_str": str(db_path_obj), "db_exists_bool": True,
+            "active_lifecycle_bool": True, "expired_lifecycle_bool": False,
+            "latest_decision_plan_dict": latest_decision_plan_dict,
+            "latest_vplan_dict": latest_vplan_dict,
+            "prior_active_vplan_dict": dict(prior_active_vplan_row_obj),
+            "reason_code_str": "persisted_prior_daily_cycle_pending",
+        }
     active_decision_status_set = {"planned", "vplan_ready", "submitted"}
     active_vplan_status_set = {"ready", "submitting", "submitted"}
     active_decision_bool = (
@@ -385,8 +425,18 @@ def inspect_persisted_lifecycle_read_only_dict(
     active_vplan_bool = (
         str(latest_vplan_dict.get("status_str") or "") in active_vplan_status_set
     )
+    daily_cycle_bool = release_obj is not None and is_daily_reconcile_release_bool(release_obj)
+    if daily_cycle_bool:
+        active_decision_bool = bool(latest_decision_plan_dict) and str(
+            latest_decision_plan_dict.get("status_str") or ""
+        ) not in {*DAILY_TERMINAL_STATUS_SET, "superseded"}
+        active_vplan_bool = str(latest_vplan_dict.get("status_str") or "") in {
+            "ready", "submitting", "submitted", "parked", "blocked", "expired"
+        }
     active_lifecycle_bool = active_decision_bool or active_vplan_bool
 
+    daily_reason_str = ""
+    daily_detail_dict: dict[str, object] = {}
     expired_lifecycle_bool = False
     lifecycle_row_dict = latest_vplan_dict if active_vplan_bool else latest_decision_plan_dict
     if active_lifecycle_bool:
@@ -394,15 +444,71 @@ def inspect_persisted_lifecycle_read_only_dict(
             target_execution_timestamp_ts = datetime.fromisoformat(
                 str(lifecycle_row_dict["target_execution_timestamp_str"])
             )
-            expired_lifecycle_bool = scheduler_utils.is_execution_window_expired_bool(
-                str(lifecycle_row_dict["execution_policy_str"]),
-                target_execution_timestamp_ts,
-                as_of_ts,
-            )
+            if daily_cycle_bool:
+                if (not latest_decision_plan_dict
+                        or (latest_vplan_dict and latest_vplan_dict["decision_plan_id_int"]
+                            != latest_decision_plan_dict["decision_plan_id_int"])):
+                    raise ValueError("Daily lifecycle requires matching saved decision and VPlan.")
+                if (target_execution_timestamp_ts.tzinfo is None or as_of_ts.tzinfo is None
+                        or str(lifecycle_row_dict["execution_policy_str"]) != "next_open_moo"
+                        or release_obj.execution_policy_str != "next_open_moo"):
+                    raise ValueError("Daily lifecycle requires aware timestamps and its MOO policy.")
+                metadata_dict = json.loads(str(latest_decision_plan_dict.get("snapshot_metadata_json_str") or "{}"))
+                dispatch_dict = metadata_dict.get("opening_dispatch_result_dict", {})
+                sent_bool = (
+                    str(latest_vplan_dict.get("status_str") or "") in {"submitting", "submitted", "parked"}
+                    or (not latest_vplan_dict and str(
+                        latest_decision_plan_dict.get("status_str") or "") in {"submitting", "submitted"})
+                )
+                if dispatch_dict and dispatch_dict.get("reason_code_str") != "dispatch_retry_pending":
+                    attempted_key_list = dispatch_dict.get("attempted_request_key_list", [])
+                    if not isinstance(attempted_key_list, list):
+                        raise ValueError("Daily dispatch evidence must contain request-key lists.")
+                    sent_bool = bool(attempted_key_list)
+                session_date_obj = scheduler_utils.to_market_timestamp_ts(
+                    target_execution_timestamp_ts, release_obj.session_calendar_id_str).date()
+                close_timestamp_ts = scheduler_utils.get_session_close_timestamp_ts(
+                    session_date_obj, release_obj.session_calendar_id_str)
+                deadline_timestamp_ts = moo_dispatch_deadline_ts(SimpleNamespace(
+                    target_execution_timestamp_ts=target_execution_timestamp_ts))
+                uncertain_send_bool = str(latest_vplan_dict.get("status_str") or "") == "submitting"
+                daily_detail_dict = {
+                    "daily_cycle_bool": True,
+                    "opening_attempted_or_uncertain_bool": sent_bool,
+                    "submission_uncertain_bool": uncertain_send_bool,
+                    "no_order_bool": metadata_dict.get("no_order_bool") is True,
+                    "target_session_close_timestamp_str": close_timestamp_ts.isoformat(),
+                    "overdue_timestamp_str": (close_timestamp_ts + timedelta(hours=1)).isoformat(),
+                }
+                # *** CRITICAL *** the opening-send deadline is not expiry of an
+                # attempted daily cycle. Settlement needs a fresh broker refresh
+                # after the exchange close; never preview replacement orders.
+                if sent_bool or metadata_dict.get("no_order_bool") is True:
+                    if as_of_ts >= close_timestamp_ts + timedelta(hours=1):
+                        daily_reason_str = "daily_cycle_overdue"
+                    elif as_of_ts >= close_timestamp_ts:
+                        daily_reason_str = "daily_cycle_awaiting_close_reconciliation"
+                    elif uncertain_send_bool:
+                        daily_reason_str = "daily_cycle_submission_uncertain"
+                    else:
+                        daily_reason_str = "daily_cycle_in_progress"
+                else:
+                    expired_lifecycle_bool = (
+                        as_of_ts >= deadline_timestamp_ts
+                        or str(latest_decision_plan_dict.get("status_str") or "") in {"blocked", "expired"}
+                    )
+            else:
+                expired_lifecycle_bool = scheduler_utils.is_execution_window_expired_bool(
+                    str(lifecycle_row_dict["execution_policy_str"]),
+                    target_execution_timestamp_ts,
+                    as_of_ts,
+                )
         except Exception:
             expired_lifecycle_bool = True
 
-    if expired_lifecycle_bool:
+    if daily_reason_str:
+        reason_code_str = daily_reason_str
+    elif expired_lifecycle_bool:
         reason_code_str = "persisted_lifecycle_expired"
     elif active_lifecycle_bool:
         reason_code_str = "persisted_lifecycle_active"
@@ -417,6 +523,7 @@ def inspect_persisted_lifecycle_read_only_dict(
         "latest_decision_plan_dict": latest_decision_plan_dict,
         "latest_vplan_dict": latest_vplan_dict,
         "reason_code_str": reason_code_str,
+        **daily_detail_dict,
     }
 
 
@@ -646,6 +753,28 @@ def _select_single_enabled_release_obj(
 
 def _persisted_lifecycle_result_dict(lifecycle_dict: dict[str, object]) -> dict[str, object]:
     reason_code_str = str(lifecycle_dict.get("reason_code_str") or "")
+    if reason_code_str == "persisted_prior_daily_cycle_pending":
+        return _component_result_dict(
+            component_name_str="persisted_lifecycle", status_str=DOCTOR_BLOCK_STR,
+            reason_code_str=reason_code_str,
+            detail_str="An older daily cycle still has an active VPlan. Doctor will not preview replacement orders.",
+            extra_detail_dict={"persisted_lifecycle_dict": dict(lifecycle_dict)},
+        )
+    if reason_code_str in {
+        "daily_cycle_in_progress", "daily_cycle_submission_uncertain",
+        "daily_cycle_awaiting_close_reconciliation", "daily_cycle_overdue",
+    }:
+        return _component_result_dict(
+            component_name_str="persisted_lifecycle",
+            status_str=DOCTOR_BLOCK_STR if reason_code_str == "daily_cycle_overdue" else DOCTOR_WAIT_STR,
+            reason_code_str=reason_code_str,
+            detail_str=(
+                "Daily cycle is overdue: target exchange close plus one hour has passed."
+                if reason_code_str == "daily_cycle_overdue" else
+                "Daily cycle remains pending until fresh after-close reconciliation."
+            ) + " Doctor will not preview a replacement or authorize resubmission.",
+            extra_detail_dict={"persisted_lifecycle_dict": dict(lifecycle_dict)},
+        )
     if reason_code_str == "persisted_lifecycle_expired":
         return _component_result_dict(
             component_name_str="persisted_lifecycle",
@@ -961,6 +1090,7 @@ def _compute_doctor_verdict_impl(
         db_path_str=effective_db_path_str,
         pod_id_str=release_obj.pod_id_str,
         as_of_ts=as_of_ts,
+        release_obj=release_obj,
     )
     detail_dict["persisted_lifecycle_dict"] = dict(lifecycle_dict)
     lifecycle_result_dict = _persisted_lifecycle_result_dict(lifecycle_dict)
@@ -1058,7 +1188,10 @@ def _compute_doctor_verdict_impl(
         return detail_dict
 
     detail_dict["decision_plan_dict"] = _decision_plan_dict(decision_plan_obj)
-    if scheduler_utils.is_execution_window_expired_bool(
+    if (
+        is_daily_reconcile_release_bool(release_obj)
+        and as_of_ts >= moo_dispatch_deadline_ts(decision_plan_obj)
+    ) or scheduler_utils.is_execution_window_expired_bool(
         decision_plan_obj.execution_policy_str,
         decision_plan_obj.target_execution_timestamp_ts,
         as_of_ts,
@@ -1291,11 +1424,25 @@ def _compute_doctor_verdict_impl(
         broker_position_map_dict=broker_snapshot_obj.position_amount_map,
     )
     try:
-        live_price_snapshot_obj = broker_adapter_obj.get_live_price_snapshot(
-            release_obj.account_route_str,
-            touched_asset_list,
-            execution_policy_str=decision_plan_obj.execution_policy_str,
-        )
+        if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
+            # *** CRITICAL *** match the runner's frozen Close_T price contract.
+            # Later quotes must neither resize nor block CORE5's frozen targets.
+            close_price_dict = dict(decision_plan_obj.snapshot_metadata_dict["sizing_close_price_map_dict"])
+            live_price_snapshot_obj = LivePriceSnapshot(
+                account_route_str=decision_plan_obj.account_route_str,
+                snapshot_timestamp_ts=decision_plan_obj.signal_timestamp_ts,
+                price_source_str="core5.frozen_close_t",
+                asset_reference_price_map=close_price_dict,
+                asset_reference_source_map_dict={
+                    asset_str: "core5.frozen_close_t" for asset_str in close_price_dict
+                },
+            )
+        else:
+            live_price_snapshot_obj = broker_adapter_obj.get_live_price_snapshot(
+                release_obj.account_route_str,
+                touched_asset_list,
+                execution_policy_str=decision_plan_obj.execution_policy_str,
+            )
     except Exception as exc:
         component_result_dict_list.append(
             _component_result_dict(
