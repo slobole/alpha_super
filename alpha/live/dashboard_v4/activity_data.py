@@ -229,6 +229,9 @@ def _event_dict(record_dict, identity_dict, *, source_str, as_of_ts, from_date_s
     quantity_int = field_dict.get("quantity_int")
     if type(quantity_int) is int and 0 < quantity_int <= 1000000000:
         payload_dict["quantity_int"] = quantity_int
+    completion_obj = field_dict.get("completion_vplan_id_int")
+    if type(completion_obj) is int and 0 < completion_obj <= 2147483647:
+        payload_dict["completion_vplan_id_int"] = completion_obj
     if related_set:
         payload_dict["related_pod_id_list"] = sorted(related_set)
     for field_str in ("decision_plan_id_int", "vplan_id_int"):

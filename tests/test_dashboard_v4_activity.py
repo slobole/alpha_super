@@ -110,9 +110,10 @@ def test_unknown_warnings_failures_and_alert_operator_families_stay_individual()
 
 
 def test_manual_order_messages_are_operator_records_not_fill_claims():
-    for code_str, expected_str in (("manual_order_submit_requested", "Manual order requested."),
-            ("manual_order_submit_completed", "Manual order submission recorded."),
-            ("manual_order_submit_failed", "Manual order submission failed.")):
+    # One plain sentence with the order itself (2026-10-16); "sent" is never a fill claim.
+    for code_str, expected_str in (("manual_order_submit_requested", "Manual MKT order requested: SELL 2 GIS."),
+            ("manual_order_submit_completed", "Manual MKT order sent: SELL 2 GIS."),
+            ("manual_order_submit_failed", "Manual MKT order failed: SELL 2 GIS.")):
         row_dict = _page_dict([_event_dict(code_str, level_str="warning", payload_dict={
             "asset_str": "GIS", "side_str": "SELL", "quantity_int": 2, "ticket_id_str": "ticket-1",
             "broker_order_type_str": "MKT", "operator_id_str": "private-operator", "reason_str": "private free text"})])["row_list"][0]

@@ -119,6 +119,17 @@ def _event_row_dict(event_dict, pod_map_dict, verified_cycle_list):
     if code_str == "operator_action_requested":
         action_str = payload_dict.get("action_name_str") or payload_dict.get("action_str")
         title_str = ACTION_LABEL_DICT.get(action_str, "Operator action") + " requested."
+    if code_str.startswith("manual_order_submit_"):
+        # "Manual MOC order sent: BUY 300 APX (completion of VPlan #412)."
+        order_type_str = payload_dict.get("broker_order_type_str")
+        order_str = " ".join(str(payload_dict.get(key_str)) for key_str in ("side_str", "quantity_int", "asset_str")
+            if payload_dict.get(key_str) not in (None, ""))
+        if order_type_str in {"MOC", "MKT", "LMT"} and order_str:
+            verb_str = {"manual_order_submit_requested": "requested", "manual_order_submit_completed": "sent",
+                "manual_order_submit_failed": "failed"}.get(code_str, "recorded")
+            vplan_obj = payload_dict.get("completion_vplan_id_int")
+            title_str = (f"Manual {order_type_str} order {verb_str}: {order_str}"
+                + (f" (completion of VPlan #{vplan_obj})" if type(vplan_obj) is int else "") + ".")
     keep_bool = False
     if code_str == "daily_cycle_reconciled":
         daily_status_str = payload_dict.get("status_str")
