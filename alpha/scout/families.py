@@ -62,6 +62,12 @@ FAMILY_DESCRIPTION_DICT: dict[str, str] = {
         "holding until recovery, paid for bearing crash risk and long-horizon mean reversion. Example: the NDX "
         "dip ladder into TQQQ."
     ),
+    "dividend_seeking_demand": (
+        "Price pressure from investors who buy stocks for their dividends ahead of predictable payments, paid by "
+        "the preference for income over equivalent capital gains. Example: the dividend month premium (Hartzmark "
+        "and Solomon 2013). Kept apart from calendar_and_flow: the flow follows each firm's own dividend calendar, "
+        "not index rebalancing or month ends."
+    ),
 }
 
 

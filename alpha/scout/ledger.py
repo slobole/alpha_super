@@ -59,6 +59,7 @@ ROW_TYPE_TUPLE = (
     "test_result",
     "vault_opening",
     "gate_result",
+    "shadow_start",
     "note",
 )
 CHAIN_FIELD_TUPLE = ("row_id_int", "utc_ts_str", "prev_row_hash_str", "row_hash_str")

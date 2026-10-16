@@ -132,15 +132,29 @@ def _vault_opening_verified(ledger, vault_opening_row_id_int: int, family_id_str
     return False
 
 
+def _shadow_start_verified(ledger, shadow_start_row_id_int: int, family_id_str: str) -> bool:
+    """The row exists in the verified chain, is a shadow start (S8), and names this family."""
+    ledger.verify()
+    for row_dict in ledger.rows("shadow_start"):
+        if row_dict.get("row_id_int") == shadow_start_row_id_int:
+            return row_dict.get("family_id_str") == family_id_str
+    return False
+
+
 def load_panel(
     name_str: str,
     snapshot_id_str: str | None = None,
     vault_opening_row_id_int: int | None = None,
     family_id_str: str | None = None,
     ledger=None,
+    shadow_start_row_id_int: int | None = None,
 ) -> Panel:
     """Load a cached panel snapshot (the latest by default), sealed at the vault unless the id of a vault-opening
-    row for the family is given and the row is in the verified ledger chain."""
+    row for the family is given and the row is in the verified ledger chain.
+
+    S8 (P8): a verified `shadow_start` row of the family also returns the full panel, because the forward period starts
+    after the registration and the strategy needs the bars before it as warm-up. Only alpha.scout.shadow passes it,
+    and it reports returns from the shadow's start date only (the bars between the seal and that date stay unreported)."""
     base_path = _panel_dir(name_str)
     if snapshot_id_str is None:
         latest_path = base_path / "latest.json"
@@ -162,6 +176,12 @@ def load_panel(
 
             ledger = Ledger()
         open_vault_bool = _vault_opening_verified(ledger, vault_opening_row_id_int, family_id_str)
+    elif shadow_start_row_id_int is not None and family_id_str is not None:
+        if ledger is None:
+            from alpha.scout.ledger import Ledger
+
+            ledger = Ledger()
+        open_vault_bool = _shadow_start_verified(ledger, shadow_start_row_id_int, family_id_str)
     panel = Panel(
         name_str=name_str, field_dict=field_dict, member_df=member_df,
         snapshot_id_str=meta_dict["snapshot_id_str"], sealed_bool=not open_vault_bool,

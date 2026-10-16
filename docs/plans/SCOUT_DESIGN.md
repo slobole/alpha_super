@@ -748,7 +748,7 @@ strategies and can start now. P3 gates each strategy only after the readiness-au
 | **P5 Strategy, luck, book and card** | S4, the three S5 gates and their diagnostics, S6, the research card, re-audition cards for TAA 3x and NDX VXN | Done 2026-10-02 (A9): cards issued; TAA 3x CANDIDATE (S3 pending), NDX VXN WATCHLIST |
 | **P6 Re-audition, classes W and X** | Retro registrations, prior-trial counts, cards for the remaining W and X strategies in section 10 order, Bench page | One card per strategy |
 | **P7 Path engine** | `engines/path.py`, gates for DV2 and HPI, then their re-audition | DV2 and HPI pass the gate; cards issued |
-| **P8 Discovery and shadow** | S7 vault opening with contamination rules, S8 monitor for new candidates, BY-FDR ledger report | First new family run end-to-end; the vault is opened only through S7 |
+| **P8 Discovery and shadow** | S7 vault opening with contamination rules, S8 monitor for new candidates, BY-FDR ledger report | Done 2026-10-16 (A20): `vault.py`, `shadow.py`, `fdr_report.py`; first new family (dividend month premium) run S0-S6 and into S8 |
 
 ## 14. Known limitations of this design
 
@@ -1213,6 +1213,57 @@ Script: `scripts/research/scout_retro_registrations_20261016/register.py`, ledge
   618 → 642, etf_short_term_reversal 250 → 295. The DSR is a WARN, not a gate, so no grade changes until a card is
   re-issued.
 - **Practice:** a study run outside Scout gets its registration in the same week, so the ledger stays complete.
+
+**A20 (2026-10-16, P8: discovery, vault, shadow, program-wide FDR).**
+Code: `alpha/scout/vault.py` (S7), `alpha/scout/shadow.py` (S8), `alpha/scout/fdr_report.py` (BY report, ledger
+helpers), `alpha/scout/specs/dividend_month.py`, `alpha/scout/specs/core5_vehicle.py`; CLI `fdr` and `shadow`.
+Scripts: `scripts/research/scout_p8_dividend_month_20261016/`. Tests: `tests/test_scout_p8.py`.
+
+- **S7 (vault).** Only a family graded CANDIDATE in the ledger can open it, once, by a `vault_opening` row written
+  before any vault bar is read. The row carries the frozen configuration and the contamination verdict: source
+  published on or after the seal, family on the seen-after-2022 list, or a retro registration in the family. Verdict:
+  net return > T-bills and vault Sharpe >= the 5th percentile of the in-sample stationary-bootstrap Sharpe (block 21)
+  for windows of the same length. A WATCHLIST or REJECTED family keeps its vault closed.
+- **S8 (shadow).** A `shadow_start` row (a new row type) freezes the configuration, a start date after the
+  registration, the expected process (saved file + SHA-256) and MinTRL. The monitor re-runs the frozen rule on the
+  newest data through a registered provider, keeps only the sessions from the start, and judges them with the live
+  pod monitor (calibrated CBI + monthly CUSUM). A verified shadow_start row also unseals the panel for its family,
+  because the rule needs the bars before the start as warm-up; only the shadow module passes it.
+- **Program-wide FDR.** `test_result` rows (one per p-value) and `station_verdict` rows (one per station). Each
+  registration has at most one primary test; a multi-component MCPT gate uses its largest component p
+  (intersection-union). The 27 re-audition MCPT p-values were back-filled as retro rows. First report (2026-10-16):
+  28 of 52 registrations have a primary p; **4 survive BY at q 0.05** (EOM, DV2, DV2 Nasdaq-100, DV2 industry ETF).
+  TAA 3x (q 0.12), CORE5 (q 0.26) and every NDX pod do not. MCPT p has a floor of 1/1001, which caps q near 0.03 at
+  this m; a borderline gate (Compass p 0.003-0.005, q 0.07) needs more permutations before it is read as a miss.
+- **First discovery family: dividend month premium** (Hartzmark and Solomon 2013; new family dividend_seeking_demand,
+  clean vault; row 52, registered before any result). S1 PASS. S3 +5.1 bp a month on total returns, t 1.07 (WATCHLIST),
+  Nasdaq-100 +52 bp, t 1.83. S4 **REJECTED**: the dollar-neutral pod earns +0.9% a year with no frictions (Sharpe 0.21),
+  but turns over 32x a year; costs take it to -0.3%, the 25% withholding on long dividends and 1% borrow to -2.8%
+  (Sharpe -0.56). MCPT p 0.071, slot P 0.02. The premium exists in S&P 500 total returns but is smaller than the cost
+  of harvesting it monthly. S7 refused the vault (graded REJECTED), as designed; the family's vault stays unread.
+- **Bug found before reading results:** the panel's Dividend column is booked on the last cum-dividend session (the
+  weights engine credits it before the next open). A total return must add it on the ex-date (the next session);
+  `dividend_month.ex_dividend_df` shifts it. After the fix the panel's daily total returns match Norgate TOTALRETURN
+  within 6 bp on every day checked. Any later study that reads `Dividend` from a panel must do the same.
+- **First shadow:** the CORE5 vehicle study's forward line (row 45): CORE5 with QQQ in the equity sleeve on its own
+  signal. Start 2026-10-17, expected Sharpe 1.26 (raw, seen history), MinTRL 21 months. Status NO_DATA until November.
+- **Review fixes (independent read-only review, same day):**
+  - A shadow_start row unseals its family's panel. S7 therefore counts it as contamination, and a CANDIDATE of a family
+    whose vault is still closed must run S7 before S8.
+  - Providers return only the sessions from the start date.
+  - A start must come after both the registration and the day the row is written.
+  - A refused second shadow can no longer overwrite the first one's expected file.
+  - The vault needs the exact grade CANDIDATE ("CANDIDATE (S3 pending)" is refused).
+  - Leading warm-up zeros are trimmed from the in-sample bootstrap.
+  - The S7 verdict is tied to its opening row, once per family.
+  - The first primary p of a registration is final (a second is refused, so a re-run cannot replace it).
+  - An empty station verdict is refused.
+  - The review confirmed:
+    - no look-ahead in the dividend signal (a truncation test over 8 configs × 2 offsets);
+    - the ex-date shift (AAPL dividend booked 2021-08-05, ex-date 08-06);
+    - consistent MCPT signal keys, a correct BY, and no vault leakage into the S7 yardstick.
+- **Not built (later):** the megacap tilt sleeve and the DV2 limit entries have no Scout spec or need real fills, so
+  they have no shadow yet. The monthly parity check of S8 needs a paper-traded shadow.
 
 **Not adopted from the critique.** One correction: the critique said the kill rule closes gap G-006.
 It does not. G-006's missing circuit breaker is about **repeated reconciliation failures**, not about

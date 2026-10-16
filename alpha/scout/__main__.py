@@ -7,6 +7,8 @@
                                             # live pod health report (report only)
     uv run python -m alpha.scout gate taa_3x [--fresh]   # identity gate: Scout spec vs the real engine
     uv run python -m alpha.scout panel "S&P 500"          # build / refresh a point-in-time panel cache
+    uv run python -m alpha.scout fdr                      # program-wide Benjamini-Yekutieli report (P8)
+    uv run python -m alpha.scout shadow                   # S8 shadow monitor for every shadow_start row (P8)
 """
 
 from __future__ import annotations
@@ -43,7 +45,7 @@ def _ledger_command(command_str: str, ledger_path_str: str) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m alpha.scout")
-    parser.add_argument("command", choices=("verify", "summary", "health", "gate", "panel"))
+    parser.add_argument("command", choices=("verify", "summary", "health", "gate", "panel", "fdr", "shadow"))
     parser.add_argument("spec", nargs="?", default=None, help="gate: a GATED_SPEC_DICT name (taa_3x, taa_3x_1n, taa_lin_1n_qqq, taa_2x_1n_qld, taa_nobtal_2x_1n_qld, taa_nobtal_2x_1n_sso, ndx_vxn, ndx_atr, ndx_natr20, ndx_natr20_vxn, compass, compass_qqq); panel: index name, e.g. \"S&P 500\"")
     parser.add_argument("--fresh", action="store_true", help="gate: run the engine now instead of the newest saved run")
     parser.add_argument("--ledger", default=str(DEFAULT_LEDGER_PATH), help="ledger path (default: main-checkout ledger)")
@@ -54,6 +56,26 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command in ("verify", "summary"):
         return _ledger_command(args.command, args.ledger)
+    if args.command == "fdr":
+        from datetime import date
+
+        from alpha.scout.fdr_report import write_report
+        from alpha.scout.ledger import MAIN_CHECKOUT_ROOT_PATH
+
+        output_dir_path = Path(args.out) if args.out else MAIN_CHECKOUT_ROOT_PATH / "results" / "scout" / "fdr" / date.today().isoformat()
+        table_dict = write_report(Ledger(args.ledger), output_dir_path)
+        discovery_int = sum(row["discovery_bool"] for row in table_dict["rows"])
+        print(f"{table_dict['test_count_int']} primary tests of {table_dict['registration_count_int']} registrations; "
+              f"{discovery_int} BY discoveries at q {table_dict['q_float']}. Report: {output_dir_path / 'fdr_report.md'}")
+        return 0
+    if args.command == "shadow":
+        from alpha.scout.shadow import run_shadow_monitor
+
+        output_dir_path, report_list = run_shadow_monitor(Ledger(args.ledger), output_dir_path=Path(args.out) if args.out else None)
+        for report_dict in report_list:
+            print(f"{report_dict['pod_id_str']:<40} {report_dict['status_str']}")
+        print(f"Report: {output_dir_path / 'shadow.md'}")
+        return 0
     if args.command == "panel":
         from alpha.scout.panel import build_panel
 
