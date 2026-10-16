@@ -748,7 +748,7 @@ strategies and can start now. P3 gates each strategy only after the readiness-au
 | **P5 Strategy, luck, book and card** | S4, the three S5 gates and their diagnostics, S6, the research card, re-audition cards for TAA 3x and NDX VXN | Done 2026-10-02 (A9): cards issued; TAA 3x CANDIDATE (S3 pending), NDX VXN WATCHLIST |
 | **P6 Re-audition, classes W and X** | Retro registrations, prior-trial counts, cards for the remaining W and X strategies in section 10 order, Bench page | One card per strategy |
 | **P7 Path engine** | `engines/path.py`, gates for DV2 and HPI, then their re-audition | DV2 and HPI pass the gate; cards issued |
-| **P8 Discovery and shadow** | S7 vault opening with contamination rules, S8 monitor for new candidates, BY-FDR ledger report | Done 2026-10-16 (A20): `vault.py`, `shadow.py`, `fdr_report.py`; first new family (dividend month premium) run S0-S6 and into S8 |
+| **P8 Discovery and shadow** | S7 vault opening with contamination rules, S8 monitor for new candidates, BY-FDR ledger report | Done 2026-10-16 (A20): `vault.py`, `shadow.py`, `fdr_report.py`; first new family (dividend month premium) run S0-S6 and into S8. A21: every registration graded in the ledger, the four FDR survivors in S8, a daily run |
 
 ## 14. Known limitations of this design
 
@@ -1264,6 +1264,62 @@ Scripts: `scripts/research/scout_p8_dividend_month_20261016/`. Tests: `tests/tes
     - consistent MCPT signal keys, a correct BY, and no vault leakage into the S7 yardstick.
 - **Not built (later):** the megacap tilt sleeve and the DV2 limit entries have no Scout spec or need real fills, so
   they have no shadow yet. The monthly parity check of S8 needs a paper-traded shadow.
+
+**A21 (2026-10-16, ledger completeness before the Bench page).**
+Scripts: `scripts/research/scout_ledger_completeness_20261016/` (`register.py`, `backfill_verdicts.py`,
+`start_shadows.py`, `setup_scout_daily_task.ps1`). Code: `alpha/scout/daily.py`, `alpha/scout/specs/reaudition_shadow.py`,
+the `carry_premium` family, `record_station_verdict(..., retro_bool, source_str)`, an ERROR row in the shadow monitor,
+CLI `daily`. Tests: `tests/test_scout_ledger_completeness.py`.
+
+- **Why:** a Bench page can only show what the ledger holds. Four gaps made it unreadable: studies missing from the
+  ledger, grades only in HTML, nothing running on its own, and no forward line for the pods that survive the FDR.
+- **Gap 1, nine studies of 2026-10-16 registered** (rows 120-128, retro). `prior_trials_int` = each study's own
+  `actual_total_variants`. The three-momentum study is split: its commodity lane (259, tactical_asset_allocation) and its
+  equity lanes (821, equity_cross_sectional_momentum), so the 1,080 evaluations count once. The two data-blocked intakes
+  count 0. New family `carry_premium` (commodity curve carry): no existing family has a curve-shape mechanism.
+- **Gap 3, every registration has a grade** (rows 129-295). The 27 re-auditions get S3 (when run), S4, S5, S6 and grade
+  rows from their saved bundles, through the card's own `grade_str` (all 28 cards checked: the printed grade equals the
+  bundle's). The other 33 get one grade row from their registered rule and report. A grade's first word is one of
+  CANDIDATE, WATCHLIST, REJECTED, NOT_TESTED, DIAGNOSTIC (now enforced); a bracketed qualifier says where it comes from:
+  "(no card)" for a Scout study that ran its own rule but no S4-S6 card, "(outside Scout)" for a retro study. None of
+  them is CANDIDATE, and only the exact word CANDIDATE opens the vault. Every back-filled row carries `retro_bool` and
+  its source file.
+- **Gap 5, the four BY-FDR survivors are in S8** (rows 298-301, start 2026-10-17, benchmark Sharpe 0):
+
+| Pod | Expected Sharpe (seen history) | MinTRL |
+|---|---:|---:|
+| EOM | 1.09 | 26 months |
+| DV2 (S&P 500) | 0.97 | 35 months |
+| DV2 Nasdaq-100 | 0.75 | 58 months |
+| DV2 industry ETF | 1.18 | 23 months |
+
+  - The provider re-runs each re-audition family's live configuration on the newest Norgate data and refuses if the
+    spec's live configuration ever changes (a changed rule is a new registration). Before each start the provider's
+    history was checked against the card's saved S4 series: EOM, DV2 Nasdaq-100 and DV2 industry ETF are identical;
+    DV2 S&P 500 differs on 9 sessions of March 2019 (a Norgate revision of one stock; Sharpe 0.975 vs 0.976).
+  - **EOM is CANDIDATE, so S7 ran first** (row 296-297). calendar_and_flow is on the seen-after-2022 list and has retro
+    registrations, so the result is CONTAMINATED, a diagnostic only: 2023-01-03 to 2026-10-15, +27.0% against T-bills
+    +18.0%, Sharpe 0.74 against a bootstrap floor of 0.42 (it would pass if it were clean). This uses the family's one
+    vault opening; a later calendar_and_flow vault would have been contaminated for the same reasons.
+  - The shadows are simulated and research only: no paper route, no live path, no order.
+- **Gap 2, one daily command** (`python -m alpha.scout daily`): ledger chain, every shadow, the live pod health report,
+  the BY report; each part isolated, one `results/scout/daily/<date>/daily_status.json` (+ .md) for the Bench page.
+  Windows task `ScoutDailyResearch` on the workstation, 07:30, StartWhenAvailable, no overlap, 90-minute cap.
+  **Limit:** the live Flex store is on the VPS. On the workstation, health reads the Flex XML files in Downloads, so it
+  reports STALE until fresh Flex data reaches this machine. Copying the Flex store from the VPS, or running health
+  there, touches the live host and is the owner's decision.
+- **Found, not changed:** 8 identity-gate tests fail on 2026-10-16 against engine runs saved on 2026-09-30 / 10-01,
+  all from data, none from this amendment (327 other Scout and stats tests pass):
+  - NDX VXN and NDX ATR: weights only. Norgate renamed WBD to WBD-202610, so the saved run and fresh data label the
+    same holding differently (returns identical to 7e-16).
+  - HPI vote and HPI IBS-RSI: Norgate's LIN history changed (2004-2005 trades differ, max daily return gap 0.9%).
+  - Compass (4 tests): "Incomplete Inflation Compass decision after warmup" on 2026-10-15, the latest inflation input
+    is not published yet.
+  The saved engine runs need refreshing (NDX, HPI) and the Compass loader a latest-day rule; strategy code is untouched
+  here, and NDX is a live path, so that is a separate change.
+- **Practice:** the knowledge base and the ledger still have no automatic link. Until one exists, a study added to the
+  knowledge base gets its retro registration the same day (A19 said the same week; this session found the nine on the
+  day they were written).
 
 **Not adopted from the critique.** One correction: the critique said the kill rule closes gap G-006.
 It does not. G-006's missing circuit breaker is about **repeated reconciliation failures**, not about

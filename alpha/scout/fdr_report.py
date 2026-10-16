@@ -59,8 +59,17 @@ def record_test_result(ledger: Ledger, registration_id_str: str, test_id_str: st
     }, precondition_fn=precondition)
 
 
-def record_station_verdict(ledger: Ledger, registration_id_str: str, station_str: str, check_list: list) -> dict:
-    """One station_verdict row: the station's check rows (name, verdict, detail) and its overall verdict."""
+GRADE_WORD_TUPLE = ("CANDIDATE", "WATCHLIST", "REJECTED", "NOT_TESTED", "DIAGNOSTIC")
+
+
+def record_station_verdict(ledger: Ledger, registration_id_str: str, station_str: str, check_list: list,
+                           retro_bool: bool = False, source_str: str = "") -> dict:
+    """One station_verdict row: the station's check rows (name, verdict, detail) and its overall verdict.
+
+    `retro_bool` marks a verdict back-filled from an earlier saved result (`source_str` names it). A grade's first word
+    is one of GRADE_WORD_TUPLE; a qualifier may follow in brackets, e.g. "CANDIDATE (S3 pending)" or
+    "REJECTED (outside Scout)". Only the exact "CANDIDATE" opens the vault (alpha.scout.vault).
+    """
     if station_str not in STATION_TUPLE:
         raise ValueError(f"station_str must be one of {STATION_TUPLE}.")
     if not check_list:
@@ -74,10 +83,15 @@ def record_station_verdict(ledger: Ledger, registration_id_str: str, station_str
         overall_str = "INFO"
     else:
         overall_str = verdict_list[0] if station_str == "grade" else "PASS"
-    return ledger.append("station_verdict", {
+    if station_str == "grade" and overall_str.split(" ")[0] not in GRADE_WORD_TUPLE:
+        raise ValueError(f"A grade must start with one of {GRADE_WORD_TUPLE}; got {overall_str!r}.")
+    payload_dict = {
         "registration_id_str": registration_id_str, "station_str": station_str, "verdict_str": overall_str,
         "check_list": [[str(n), str(v), str(d)] for n, v, d in check_list],
-    }, precondition_fn=_registration_precondition(registration_id_str))
+    }
+    if retro_bool:
+        payload_dict.update({"retro_bool": True, "source_str": str(source_str)})
+    return ledger.append("station_verdict", payload_dict, precondition_fn=_registration_precondition(registration_id_str))
 
 
 def fdr_table(ledger: Ledger, q_float: float = FDR_Q_FLOAT) -> dict:

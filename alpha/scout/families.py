@@ -68,6 +68,12 @@ FAMILY_DESCRIPTION_DICT: dict[str, str] = {
         "and Solomon 2013). Kept apart from calendar_and_flow: the flow follows each firm's own dividend calendar, "
         "not index rebalancing or month ends."
     ),
+    "carry_premium": (
+        "Holding the assets whose price is expected to rise if nothing changes (futures roll yield, interest-rate "
+        "differential), paid for bearing crash risk and supplying insurance to hedgers. Example: commodity curve carry "
+        "(Koijen, Moskowitz, Pedersen and Vrugt 2018). Kept apart from momentum and trend: the signal is the curve "
+        "shape at T, not past returns."
+    ),
 }
 
 

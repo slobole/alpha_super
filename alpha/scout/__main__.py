@@ -9,6 +9,7 @@
     uv run python -m alpha.scout panel "S&P 500"          # build / refresh a point-in-time panel cache
     uv run python -m alpha.scout fdr                      # program-wide Benjamini-Yekutieli report (P8)
     uv run python -m alpha.scout shadow                   # S8 shadow monitor for every shadow_start row (P8)
+    uv run python -m alpha.scout daily                    # ledger check + shadows + pod health + FDR, one status file (A21)
 """
 
 from __future__ import annotations
@@ -45,7 +46,7 @@ def _ledger_command(command_str: str, ledger_path_str: str) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m alpha.scout")
-    parser.add_argument("command", choices=("verify", "summary", "health", "gate", "panel", "fdr", "shadow"))
+    parser.add_argument("command", choices=("verify", "summary", "health", "gate", "panel", "fdr", "shadow", "daily"))
     parser.add_argument("spec", nargs="?", default=None, help="gate: a GATED_SPEC_DICT name (taa_3x, taa_3x_1n, taa_lin_1n_qqq, taa_2x_1n_qld, taa_nobtal_2x_1n_qld, taa_nobtal_2x_1n_sso, ndx_vxn, ndx_atr, ndx_natr20, ndx_natr20_vxn, compass, compass_qqq); panel: index name, e.g. \"S&P 500\"")
     parser.add_argument("--fresh", action="store_true", help="gate: run the engine now instead of the newest saved run")
     parser.add_argument("--ledger", default=str(DEFAULT_LEDGER_PATH), help="ledger path (default: main-checkout ledger)")
@@ -76,6 +77,16 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{report_dict['pod_id_str']:<40} {report_dict['status_str']}")
         print(f"Report: {output_dir_path / 'shadow.md'}")
         return 0
+    if args.command == "daily":
+        from alpha.scout.daily import run_daily
+
+        output_dir_path, status_dict = run_daily(
+            flex_db_path=Path(args.flex_db) if args.flex_db else None,
+            flex_xml_path_list=[Path(path_str) for path_str in args.flex_xml] if args.flex_xml else None,
+            ledger=Ledger(args.ledger),
+        )
+        print((output_dir_path / "daily_status.md").read_text(encoding="utf-8"))
+        return 0 if status_dict["ok_bool"] else 1
     if args.command == "panel":
         from alpha.scout.panel import build_panel
 

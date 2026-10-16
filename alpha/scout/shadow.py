@@ -43,6 +43,11 @@ SESSIONS_PER_MONTH_FLOAT = 21.0
 SHADOW_PROVIDER_DICT: dict[str, str] = {
     "dividend_month_premium_20261016": "alpha.scout.specs.dividend_month:shadow_daily_return_ser",
     "core5_equity_vehicle_v2_retro_20261011": "alpha.scout.specs.core5_vehicle:shadow_daily_return_ser",
+    # The four BY-FDR survivors of 2026-10-16 (design A21): live configuration of the re-audition family.
+    "eom_reaudition_20261002": "alpha.scout.specs.reaudition_shadow:shadow_daily_return_ser",
+    "dv2_reaudition_20261002": "alpha.scout.specs.reaudition_shadow:shadow_daily_return_ser",
+    "dv2_ndx_reaudition_20261002": "alpha.scout.specs.reaudition_shadow:shadow_daily_return_ser",
+    "dv2_industry_etf_reaudition_20261002": "alpha.scout.specs.reaudition_shadow:shadow_daily_return_ser",
 }
 
 
@@ -160,6 +165,9 @@ def render_markdown(report_list: list[dict], as_of_str: str) -> str:
             f"{shadow_dict['expected_annual_sharpe_float']:.2f} | "
             f"{('%+.2f%%' % (100 * live_dict['cumulative_return_float'])) if live_dict else 'n/a'} | "
             f"{('%.3f' % live_dict['current_cbi_float']) if live_dict.get('current_cbi_float') is not None else 'n/a'} |")
+    error_list = [r for r in report_list if r.get("error_str")]
+    if error_list:
+        line_list += ["", "## Errors", ""] + [f"- {r['pod_id_str']}: {r['error_str']}" for r in error_list]
     return "\n".join(line_list) + "\n"
 
 
@@ -168,8 +176,16 @@ def run_shadow_monitor(ledger: Ledger | None = None, as_of_date: date | None = N
     as_of_date = as_of_date or date.today()
     report_list = []
     for registration_id_str, row_dict in shadow_rows(ledger).items():
-        realized_ser = provider_for(registration_id_str)(row_dict)
-        report_list.append(shadow_report(row_dict, realized_ser, as_of_date))
+        try:
+            realized_ser = provider_for(registration_id_str)(row_dict)
+            report_list.append(shadow_report(row_dict, realized_ser, as_of_date))
+        except Exception as error:  # one broken provider must not hide the other shadows; the row says ERROR
+            report_list.append({
+                "pod_id_str": registration_id_str, "status_str": "ERROR", "error_str": f"{type(error).__name__}: {error}",
+                "live": {}, "shadow": {"start_date_str": row_dict["start_date_str"], "forward_sessions_int": 0, "forward_months_float": 0.0,
+                                       "min_trl_months_float": row_dict.get("min_trl_months_float"), "progress_float": None,
+                                       "expected_annual_sharpe_float": row_dict["expected_annual_sharpe_float"]},
+            })
     output_dir_path = Path(output_dir_path or SHADOW_ROOT_PATH / "reports" / as_of_date.isoformat())
     output_dir_path.mkdir(parents=True, exist_ok=True)
     (output_dir_path / "shadow.md").write_text(render_markdown(report_list, as_of_date.isoformat()), encoding="utf-8")
