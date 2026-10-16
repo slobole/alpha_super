@@ -98,7 +98,7 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         return load_missing_trades_dict(target_obj, as_of_ts=clock_fn(), shared_account_bool=shared_bool,
             completion_event_list=event_list)
 
-    # Real orders only with --enable-orders; the demo uses a synthetic broker.
+    # Real orders unless the CLI passes --disable-orders; the demo uses a synthetic broker.
     order_service_obj = OrderTicketService(target_fn=tools_target_obj, missing_fn=missing_trades_dict,
         log_path_fn=order_log_path_fn, target_loader_fn=lambda pod_id_str: provider_obj.get_target_for_pod(pod_id_str),
         enabled_bool=orders_enabled_bool, broker_factory_fn=order_broker_factory_fn, now_fn=clock_fn)

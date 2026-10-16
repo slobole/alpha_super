@@ -7,7 +7,7 @@ Two steps, both JSON POSTs with the action token and a same-origin check:
 * send: consumes the nonce, re-checks every rule and the broker once more, then sends
   one manual ticket through alpha.live.manual_order (the same path as Dashboard V3).
 
-Production sends only with ``--enable-orders``. Every other V4 tool stays copy-only.
+Production sends orders by default (``--disable-orders`` turns the panel off). Every other V4 tool stays copy-only.
 Rules: docs/plans/MOC_COMPLETION_HANDOFF.md §5-§8b.
 """
 

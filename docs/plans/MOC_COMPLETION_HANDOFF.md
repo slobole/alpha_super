@@ -18,7 +18,7 @@ wants to complete it today **in a few clicks**, usually **at the close (MOC)**. 
    button that names the exact order (`Send · BUY 300 APX at close`);
 3. **MOC** as a third order type in the existing manual ticket backend;
 4. a free **New order…** panel (any symbol, §8b);
-5. the manual ticket (New order and Complete) **runnable on V4 production**, behind `--enable-actions`.
+5. the manual ticket (New order and Complete) **runnable on V4 production**, on by default (`--disable-orders` turns it off).
 
 Owner decisions (2026-10-16): V4 production · gap-driven pre-fill for all pods · panels in the page (no
 pop-out) · **no typed confirmation** (the Send button names the order; this replaces the earlier
@@ -56,7 +56,7 @@ All numbers, symbols and accounts in the mockup are synthetic. Wording is the co
    the V4 dashboard package, and the V4 CLI flag wiring.
 2. **The one exception to V4 guardrail #4 ("no new executable actions")**: the manual ticket becomes
    runnable on V4 production. Every other ACTIVE tool stays copy-only. Read-only stays the default; the
-   ticket is runnable only with `--enable-actions`, exactly as in V3.
+   ticket is on by default (owner, 2026-10-17); `--disable-orders` turns it off.
 3. One order per ticket. No batch, no "complete all" in v1.
 4. Unknown is not green. Any failed read (saved evidence, fresh broker read, calendar) shows no pre-fill
    and no Send button, never a guessed number.
@@ -217,7 +217,7 @@ There is no gap cap on a BUY. Log payloads carry no completion reference.
   (`dashboard_v3/data.py:147` logic: job gate + `operator_execution_context` + `submit_manual_order_ticket_dict`).
   Import and reuse it; do not copy it.
 - `ToolsActionService`: allow `enabled_bool` outside demo **only** for `action_name == "manual_order"`, and only
-  when the app runs with `--enable-actions`. Every other action keeps raising "Tools execution is available only
+  when orders are on (the default). Every other action keeps raising "Tools execution is available only
   in the synthetic demo." Keep the action token header, nonce, release-hash check and journal.
 - The preview step for completion also carries the fresh-check result (§7) in the confirmation context, so
   confirm cannot send a different symbol, side, quantity, type or VPlan than the one previewed.
@@ -287,8 +287,8 @@ Where it lives:
 
 Run it:
 
-* Production, real orders: `python -m alpha.live.dashboard_v4 --enable-orders`. Without the flag, V4 stays
-  read-only: the Missing trades panel still shows, but there are no buttons and every POST gets 403.
+* Production: `python -m alpha.live.dashboard_v4`. The order panel is **on by default** (owner, 2026-10-17).
+  `--disable-orders` turns it off: the Missing trades panel still shows, with no buttons, and every POST gets 403.
 * Demo with a synthetic broker: `python -m alpha.live.dashboard_v4 --demo --demo-tools`. The QPI demo pod shows
   `MSFT · BUY 17 · Missing · no broker ACK`.
 
