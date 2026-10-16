@@ -15,9 +15,9 @@
     }
   ],
   "feature_catalog": "pakal-research/knowledge/STRATEGY_FEATURE_CATALOG.md",
-  "record_count": 155,
+  "record_count": 165,
   "schema_version": "quant-research-knowledge-base-v1",
-  "source_record_count": 158,
+  "source_record_count": 168,
   "source_registry_schema": "quant-research-registry-v1",
   "studies": [
     {
@@ -231,6 +231,163 @@
         "predictive_value": "mixed; validation QLIKE improved in paper10 and macro3 but worsened about 21% in sector9",
         "promotion": "rejected; confirmation remained sealed and no post-hoc rescue was tested",
         "source_replication": "not_reproducible; the source omits proxy splices and the executable MinVar covariance/timing contract"
+      }
+    },
+    {
+      "CAGR": 0.0842639439783163,
+      "Sharpe": 0.8124721493985921,
+      "adaptive_lineage": null,
+      "artifacts": {
+        "concise_report": "pakal-research/reports/antonacci_models_study/REPORT.md",
+        "frozen_specification": "pakal-research/reports/antonacci_models_study/research_spec_frozen.json",
+        "full_report": "pakal-research/reports/antonacci_models_study/REPORT_FULL.md",
+        "manifest": "pakal-research/reports/antonacci_models_study/run_manifest.json",
+        "notebook": "pakal-research/reports/antonacci_models_study/antonacci_models_study.ipynb",
+        "primary_charts": [
+          "pakal-research/reports/antonacci_models_study/charts/gem_equity_drawdown.png",
+          "pakal-research/reports/antonacci_models_study/charts/gem_relative_to_sp500.png",
+          "pakal-research/reports/antonacci_models_study/charts/rec_equity_drawdown.png",
+          "pakal-research/reports/antonacci_models_study/charts/rec_grid_vs_claims.png",
+          "pakal-research/reports/antonacci_models_study/charts/rec_badass.png",
+          "pakal-research/reports/antonacci_models_study/charts/rec_portfolios.png",
+          "pakal-research/reports/antonacci_models_study/charts/rec_snapback.png"
+        ],
+        "primary_source_code": [
+          "pakal-research/antonacci_models_study/ams_data.py",
+          "pakal-research/antonacci_models_study/ams_lib.py",
+          "pakal-research/antonacci_models_study/ams_gem.py",
+          "pakal-research/antonacci_models_study/ams_models.py",
+          "pakal-research/antonacci_models_study/ams_charts.py",
+          "pakal-research/antonacci_models_study/test_ams_timing.py",
+          "pakal-research/antonacci_models_study/ams_build_artifacts.py"
+        ],
+        "primary_tables": [
+          "pakal-research/reports/antonacci_models_study/tables/gem_long_metrics.csv",
+          "pakal-research/reports/antonacci_models_study/tables/gem_bootstrap.csv",
+          "pakal-research/reports/antonacci_models_study/tables/gem_etf.csv",
+          "pakal-research/reports/antonacci_models_study/tables/rec_reachability.csv",
+          "pakal-research/reports/antonacci_models_study/tables/rec_primaries.csv",
+          "pakal-research/reports/antonacci_models_study/tables/rec_grid.csv",
+          "pakal-research/reports/antonacci_models_study/tables/rec_bootstrap.csv",
+          "pakal-research/reports/antonacci_models_study/tables/rec_portfolios.csv",
+          "pakal-research/reports/antonacci_models_study/tables/rec_snapback.csv"
+        ]
+      },
+      "comfortable_capacity": "GLD leg ~$40M; BLOK leg ~$1M",
+      "concise_report": "pakal-research/reports/antonacci_models_study/REPORT.md",
+      "cost_capacity": {
+        "capacity_impact_separate": true,
+        "central_research_round_trip_bps": 10,
+        "comfortable_capacity": "GLD leg ~$40M; BLOK leg ~$1M",
+        "conservative_survival_round_trip_bps": 20,
+        "hard_capacity": "GLD ~$404M; BLOK ~$8M",
+        "note": "liquid ETFs; capacity irrelevant at personal size",
+        "paper_like_round_trip_bps": 0,
+        "soft_capacity": "GLD ~$101M; BLOK ~$2M",
+        "strained_capacity": "GLD ~$202M; BLOK ~$4M"
+      },
+      "created_at": "2026-10-10T00:00:00+03:00",
+      "decision_timing": "GEM: month-end close; reconstructions: every Close_T",
+      "disposition": "rejected",
+      "feature_findings": [
+        {
+          "feature": "GEM 12-month dual momentum (public rule)",
+          "finding": "1991-2026 Sharpe 0.82 vs S&P 0.63; post-2014 0.56 vs 0.82; drawdown halves; 1.1-2.1 switches/yr"
+        },
+        {
+          "feature": "Donchian 63/126/252 ensemble + stretch exit on SPY/QQQ (SMURF reconstruction)",
+          "finding": "site window Sharpe 0.62, CAGR 8.6%, MDD -18.2% vs claim 1.52 / 21.3% / -10.2%"
+        },
+        {
+          "feature": "Gold channel trend with GLD/IAU confirmation and layering into the stock model (GLTR reconstruction)",
+          "finding": "site window Sharpe 0.77, CAGR 12.4%, MDD -21.6% vs claim 2.03 / 30.2% / -9.4%"
+        },
+        {
+          "feature": "Snap Back style 3-day sell-off reversal, 2-session hold",
+          "finding": "net win rate 51.2%, mean net 0.14% per trade, t=3.4"
+        },
+        {
+          "feature": "Hill-climb adjusted-Sharpe weights vs equal weights",
+          "finding": "walk-forward Sharpe 0.87 vs equal 0.79 vs 50/30/20 0.78"
+        }
+      ],
+      "fill_timing": "Open_(T+1) primary; Close_(T+1) and paper Close_T as robustness",
+      "hard_capacity": "GLD ~$404M; BLOK ~$8M",
+      "knowledge_record": "pakal-research/reports/antonacci_models_study/knowledge_record.json",
+      "last_reviewed_at": "2026-10-10T00:00:00+03:00",
+      "limitations": [
+        "proprietary rules undisclosed; Part B is a reachability study, not a replication",
+        "GEM international proxy from 1990 only; bond leg spliced; French US market before 1988",
+        "mega-cap and ETF lists are 2026 survivors",
+        "site figures gross and month-end; BADASS window 8.7 years, one crypto cycle"
+      ],
+      "maximum_drawdown": -0.1204334763506592,
+      "next_test": "none recommended; GEM-type TAA is already covered by the book's TAA sleeves",
+      "next_tests": [
+        "none recommended; GEM-type TAA is already covered by the book's TAA sleeves"
+      ],
+      "notebook": "pakal-research/reports/antonacci_models_study/antonacci_models_study.ipynb",
+      "objective": "Replicate the public GEM rule on long proxies and ETFs (including the post-publication period the interview figure glosses over), and measure what the described ingredients of the four proprietary models (Donchian ensembles, mean-reversion exits, GLD/IAU confirmation, layering, fixed-income reversal overlay, Snap Back) can deliver against the published 2005-2026 statistics.",
+      "portal_images": [
+        "assets/antonacci_models_study/01-gem_equity_drawdown.png",
+        "assets/antonacci_models_study/02-rec_equity_drawdown.png"
+      ],
+      "primary_cost_layer": "central_research",
+      "primary_metrics": {
+        "CAGR": 0.0842639439783163,
+        "Sharpe": 0.8124721493985921,
+        "annualized_volatility": 0.0834956404545587,
+        "benchmark": "60/40 SPY/AGG monthly rebalanced",
+        "benchmark_sharpe": 0.6758836013946895,
+        "cost_layer": "central_research (5 bps one-way)",
+        "maximum_drawdown": -0.1204334763506592,
+        "n_trials": 498,
+        "period": "2005-01-03..2026-06-30 (site window)",
+        "universe": "50/30/20 SMURF/GLTR/FIRM reconstructions, monthly rebalanced"
+      },
+      "replication_outcome": "gem_reproduced_with_proxies; proprietary_models_not_reproducible_from_public_ingredients",
+      "research_status": "diagnostic",
+      "signal_family": "cross_asset_dual_momentum_and_channel_breakout_with_reversal_overlays",
+      "soft_capacity": "GLD ~$101M; BLOK ~$2M",
+      "sources": [
+        "Concretum Research, Gary Antonacci: From Dual Momentum to Advanced Models, Substack 2026-10-10",
+        "optimalmomentum.com proprietary-models-2, extended-backtest, FAQ, global-equities-momentum (2026-10-10)",
+        "Antonacci, Dual Momentum Investing (2014)",
+        "pakal-research/reports/trend_breakout_momentum_candidates_study (TBMC-01 Dow Award replication)",
+        "pakal-research/reports/concretum_etf_trend_study (CET-01 Donchian ensemble)"
+      ],
+      "study_id": "antonacci_models_study",
+      "tags": [],
+      "timing_attribution": {
+        "artifact": "pakal-research/reports/antonacci_models_study/tables/rec_bootstrap.csv",
+        "diagnostic_path": "paper month-end fills (published convention) / paper Close_T",
+        "executable_path": "stateful daily engine, Open_(T+1), 5 bps one-way (15 bps crypto/blockchain)",
+        "headline_result": "HG2 (post-publication GEM >= SP500) P=0.02; HR2 (GLTR rec > GLD) P=0.88; HR6 (50/30/20 > 60/40) P=0.69",
+        "method": "frozen spec v1; GEM family HG1-HG3 and reconstruction family HR1-HR6, paired block bootstrap with Holm",
+        "metrics": {
+          "HG2_p_a_gt_b": 0.0194,
+          "HR2_p_a_gt_b": 0.8776,
+          "HR6_p_a_gt_b": 0.6896
+        },
+        "status": "tested",
+        "unavailable_reason": null
+      },
+      "title": "Antonacci (Concretum interview 2026-10): GEM replication and public-ingredient reconstructions of SMURF / GLTR / BADASS / FIRM / Snap Back",
+      "universes": [
+        "US / ACWI ex-US proxies / bonds (GEM)",
+        "IVV ACWX AGG BIL (GEM ETF)",
+        "SPY QQQ IWF VUG (SMURF)",
+        "GLD IAU (GLTR)",
+        "BLOK BKCH BITQ DAPP + GBTC->IBIT, ETHE->ETHA (BADASS)",
+        "11 fixed-income ETFs (FIRM)",
+        "~85 ETFs + 20 mega-caps (Snap Back)"
+      ],
+      "verdict": "GEM reproduces on proxies (1991-2026 CAGR 12.7%, excess Sharpe 0.82, MDD -21.4%); post-publication 2014-11..2026-08 it trails the S&P 500 (Sharpe 0.56 vs 0.82, bootstrap P(GEM>SP)=0.02). The proprietary claims (SMURF Sharpe 1.52, GLTR 2.03, BADASS 2.01) are not reachable with the described public ingredients: best grid cells 0.67 / 0.90 / 0.88; primaries 0.62 / 0.77. 50/30/20 of the primaries: Sharpe 0.81 vs site 2.35. Snap Back primary win rate 51.2% vs claimed 70-80%.",
+      "verdicts": {
+        "economic_value": "nothing promotable; the GLTR-style gold trend with layering is the only reconstruction above its buy-and-hold on Sharpe",
+        "predictive_value": "GEM post-publication: no edge over the S&P 500; channel-breakout reconstructions: defensive, below buy-and-hold Sharpe in the 2016-2026 half for equities",
+        "promotion": "none",
+        "source_replication": "GEM: reproduced on proxies (pre-2014 Sharpe 0.97 vs site 0.96 for 1950-2017); proprietary models: not reproducible, reachability tested"
       }
     },
     {
@@ -11592,6 +11749,323 @@
       }
     },
     {
+      "CAGR": 0.055,
+      "Sharpe": 0.587,
+      "adaptive_lineage": null,
+      "artifacts": {
+        "concise_report": "pakal-research/reports/bond_calendar_flow_family_study/REPORT.md",
+        "frozen_specification": "pakal-research/reports/bond_calendar_flow_family_study/research_spec_frozen.json",
+        "full_report": "pakal-research/reports/bond_calendar_flow_family_study/REPORT_FULL.md",
+        "manifest": "pakal-research/reports/bond_calendar_flow_family_study/run_manifest.json",
+        "notebook": "pakal-research/reports/bond_calendar_flow_family_study/bond_calendar_flow_family_study.ipynb",
+        "primary_charts": [
+          "pakal-research/reports/bond_calendar_flow_family_study/charts/yield_month_end_profile_by_era.png",
+          "pakal-research/reports/bond_calendar_flow_family_study/charts/etf_eom_vs_duration.png",
+          "pakal-research/reports/bond_calendar_flow_family_study/charts/auction_cycle_profile_long_end.png"
+        ],
+        "primary_source_code": [
+          "pakal-research/bond_calendar_flow_family_study.py",
+          "pakal-research/bond_calendar_flow_data_fetch.py"
+        ],
+        "primary_tables": [
+          "pakal-research/reports/bond_calendar_flow_family_study/tables/etf_eom_cross_section.csv",
+          "pakal-research/reports/bond_calendar_flow_family_study/tables/yield_event_windows_by_era.csv",
+          "pakal-research/reports/bond_calendar_flow_family_study/tables/tlt_ief_window_sleeves.csv"
+        ]
+      },
+      "comfortable_capacity": "TLT $26M / IEF $7M / ZROZ $0.3M per MOC order (1% median daily turnover)",
+      "concise_report": "pakal-research/reports/bond_calendar_flow_family_study/REPORT.md",
+      "cost_capacity": {
+        "capacity_impact_separate": true,
+        "central_research_round_trip_bps": 6,
+        "comfortable_capacity": "TLT $26M / IEF $7M / ZROZ $0.3M per MOC order (1% median daily turnover)",
+        "conservative_survival_round_trip_bps": 12,
+        "hard_capacity": "TLT $658M / IEF $186M / ZROZ $8.4M (25%)",
+        "paper_like_round_trip_bps": 0,
+        "soft_capacity": "TLT $132M / IEF $37M / ZROZ $1.7M (5%)",
+        "strained_capacity": "TLT $263M / IEF $74M / ZROZ $3.4M (10%)"
+      },
+      "created_at": "2026-10-16T12:00:00+03:00",
+      "decision_timing": "Calendar known in advance; auction windows no earlier than announcement close; FOMC scheduled dates; NFP rule-based proxy",
+      "disposition": "shadow",
+      "feature_findings": [
+        {
+          "corrected_significance": "BH q<0.10 for 25/27 ETFs; Holm eras 2 and 4",
+          "direction": "positive",
+          "economic_mechanism": "benchmarked bond funds extend duration when indices add new issues at month-end",
+          "effect_size": "TLT +37 bp/month gross (t 3.9); 2.6-4.5 bp per duration-year; 10y yield -2.1 to -2.6 bp per month-end since 1985",
+          "feature": "EOM final-5 long bond (index extension bid)",
+          "period_consistency": "positive 2003-12/2013-22/2023-26 (0.54/0.68/0.47); absent 1962-84",
+          "recommended_action": "already inside C_main; prefer IEF/IEI/TLT over ZROZ",
+          "role": "signal",
+          "status": "research_candidate"
+        },
+        {
+          "corrected_significance": "post-freeze, not corrected",
+          "direction": "positive",
+          "economic_mechanism": "larger index extension when new 10y/30y bonds enter",
+          "effect_size": "TLT +71 vs +20 bp per month-end (p 0.011); Sharpe 0.56/0.67/1.22, 2026 +2.0; non-refunding 2023-26 negative",
+          "feature": "EOM conditioned on refunding months (Feb/May/Aug/Nov)",
+          "period_consistency": "refunding > non-refunding in every period",
+          "recommended_action": "shadow-log beside C_main EOM leg",
+          "role": "filter",
+          "status": "forward_hypothesis"
+        },
+        {
+          "corrected_significance": "frozen gate q 0.13/0.16 (failed)",
+          "direction": "positive",
+          "economic_mechanism": "Hillenbrand: secular yield decline concentrated around FOMC; risk premium on announcement",
+          "effect_size": "+31 bp per meeting (t 2.4); Sharpe 0.39/0.34/0.68; adds ~+0.2 Sharpe to EOM (post-hoc)",
+          "feature": "FOMC window long TLT (sessions -1..+1)",
+          "period_consistency": "positive all three ETF periods; yields -3.0/-1.6 bp 2000-12/2013-26",
+          "recommended_action": "shadow-log",
+          "role": "signal",
+          "status": "forward_hypothesis"
+        },
+        {
+          "corrected_significance": "BH within era q<=0.03 (2013-26); frozen gate failed (discovery)",
+          "direction": "negative bond",
+          "economic_mechanism": "supply concession as auction sizes grew",
+          "effect_size": "2013-26 yields +2.1/+3.1/+1.9 bp pre-auction (q<=0.03); TLT short Sharpe -0.16/0.79/0.71",
+          "feature": "Short long-end Treasuries into 10/20/30y auctions (from announcement)",
+          "period_consistency": "regime: absent 1980-2012, strong 2013-2026",
+          "recommended_action": "shadow-log; regime-dependent",
+          "role": "signal",
+          "status": "forward_hypothesis"
+        },
+        {
+          "corrected_significance": "n/a",
+          "direction": "positive",
+          "economic_mechanism": "dealer inventory unwind",
+          "effect_size": "TLT Sharpe 0.38/-0.17/-0.51",
+          "feature": "Post-auction relief long",
+          "period_consistency": "dead since 2013",
+          "recommended_action": "drop",
+          "role": "signal",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "n/a",
+          "direction": "positive",
+          "economic_mechanism": "announcement risk premium",
+          "effect_size": "TLT -12 bp per release (t -1.8)",
+          "feature": "NFP release-day bond premium",
+          "period_consistency": "premium only 1962-84; reversed since 2000",
+          "recommended_action": "drop",
+          "role": "signal",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "n/a",
+          "direction": "positive",
+          "economic_mechanism": "coupon/principal reinvestment on the 15th",
+          "effect_size": "+6 bp; Sharpe 0.27/0.05/-0.82",
+          "feature": "Mid-month coupon reinvestment window",
+          "period_consistency": "only 1985-99",
+          "recommended_action": "drop",
+          "role": "signal",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "frozen gate failed",
+          "direction": "negative bond",
+          "economic_mechanism": "reversal of month-end bid",
+          "effect_size": "TLT +32 bp (t 2.4); Sharpe 0.39/0.52/0.12",
+          "feature": "BOM short bonds",
+          "period_consistency": "yield rise only 2013-26",
+          "recommended_action": "no change (already weak in eom_flow_family_study)",
+          "role": "signal",
+          "status": "diagnostic"
+        },
+        {
+          "corrected_significance": "n/a",
+          "direction": "positive",
+          "economic_mechanism": "pension rebalancing / tax-loss",
+          "effect_size": "quarter-end 22 vs 45 bp; credit n.s. (PFF post-hoc +209 bp p 0.02)",
+          "feature": "Quarter-end amplification / credit turn-of-year",
+          "period_consistency": "none",
+          "recommended_action": "drop",
+          "role": "filter",
+          "status": "rejected"
+        }
+      ],
+      "fill_timing": "MOC at the close before each window, exit at window-end close (close-to-close)",
+      "hard_capacity": "TLT $658M / IEF $186M / ZROZ $8.4M (25%)",
+      "knowledge_record": "pakal-research/reports/bond_calendar_flow_family_study/knowledge_record.json",
+      "last_reviewed_at": "2026-10-16T12:00:00+03:00",
+      "limitations": [
+        "H.15 yields are 3:30 pm bid-side CMT points; synthetic bond ignores roll-down and on-the-run premia",
+        "NFP dates rule-based proxy; FOMC dates from 1998",
+        "Front-end auctions overlap 76-90% of month-end sessions after 1985; separation relies on regression and the refunding split",
+        "Refunding-month, FOMC and auction composites are post-hoc on 2003-2026"
+      ],
+      "maximum_drawdown": -0.172,
+      "next_test": "12-month forward shadow of refunding-only EOM, FOMC long TLT, pre-auction short TLT beside C_main",
+      "next_tests": [
+        "12-month forward shadow of refunding-only EOM, FOMC long TLT, pre-auction short TLT beside C_main",
+        "Use published Bloomberg projected index extension instead of the refunding-month proxy",
+        "Intraday (announcement-to-auction) test of the post-2013 concession"
+      ],
+      "notebook": "pakal-research/reports/bond_calendar_flow_family_study/bond_calendar_flow_family_study.ipynb",
+      "objective": "Reproduce Valuelytica's ZROZ end-of-month claim, test the same month-end bid across 27 bond ETFs and 64 years of Treasury yields, and put every comparable bond calendar/flow effect (BOM reversal, auction cycle, FOMC, employment report, mid-month coupon, quarter/year-end) on one bench with a frozen composite gate.",
+      "portal_images": [
+        "assets/bond_calendar_flow_family_study/01-auction_cycle_profile_long_end.png",
+        "assets/bond_calendar_flow_family_study/02-etf_eom_vs_duration.png"
+      ],
+      "primary_cost_layer": "central_research",
+      "primary_metrics": {
+        "CAGR": 0.055,
+        "Sharpe": 0.587,
+        "annualized_volatility": null,
+        "cost_layer": "central_research (3 bps/side)",
+        "maximum_drawdown": -0.172,
+        "period": "2003-01-01 to 2026-09-30",
+        "turnover": 24.0,
+        "universe": "TLT"
+      },
+      "replication_outcome": "replicated",
+      "research_status": "forward_hypothesis",
+      "signal_family": "calendar_bond_index_flow",
+      "soft_capacity": "TLT $132M / IEF $37M / ZROZ $1.7M (5%)",
+      "sources": [
+        "https://valuelytica.substack.com/p/eom-effect-in-zero-coupon-bonds",
+        "Lou, Yan, Zhang (2013) RFS",
+        "Hillenbrand (2023/2025)",
+        "Jones, Lamont, Lumsdaine (1998) JFE",
+        "fiscaldata.treasury.gov auctions_query; FRED H.15; Norgate US Equities"
+      ],
+      "study_id": "bond_calendar_flow_family_study",
+      "tags": [],
+      "timing_attribution": {
+        "diagnostic_path": "paper close-to-close",
+        "executable_path": "MOC close-to-close with central/conservative costs",
+        "headline_result": "TLT EOM 0.87 paper / 0.76 central / 0.66 conservative (2010-2025)",
+        "method": "calendar windows contain no price signal; costs layered",
+        "metrics": {
+          "tlt_eom_central_2010_2025": 0.763,
+          "tlt_eom_paper_2010_2025": 0.87,
+          "zroz_eom_central_2010_2025": 0.627
+        },
+        "status": "not_applicable"
+      },
+      "title": "Bond calendar flow family: Valuelytica ZROZ month-end effect and every comparable bond calendar effect (27 ETFs, 1962-2026 yields, auctions, FOMC, NFP, coupons)",
+      "universes": [
+        "27 US bond ETFs (Treasury, TIPS, IG, HY, MBS, muni, EM, intl, aggregate, hybrid)",
+        "FRED H.15 CMT yields 1962-2026",
+        "US Treasury coupon auctions 1979-2026",
+        "scheduled FOMC 1998-2026"
+      ],
+      "verdict": "Source replicated (ZROZ EOM 9.9%/0.81 vs claim 9.46%/0.81; EOMS 16.2%/0.91 vs 17.3%/1.01; central cost 0.63/0.66). Month-end bond bid is real and index-driven: absent in 1962-84 yields, present in every era since 1985, larger in refunding months, scales with duration across 27 ETFs (corr 0.95). ZROZ is not a better vehicle (same edge per duration; IEI/IEF/TLT higher Sharpe, far more liquid). Frozen composite gate passed no window. FOMC window, pre-auction long-end short (post-2013 regime) and refunding-month EOM are forward hypotheses for shadow logging; NFP premium, post-auction relief, mid-month coupon and quarter-end amplification rejected. 2026 YTD EOM on ZROZ -8%.",
+      "verdicts": {
+        "economic_value": "EOM TLT Sharpe 0.59 central 2003-2026; ZROZ 0.54; thin vs costs on short-duration ETFs",
+        "predictive_value": "EOM confirmed (t 3.9 TLT, 25/27 ETFs q<0.10, 1985+ yields); FOMC and pre-auction directional; NFP, mid-month, post-auction (2013+) rejected",
+        "promotion": "none; C_main paper trial unchanged; three shadow lines",
+        "source_replication": "replicated (paper close-to-close, final-5 / first-5 mapping)"
+      }
+    },
+    {
+      "CAGR": null,
+      "Sharpe": null,
+      "adaptive_lineage": null,
+      "artifacts": {
+        "concise_report": "pakal-research/reports/book_picture_20261014/REPORT.md",
+        "frozen_specification": "pakal-research/reports/book_picture_20261014/research_spec_frozen.json",
+        "full_report": "pakal-research/reports/book_picture_20261014/REPORT_FULL.md",
+        "manifest": "pakal-research/reports/book_picture_20261014/run_manifest.json",
+        "notebook": "pakal-research/reports/book_picture_20261014/book_picture_20261014.ipynb",
+        "primary_charts": [
+          "pakal-research/reports/book_picture_20261014/charts/01_ladder_equity_drawdown.png",
+          "pakal-research/reports/book_picture_20261014/charts/02_marginal_10pct.png",
+          "pakal-research/reports/book_picture_20261014/charts/03_crisis_windows.png"
+        ],
+        "primary_source_code": [
+          "pakal-research/book_picture/bp_data.py",
+          "pakal-research/book_picture/bp_run.py",
+          "pakal-research/book_picture/bp_charts.py",
+          "pakal-research/book_picture/bp_build.py"
+        ],
+        "primary_tables": [
+          "pakal-research/reports/book_picture_20261014/tables/sleeves.csv",
+          "pakal-research/reports/book_picture_20261014/tables/ladder.csv",
+          "pakal-research/reports/book_picture_20261014/tables/ladder_ex_covid.csv",
+          "pakal-research/reports/book_picture_20261014/tables/crisis_windows.csv",
+          "pakal-research/reports/book_picture_20261014/tables/risk_contribution_B3.csv"
+        ]
+      },
+      "comfortable_capacity": null,
+      "concise_report": "pakal-research/reports/book_picture_20261014/REPORT.md",
+      "cost_capacity": {
+        "note": "not modelled at book level"
+      },
+      "created_at": "2026-10-14T19:01:27+00:00",
+      "decision_timing": "inherited from each sleeve's own study",
+      "disposition": "descriptive",
+      "feature_findings": [],
+      "fill_timing": "inherited; EOM MOC, others next open",
+      "hard_capacity": null,
+      "knowledge_record": "pakal-research/reports/book_picture_20261014/knowledge_record.json",
+      "last_reviewed_at": "2026-10-14T19:01:27+00:00",
+      "limitations": [
+        "sleeves are backtests on overlapping history",
+        "daily rebalancing without cost",
+        "G3 TAA leg partly in-sample"
+      ],
+      "maximum_drawdown": null,
+      "next_test": "keep EOM paper trial as the priority add-on",
+      "next_tests": [
+        "keep EOM paper trial as the priority add-on",
+        "decide the crisis slot: pod (5+5) vs crisis-alpha L/S, not both, on forward shadow evidence"
+      ],
+      "notebook": "pakal-research/reports/book_picture_20261014/book_picture_20261014.ipynb",
+      "objective": "Show what the book holds, what is in paper/shadow, and each sleeve's contribution to book Sharpe, drawdown and CAGR on one window.",
+      "portal_images": [
+        "assets/book_picture_20261014/01-01_ladder_equity_drawdown.png",
+        "assets/book_picture_20261014/02-02_marginal_10pct.png"
+      ],
+      "primary_cost_layer": "each sleeve's own central costs; no inter-sleeve rebalancing cost",
+      "primary_metrics": {
+        "B0 G3 alone_cagr": 0.1997546282504767,
+        "B0 G3 alone_max_dd": -0.1409661853956698,
+        "B0 G3 alone_sharpe_ex": 1.180947605686712,
+        "B0 G3 alone_sharpe_rf0": 1.2976704033454414,
+        "B1 +15% EOM_cagr": 0.1855282203355421,
+        "B1 +15% EOM_max_dd": -0.1187434597606417,
+        "B1 +15% EOM_sharpe_ex": 1.2530214219369853,
+        "B1 +15% EOM_sharpe_rf0": 1.388235901643725,
+        "B2 +10% crisis pod_cagr": 0.1668188290953929,
+        "B2 +10% crisis pod_max_dd": -0.1053220260953808,
+        "B2 +10% crisis pod_sharpe_ex": 1.274628164202756,
+        "B2 +10% crisis pod_sharpe_rf0": 1.4293448398468702,
+        "B3 +10% eVRP_cagr": 0.1548564490046957,
+        "B3 +10% eVRP_max_dd": -0.0909123811845286,
+        "B3 +10% eVRP_sharpe_ex": 1.3188382546959123,
+        "B3 +10% eVRP_sharpe_rf0": 1.4930933720656976,
+        "window": "2012-10-02..2026-07-24"
+      },
+      "replication_outcome": null,
+      "research_status": "diagnostic",
+      "signal_family": "portfolio_construction_book_level",
+      "soft_capacity": null,
+      "sources": [],
+      "study_id": "book_picture_20261014",
+      "tags": [
+        "book_level",
+        "g3",
+        "eom",
+        "crisis_pod",
+        "evrp",
+        "portfolio_picture",
+        "diagnostic"
+      ],
+      "timing_attribution": null,
+      "title": "Whole-book picture: true G3 core plus every paper/shadow sleeve, marginal effects and an illustrative ladder",
+      "universes": [
+        "book level"
+      ],
+      "verdict": "G3 alone 2012-10..2026-07: 20.0%/yr, excess Sharpe 1.18 (rf0 1.30), max DD -14.1%; its two legs carry ~100% of risk. EOM C_main is the only sleeve that adds in both eras and ex-COVID (+0.07 Sharpe at 15%, DD to -11.9%). The crisis pod (5+5%) is insurance (COVID -5% -> 0%) with ~0 Sharpe effect ex-COVID. eVRP's +0.04 is mostly March 2020 (+0.01 ex). Equity sleeves (NDX tilt, TBMC-05, CORE5, Connors, IBS) add <= 0.02 by diluting vol and lose with the book in crises. Illustrative B3 (65 G3 / 15 EOM / 5 core / 5 VIXM / 10 eVRP): 15.5%/yr, excess Sharpe 1.32 (rf0 1.49), DD -9.1%; 21.9% at G3's vol with 1.5x financing. Still ~95% of risk in the G3 legs.",
+      "verdicts": null
+    },
+    {
       "CAGR": 0.04584397080602676,
       "Sharpe": 0.3774330237059676,
       "adaptive_lineage": {
@@ -12170,6 +12644,216 @@
         "predictive_value": "trend timing reduces down-month losses beyond exposure (T2 Holm p 0.014; placebo 100th pct)",
         "promotion": "none for the book; optional as an investor-level 60/40 replacement with the crisis pod (80/20)",
         "source_replication": "reproduced (orders, weights, correlations, headline stats with 100% effective cap)"
+      }
+    },
+    {
+      "CAGR": 0.0797772664766307,
+      "Sharpe": 1.023423879991189,
+      "adaptive_lineage": null,
+      "artifacts": {
+        "concise_report": "pakal-research/reports/core5_equity_vehicle_v2/REPORT.md",
+        "frozen_specification": "pakal-research/reports/core5_equity_vehicle_v2/research_spec_frozen.json",
+        "full_report": "pakal-research/reports/core5_equity_vehicle_v2/REPORT_FULL.md",
+        "manifest": "pakal-research/reports/core5_equity_vehicle_v2/run_manifest.json",
+        "notebook": "pakal-research/reports/core5_equity_vehicle_v2/core5_equity_vehicle_v2.ipynb",
+        "primary_charts": [
+          "pakal-research/reports/core5_equity_vehicle_v2/charts/1_growth_drawdown_real.png",
+          "pakal-research/reports/core5_equity_vehicle_v2/charts/2_growth_drawdown_proxy_2000.png",
+          "pakal-research/reports/core5_equity_vehicle_v2/charts/3_sharpe_by_variant.png",
+          "pakal-research/reports/core5_equity_vehicle_v2/charts/4_dotcom_drawdown.png",
+          "pakal-research/reports/core5_equity_vehicle_v2/charts/5_leverage_ladder.png"
+        ],
+        "primary_source_code": [
+          "pakal-research/core5_equity_vehicle_v2/cev2_engine.py",
+          "pakal-research/core5_equity_vehicle_v2/cev2_proxy_book.py",
+          "pakal-research/core5_equity_vehicle_v2/cev2_ladder.py",
+          "pakal-research/core5_equity_vehicle_v2/cev2_ladder_stats.py",
+          "pakal-research/core5_equity_vehicle_v2/cev2_run.py",
+          "pakal-research/core5_equity_vehicle_v2/cev2_charts.py",
+          "pakal-research/core5_equity_vehicle_v2/cev2_build_artifacts.py",
+          "pakal-research/core5_equity_vehicle_v2/test_cev2_timing.py"
+        ],
+        "primary_tables": [
+          "pakal-research/reports/core5_equity_vehicle_v2/tables/stats_by_window.csv",
+          "pakal-research/reports/core5_equity_vehicle_v2/tables/f1_vs_baseline.csv",
+          "pakal-research/reports/core5_equity_vehicle_v2/tables/f2_equal_risk_leverage.csv",
+          "pakal-research/reports/core5_equity_vehicle_v2/tables/f4_sleeve_only.csv",
+          "pakal-research/reports/core5_equity_vehicle_v2/tables/f6_proxy_book.csv",
+          "pakal-research/reports/core5_equity_vehicle_v2/tables/decision_rule.json"
+        ]
+      },
+      "comfortable_capacity": "<= $200M",
+      "concise_report": "pakal-research/reports/core5_equity_vehicle_v2/REPORT.md",
+      "cost_capacity": {
+        "capacity_impact_separate": true,
+        "central_research_round_trip_bps": 5,
+        "comfortable_capacity": "<= $200M",
+        "conservative_survival_round_trip_bps": 10,
+        "hard_capacity": "> $3B",
+        "note": "SPY/QQQ effectively unlimited; UPRO/TQQQ daily volume ~$0.5-5B, ~25 equity trades per year; 2x cost stress lowers Sharpe 0.03-0.05",
+        "paper_like_round_trip_bps": 0,
+        "soft_capacity": "$200M-1B",
+        "strained_capacity": "$1-3B"
+      },
+      "created_at": "2026-10-11T00:00:00+03:00",
+      "decision_timing": "Close_T (CORE5 state change or month end)",
+      "disposition": "forward_observation_only",
+      "feature_findings": [
+        {
+          "feature": "QQQ vehicle in the CORE5 equity sleeve",
+          "finding": "Sharpe +0.08..0.10 2007-26, not Holm-significant; needs its own signal to survive 2000-02"
+        },
+        {
+          "feature": "3x S&P (UPRO) vehicle, SPY signal",
+          "finding": "CAGR 7.2% -> 11.1%, DD -6.8% -> -14.1%; beats whole-book leverage at equal vol 2000-2026 (Sharpe 0.74 vs 0.62)"
+        },
+        {
+          "feature": "3x Nasdaq (TQQQ) vehicle",
+          "finding": "rejected: 2000-02 book drawdown -19% to -31% vs -6% equal-risk control"
+        },
+        {
+          "feature": "leverage ladder 1x-3x (synthetic daily reset)",
+          "finding": "S&P Sharpe flat 2x-3x (linear dial); Nasdaq Sharpe peaks 1.5-2x, 2x beats 3x with P 0.85-0.92; QLD preferred over TQQQ"
+        },
+        {
+          "feature": "signal read from the LETF price",
+          "finding": "worse than the underlying's signal in every comparison"
+        },
+        {
+          "feature": "LETF wrapper vs margin",
+          "finding": "within +/-0.2 pp per year; no decay penalty beyond daily-rebalanced margin"
+        },
+        {
+          "feature": "raw vs excess Sharpe",
+          "finding": "raw Sharpe (August study) penalised leverage because BIL interest counted as riskless return"
+        }
+      ],
+      "fill_timing": "Open_(T+1); proxy sleeves in F6 at Close_(T+1)",
+      "hard_capacity": "> $3B",
+      "knowledge_record": "pakal-research/reports/core5_equity_vehicle_v2/knowledge_record.json",
+      "last_reviewed_at": "2026-10-11T00:00:00+03:00",
+      "limitations": [
+        "all history seen; F6 post hoc",
+        "2000-02 uses proxies and synthetic LETFs",
+        "whole-book leverage control also levers cash",
+        "weights other than 20% not tested"
+      ],
+      "maximum_drawdown": -0.0793863570963739,
+      "next_test": "forward observation of A2 (QQQ/QQQ) and A3 (UPRO/SPY) beside live CORE5",
+      "next_tests": [
+        "forward observation of A2 (QQQ/QQQ) and A3 (UPRO/SPY) beside live CORE5",
+        "smaller TQQQ weights (e.g. 7%) only if pre-registered with a 2000-02 gate"
+      ],
+      "notebook": "pakal-research/reports/core5_equity_vehicle_v2/core5_equity_vehicle_v2.ipynb",
+      "objective": "Owner request 2026-10-11: in CORE5 replace the SPY equity sleeve with QQQ, UPRO or TQQQ.",
+      "portal_images": [
+        "assets/core5_equity_vehicle_v2/01-1_growth_drawdown_real.png",
+        "assets/core5_equity_vehicle_v2/02-2_growth_drawdown_proxy_2000.png"
+      ],
+      "primary_cost_layer": "house (2.5 bp slippage, 0.005/share)",
+      "primary_metrics": {
+        "CAGR": 0.0797772664766307,
+        "Sharpe": 1.023423879991189,
+        "annualized_volatility": 0.0622669468167144,
+        "benchmark_sharpe": 0.9457900659024496,
+        "best_family_member": "A5 TQQQ/SPY signal Sharpe 1.08 (downgraded by 2000-02)",
+        "maximum_drawdown": -0.0793863570963739,
+        "n_trials": 10,
+        "period": "2007-09-04..2026-10-09",
+        "turnover": null,
+        "universe": "CORE5 live config, equity sleeve swapped"
+      },
+      "replication_outcome": "engine_parity_exact",
+      "research_status": "forward_hypothesis",
+      "signal_family": "adaptive_trend_macro_sleeves_vehicle_swap",
+      "soft_capacity": "$200M-1B",
+      "sources": [
+        "owner request 2026-10-11",
+        "alpha_super alpha/scout/specs/core5.py"
+      ],
+      "study_id": "core5_equity_vehicle_v2",
+      "tags": [
+        "core5",
+        "qqq",
+        "upro",
+        "tqqq",
+        "leveraged_etf",
+        "vehicle_swap",
+        "synthetic_letf",
+        "dot_com",
+        "excess_sharpe"
+      ],
+      "timing_attribution": {
+        "artifact": "pakal-research/reports/core5_equity_vehicle_v2/tables/f1_vs_baseline.csv",
+        "diagnostic_path": "F4 sleeve-only 2000-2026 and F6 proxy book",
+        "executable_path": "alpha_super weights engine, historical share units",
+        "headline_result": "A2 QQQ/QQQ Sharpe 1.02 vs 0.95 (P 0.89); A3 UPRO/SPY 0.99 vs levered A0 0.88 (P 0.84)",
+        "method": "frozen spec v1 + post-hoc v1.1, block bootstrap, Holm",
+        "metrics": {
+          "A0": {
+            "cagr": 0.0716882246535837,
+            "maxdd": -0.067786340515385,
+            "sharpe": 0.9457900659024496
+          },
+          "A1": {
+            "cagr": 0.0808947554672403,
+            "maxdd": -0.0767683435806572,
+            "sharpe": 1.0411142294591218
+          },
+          "A2": {
+            "cagr": 0.0797772664766307,
+            "maxdd": -0.0793863570963739,
+            "sharpe": 1.023423879991189
+          },
+          "A3": {
+            "cagr": 0.111319009164696,
+            "maxdd": -0.1414690075792026,
+            "sharpe": 0.9929832536578536
+          },
+          "A4": {
+            "cagr": 0.1022369581282447,
+            "maxdd": -0.1486830505995223,
+            "sharpe": 0.9344621999583108
+          },
+          "A5": {
+            "cagr": 0.137674587327365,
+            "maxdd": -0.1476997488035073,
+            "sharpe": 1.0797132902245998
+          },
+          "A6": {
+            "cagr": 0.1329640417883175,
+            "maxdd": -0.1560645497592075,
+            "sharpe": 1.0289503374033304
+          },
+          "A7": {
+            "cagr": 0.1208170226135412,
+            "maxdd": -0.2151183609577004,
+            "sharpe": 0.952310535839629
+          },
+          "X1": {
+            "cagr": 0.0911592773798077,
+            "maxdd": -0.1021983397524878,
+            "sharpe": 0.996878851450697
+          },
+          "X2": {
+            "cagr": 0.1062714510177218,
+            "maxdd": -0.1123627956771963,
+            "sharpe": 1.0518736775838295
+          }
+        },
+        "status": "tested",
+        "unavailable_reason": null
+      },
+      "title": "CORE5 equity sleeve on QQQ / UPRO / TQQQ instead of SPY: own vs SPY signal, synthetic 3x through 2008, equal-risk whole-book leverage, 2000-2026 proxy book",
+      "universes": [
+        "CORE5 ETFs SPY IEF GLD DBC UUP BIL + QQQ UPRO TQQQ SSO QLD (synthetic before inception)"
+      ],
+      "verdict": "QQQ with its own QQQ signal passes the frozen rule (Sharpe 1.02 vs 0.95, CAGR 8.0% vs 7.2%, DD -7.9% vs -6.8%; not significant after Holm) and should replace the August QQQ/SPY-signal forward line, which fails the 2000-02 check. UPRO with the SPY signal passes as a leverage dial (11.1%, Sharpe 0.99, DD -14.1%; beats whole-book leverage at equal vol, survives 2000-02 at -7%). TQQQ (13-14% CAGR 2007-26) is downgraded: the 2000-02 proxy book loses 19-31% vs -6% for equal-risk whole-book leverage. LETF-price signals are worse than underlying signals. Ladder (post hoc): S&P Sharpe flat 2x-3x; Nasdaq peaks at 1.5-2x, so QLD beats TQQQ.",
+      "verdicts": {
+        "economic_value": "QQQ +0.8 pp CAGR at same character; UPRO +3.9 pp CAGR for double drawdown",
+        "predictive_value": "vehicle swap only; no new signal edge; own-signal benefit rests on 2000-02",
+        "promotion": "forward observation only; no PAPER/LIVE authority",
+        "source_replication": "CORE5 live config reproduced to 0.0 daily difference"
       }
     },
     {
@@ -19664,6 +20348,221 @@
       "verdicts": null
     },
     {
+      "CAGR": null,
+      "Sharpe": null,
+      "adaptive_lineage": {
+        "declared_total_variants": 44,
+        "neural_fits": 270,
+        "post_hoc_items": [
+          "LM_z",
+          "XGB_reg_ret_z",
+          "MOM_REV / MOM_LOWVOL / MOM_LOWVOL_REV heuristics",
+          "MLP/ListMLE on r1000 and r3000_liquid",
+          "financing column"
+        ],
+        "stop_reason": "frozen tests decisive; every decision-rule gate fails",
+        "xgboost_trial_books": 720
+      },
+      "artifacts": {
+        "concise_report": "pakal-research/reports/ltr_momentum_study/REPORT.md",
+        "decision_log": "pakal-research/reports/ltr_momentum_study/decision_log.jsonl",
+        "experiment_ledger": "pakal-research/reports/ltr_momentum_study/experiment_ledger.jsonl",
+        "frozen_specification": "pakal-research/reports/ltr_momentum_study/research_spec_frozen.json",
+        "full_report": "pakal-research/reports/ltr_momentum_study/REPORT_FULL.md",
+        "hypothesis_registry": "pakal-research/reports/ltr_momentum_study/hypothesis_registry.json",
+        "manifest": "pakal-research/reports/ltr_momentum_study/run_manifest.json",
+        "notebook": "pakal-research/reports/ltr_momentum_study/ltr_momentum_study.ipynb",
+        "primary_charts": [
+          "pakal-research/reports/ltr_momentum_study/charts/08_all_models_by_era_r3000.png",
+          "pakal-research/reports/ltr_momentum_study/charts/02_exec_net_central_r3000.png",
+          "pakal-research/reports/ltr_momentum_study/charts/06_trial_luck_lm_r3000.png",
+          "pakal-research/reports/ltr_momentum_study/charts/07_score_loadings_r3000.png"
+        ],
+        "primary_source_code": [
+          "pakal-research/ltr_momentum/ltr_lib.py",
+          "pakal-research/ltr_momentum/ltr_models.py",
+          "pakal-research/ltr_momentum/ltr_run.py",
+          "pakal-research/ltr_momentum/ltr_charts.py",
+          "pakal-research/ltr_momentum/test_ltr_timing.py",
+          "pakal-research/ltr_momentum/ltr_build_artifacts.py"
+        ],
+        "primary_tables": [
+          "pakal-research/reports/ltr_momentum_study/tables/table_paper_comparison.csv",
+          "pakal-research/reports/ltr_momentum_study/tables/table_executable.csv",
+          "pakal-research/reports/ltr_momentum_study/tables/table_tests_H1_H2.csv",
+          "pakal-research/reports/ltr_momentum_study/tables/table_spanning_H3.csv",
+          "pakal-research/reports/ltr_momentum_study/tables/table_trial_luck.csv",
+          "pakal-research/reports/ltr_momentum_study/tables/table_score_loadings.csv"
+        ],
+        "research_state": "pakal-research/reports/ltr_momentum_study/research_state.json",
+        "source_rule_map": "pakal-research/reports/ltr_momentum_study/SOURCE_RULE_MAP.md"
+      },
+      "comfortable_capacity": null,
+      "concise_report": "pakal-research/reports/ltr_momentum_study/REPORT.md",
+      "cost_capacity": {
+        "borrow_bps_per_year": {
+          "central": {
+            "r1000": 100,
+            "r3000": 200
+          },
+          "conservative": {
+            "r1000": 300,
+            "r3000": 500
+          }
+        },
+        "breakeven_one_way_bps_LM_r3000": {
+          "1996_2020": 18.1,
+          "2021_2026": 2.5
+        },
+        "capacity_impact_separate": true,
+        "central_research_one_way_bps": {
+          "r1000": 5,
+          "r3000": 10,
+          "r3000_liquid": 7.5
+        },
+        "comfortable_capacity": null,
+        "conservative_survival_one_way_bps": {
+          "r1000": 12.5,
+          "r3000": 25,
+          "r3000_liquid": 20
+        },
+        "financing": "T-bill on net long dollars (0.3-0.5 for low-vol-tilted books)",
+        "hard_capacity": null,
+        "paper_like_round_trip_bps": 0,
+        "soft_capacity": null,
+        "strained_capacity": null,
+        "unresolved_reason": "no candidate passed; R3000 short legs hold median $3-5M ADV names, 15-35% under $5"
+      },
+      "created_at": "2026-10-14T19:30:00+00:00",
+      "decision_timing": "after final Close_T of each month",
+      "disposition": "rejected",
+      "feature_findings": [
+        {
+          "corrected_significance": "H1 Holm p = 1",
+          "direction": "long top decile of score",
+          "economic_mechanism": "slow momentum with mild reversal; heavy hyperparameter noise",
+          "effect_size": "gross Sharpe 0.99 (1996-2020), 0.35 (2021-26); net central 0.33 / -0.33",
+          "feature": "LambdaMART rank:pairwise on 22 momentum features, decile labels",
+          "period_consistency": "2.13 1996-2000 -> 0.09 2016-2020",
+          "recommended_action": "do not use",
+          "role": "signal",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "t -3 (ListNet)",
+          "direction": "n/a",
+          "economic_mechanism": "learns who lands in the extreme decile = volatility (score-vol rank corr +0.74)",
+          "effect_size": "gross Sharpe -0.76 / -0.34 (1996-2020) with the best long-side NDCG of all models",
+          "feature": "Top-weighted list losses (ListNet softmax over decile labels; XGBoost rank:ndcg)",
+          "period_consistency": "negative in every block",
+          "recommended_action": "never use extreme-decile relevance labels for return ranking",
+          "role": "signal",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "post hoc in tradable universes",
+          "direction": "long top decile",
+          "economic_mechanism": "momentum + low volatility + small-cap residual (factor R2 0.72-0.91)",
+          "effect_size": "R3000 gross 1.3 / 1.2-1.0 post 2021; R1000 MLP post-2021 net 0.08",
+          "feature": "Regress-then-rank MLP / ListMLE on per-month z-scored features",
+          "period_consistency": "holds in R3000, small-cap dependent",
+          "recommended_action": "diagnostic only",
+          "role": "signal",
+          "status": "diagnostic"
+        },
+        {
+          "corrected_significance": "post hoc; alpha vs UMD + LOWVOL ~0 (it is those two factors)",
+          "direction": "long strong + calm",
+          "economic_mechanism": "momentum + betting-against-volatility; works only with risk (inverse-vol) weights, not dollar-neutral",
+          "effect_size": "R1000 net central financed 0.65 (1996-2020), 0.47 (2021-26); JT 0.26 / 0.37",
+          "feature": "rank(ret_252) - rank(vol_63 EWM), inverse-vol weighted long-short (post hoc)",
+          "period_consistency": "stable both eras",
+          "recommended_action": "fold into TBMC-05 two-factor rotation review; no separate study",
+          "role": "signal",
+          "status": "forward_hypothesis"
+        }
+      ],
+      "fill_timing": "Open_(T+1) to Open_(T'+1); Close_T -> Close_T' paper-like diagnostic",
+      "hard_capacity": null,
+      "knowledge_record": "pakal-research/reports/ltr_momentum_study/knowledge_record.json",
+      "last_reviewed_at": "2026-10-14T19:30:00+00:00",
+      "limitations": [
+        "no CRSP NYSE codes 10/11; Russell PIT 1992-2026; no delisting returns",
+        "reduced hyperparameter budget (20/10 XGBoost trials, 5 neural trials vs 50) and narrower nets",
+        "numpy re-implementation of RankNet/ListNet/ListMLE (gradients unit-tested)",
+        "capacity not modelled"
+      ],
+      "maximum_drawdown": null,
+      "next_test": "none for LTR; optionally review rank(12m) - rank(vol) only inside the existing TBMC-05 two-factor rotation shadow",
+      "next_tests": [
+        "none for LTR; optionally review rank(12m) - rank(vol) only inside the existing TBMC-05 two-factor rotation shadow"
+      ],
+      "notebook": "pakal-research/reports/ltr_momentum_study/ltr_momentum_study.ipynb",
+      "objective": "Replicate the paper's claim that learning-to-rank (LambdaMART, ListNet, ListMLE, RankNet) on 22 momentum features roughly triples the Sharpe of momentum and regress-then-rank; decompose loss vs label vs learner; test what the models learn, executable costs, financing, and post-publication (2021-2026).",
+      "portal_images": [
+        "assets/ltr_momentum_study/01-02_exec_net_central_r3000.png",
+        "assets/ltr_momentum_study/02-06_trial_luck_lm_r3000.png"
+      ],
+      "primary_cost_layer": "central_research",
+      "primary_metrics": {
+        "JT_net_central_sharpe_1996_2020": 0.19,
+        "JT_net_central_sharpe_2021_2026": 0.4,
+        "LM_exec_gross_sharpe_1996_2020": 0.99,
+        "LM_exec_gross_sharpe_2021_2026": 0.35,
+        "LM_net_central_sharpe_1996_2020": 0.33,
+        "LM_net_central_sharpe_2021_2026": -0.33,
+        "LM_turnover_month": 1.01,
+        "MLP_net_central_sharpe_1996_2020": 0.95,
+        "MLP_net_central_sharpe_2021_2026": 0.84,
+        "cost_layer": "central_research: 10 bps per side + 200 bps/yr borrow",
+        "pairwise_vs_mse_trees_sharpe_diff": -0.81,
+        "period": "1996-01 to 2026-07 formation months (6 frozen 5-year walk-forward blocks)",
+        "turnover_unit": "monthly traded notional per unit of book, both legs",
+        "universe": "Russell 3000 PIT, top/bottom 10%, w = 0.15/sigma_i/n per side"
+      },
+      "replication_outcome": "not_replicated",
+      "research_status": "diagnostic",
+      "signal_family": "cross_sectional_momentum_machine_learning_ranking",
+      "soft_capacity": null,
+      "sources": [
+        "pakal-research/sources/ltr_momentum/aligrithm_10_23_learning_to_rank_2026-10-14.pdf | sha256:a8a06d5d34cf77a47e919e43ca5ac02b3746a9a934772f390d32122d4c31a3cc",
+        "https://arxiv.org/abs/2012.07149 (Poh, Lim, Zohren, Roberts 2020, v1)"
+      ],
+      "study_id": "ltr_momentum_study",
+      "tags": [
+        "learning_to_rank",
+        "lambdamart",
+        "listnet",
+        "listmle",
+        "ranknet",
+        "cross_sectional_momentum",
+        "machine_learning",
+        "low_volatility",
+        "article_audit",
+        "hyperparameter_selection_bias"
+      ],
+      "timing_attribution": {
+        "artifact": "pakal-research/reports/ltr_momentum_study/tables/table_executable.csv",
+        "diagnostic_path": "Close_T -> Close_T'",
+        "executable_path": "Open_(T+1) -> Open_(T'+1)",
+        "headline_result": "paper-like minus executable Sharpe within +-0.12 for every non-random model (median 0.00); timing is not the explanation",
+        "status": "tested"
+      },
+      "title": "Learning to rank for cross-sectional momentum (Poh-Lim-Zohren-Roberts 2020 / Aligrithm 10.23) on US PIT equities",
+      "universes": [
+        "r3000 PIT (primary)",
+        "r1000 PIT",
+        "r3000 liquid (price >= $5, ADV >= $5M)"
+      ],
+      "verdict": "Not replicated. On Russell 3000 1996-2020 (Open->Open, no costs) LambdaMART gets Sharpe 0.99 vs the paper's 2.16, ListNet and rank:ndcg are negative, and the regress-then-rank MLP the paper reports at 0.27 gets 1.34. With identical trees/features/labels, squared error beats the pairwise ranking loss by 0.81 Sharpe (SE 0.20): the paper's central mechanism reverses. The working models learn momentum plus a strong low-volatility tilt; top-weighted list losses learn volatility (who lands in the extreme decile) and lose money while winning NDCG. LambdaMART's 20 hyperparameter trials span -1.2..+2.3 Sharpe within a block; the no-selection ensemble is 0.67 before and 0.00 after 2020. After costs and T-bill financing of the net-long dollars that inverse-vol weights create, no ML model beats a two-line rank(12m) - rank(vol) rule in tradable universes, and neither beats plain 12-month momentum by more than random-book noise after 2021 (financed net Sharpe 0.31-0.50 vs JT 0.33-0.37).",
+      "verdicts": {
+        "economic_value": "fails: H1 Holm p = 1 in all 4 cells; LM post-2021 net central -0.33",
+        "predictive_value": "real but it is momentum + low volatility; decays strongly after 2005; tree models collapse after 2020",
+        "promotion": "none",
+        "source_replication": "fails: LM 0.99 vs 2.16, ListNet -0.76 vs 1.97, MLP 1.34 vs 0.27 (Russell 3000, 1996-2020, gross)"
+      }
+    },
+    {
       "CAGR": 0.0643247426012578,
       "Sharpe": 0.7586049932058608,
       "adaptive_lineage": {
@@ -20137,6 +21036,199 @@
       ],
       "verdict": "Diagnostic only. The filter is a transparent beta and drawdown overlay, but this history is source-contaminated and the executable next-open evidence does not justify deployment without a pristine forward window and live fill/cash implementation.",
       "verdicts": null
+    },
+    {
+      "CAGR": 0.1380379357206225,
+      "Sharpe": 0.6066398824403856,
+      "adaptive_lineage": null,
+      "artifacts": {
+        "concise_report": "pakal-research/reports/megacap_concentration_beta_boost/REPORT.md",
+        "frozen_specification": "pakal-research/reports/megacap_concentration_beta_boost/research_spec_frozen.json",
+        "full_report": "pakal-research/reports/megacap_concentration_beta_boost/REPORT_FULL.md",
+        "manifest": "pakal-research/reports/megacap_concentration_beta_boost/run_manifest.json",
+        "notebook": "pakal-research/reports/megacap_concentration_beta_boost/megacap_concentration_beta_boost.ipynb",
+        "primary_charts": [
+          "pakal-research/reports/megacap_concentration_beta_boost/charts/1_growth_drawdown_key_books.png",
+          "pakal-research/reports/megacap_concentration_beta_boost/charts/3_primary_family_vs_control.png",
+          "pakal-research/reports/megacap_concentration_beta_boost/charts/2_grid_cagr_vs_maxdd.png",
+          "pakal-research/reports/megacap_concentration_beta_boost/charts/5_french_century.png",
+          "pakal-research/reports/megacap_concentration_beta_boost/charts/9_addendum_sharpe_first.png"
+        ],
+        "primary_source_code": [
+          "pakal-research/megacap_concentration_beta_boost/mcbb_lib.py",
+          "pakal-research/megacap_concentration_beta_boost/mcbb_run.py",
+          "pakal-research/megacap_concentration_beta_boost/mcbb_controls_v11.py",
+          "pakal-research/megacap_concentration_beta_boost/mcbb_charts.py",
+          "pakal-research/megacap_concentration_beta_boost/mcbb_build_artifacts.py",
+          "pakal-research/megacap_concentration_beta_boost/test_mcbb_timing.py",
+          "pakal-research/megacap_concentration_beta_boost/mcbb_addendum_sharpe_first.py",
+          "pakal-research/megacap_concentration_beta_boost/mcbb_addendum_voltarget.py"
+        ],
+        "primary_tables": [
+          "pakal-research/reports/megacap_concentration_beta_boost/tables/primary_family_holm_v11.csv",
+          "pakal-research/reports/megacap_concentration_beta_boost/tables/primary_family_holm.csv",
+          "pakal-research/reports/megacap_concentration_beta_boost/tables/book_stats.csv",
+          "pakal-research/reports/megacap_concentration_beta_boost/tables/yardstick_stats.csv",
+          "pakal-research/reports/megacap_concentration_beta_boost/tables/neighborhood_summary_v11.csv",
+          "pakal-research/reports/megacap_concentration_beta_boost/tables/secondary_regime_holm.csv",
+          "pakal-research/reports/megacap_concentration_beta_boost/tables/french_decades.csv",
+          "pakal-research/reports/megacap_concentration_beta_boost/tables/french_regressions.csv",
+          "pakal-research/reports/megacap_concentration_beta_boost/tables/french_switch.csv",
+          "pakal-research/reports/megacap_concentration_beta_boost/tables/addendum_sharpe_first.csv",
+          "pakal-research/reports/megacap_concentration_beta_boost/tables/addendum_voltarget.csv"
+        ]
+      },
+      "comfortable_capacity": "<= $200M",
+      "concise_report": "pakal-research/reports/megacap_concentration_beta_boost/REPORT.md",
+      "cost_capacity": {
+        "capacity_impact_separate": true,
+        "central_research_round_trip_bps": 10,
+        "comfortable_capacity": "<= $200M",
+        "conservative_survival_round_trip_bps": 20,
+        "hard_capacity": "> $5B",
+        "note": "mega-caps trade $1B+ per day; monthly turnover of names ~20%; the hot-name tilt (MU, SNDK) lowers the bands; financing spread dominates costs at 2x",
+        "paper_like_round_trip_bps": 0,
+        "soft_capacity": "$200M-1B",
+        "strained_capacity": "$1-5B"
+      },
+      "created_at": "2026-10-10T00:00:00+03:00",
+      "decision_timing": "Close_t at month end (selection, gate, leverage); weekly-gate variant re-reads the gate at week ends",
+      "disposition": "rejected",
+      "feature_findings": [
+        {
+          "feature": "biggest-N selection (turnover proxy), N 3-20",
+          "finding": "CAGR rises with concentration but so does on-day beta (1.3-1.6); vs matched S&P +1-6 pp/yr, t 1.2-2.1 medians; zero or negative before 2009"
+        },
+        {
+          "feature": "index SMA200 gate (monthly / weekly)",
+          "finding": "halves max DD, Sharpe +0.1; weekly helps post-2016, hurts pre-2008"
+        },
+        {
+          "feature": "CORE5 per stock",
+          "finding": "DD -72% -> -54% on the 2x gated book at ~0 CAGR cost"
+        },
+        {
+          "feature": "constant leverage 1.5x / 2x, VT30",
+          "finding": "CAGR +4..+7 pp per 0.5x; DD -59% / -72%; VT30 16.6%/yr at -44%"
+        },
+        {
+          "feature": "relative-strength regime switch (6/12/36m) and concentration-change switch",
+          "finding": "no gain vs static (Holm p 1)"
+        },
+        {
+          "feature": "century: largest CRSP decile vs market",
+          "finding": "-0.4 pp/yr over 100y; decade waves; past 12m relative return t 2.9 but switch does not beat market"
+        },
+        {
+          "feature": "3-year turnover size proxy",
+          "finding": "better than 1-year in all 8 primary cells (t 2.7 gated biggest-5); forward hypothesis"
+        },
+        {
+          "feature": "Addendum: gate + CORE5 biggest-10 vs own gated index at matched beta, with leverage (owner's Sharpe-first target)",
+          "finding": "S&P: names add no Sharpe (0.64 = 0.64). NDX: +0.08 Sharpe (t 2.0, post hoc), all 2009+; matches plain NDX in that era. Leverage preserves Sharpe: NDX 1.5x 24.5%/yr DD -45%, 2x 30.3%/yr DD -57%."
+        },
+        {
+          "feature": "Addendum 2: vol-targeted leverage (20/25/30%, cap 2x) on gate + CORE5 biggest-10 vs own gated index",
+          "finding": "no CAGR gain (t ~0); worse than constant 1.5x with the gate (NDX 19.2%/0.73/-46% vs 24.5%/0.79/-45%); vol target de-levers into recoveries once a gate exists"
+        }
+      ],
+      "fill_timing": "Close_(t+1) MOC; robustness Open_(t+1)",
+      "hard_capacity": "> $5B",
+      "knowledge_record": "pakal-research/reports/megacap_concentration_beta_boost/knowledge_record.json",
+      "last_reviewed_at": "2026-10-10T00:00:00+03:00",
+      "limitations": [
+        "no PIT market cap (dollar-turnover proxy with an attention tilt)",
+        "monthly leverage reset, no intramonth margin calls",
+        "stock-book borrowing at T-bill + 1% (index futures would be cheaper)",
+        "delisting returns after the last bar not modelled",
+        "two exploratory rounds preceded the frozen spec; v1.1 control amendment after seeing v1"
+      ],
+      "maximum_drawdown": -0.4156121366732873,
+      "next_test": "Pre-registered 'levered gated Nasdaq-100 + half-sized mega-cap tilt' sleeve: 50% gated NQ/QQQ + 50% biggest-10 NDX by 3-year turnover with CORE5 per stock, constant 1.5x, SMA200 monthly gate, NQ financing for the index half; locked 2016-2026 holdout and walk-forward; then 6-month paper shadow beside the crisis-trend hedge pod",
+      "next_tests": [
+        "Pre-registered 'levered gated Nasdaq-100 + half-sized mega-cap tilt' sleeve: 50% gated NQ/QQQ + 50% biggest-10 NDX by 3-year turnover with CORE5 per stock, constant 1.5x, SMA200 monthly gate, NQ financing for the index half; locked 2016-2026 holdout and walk-forward; then 6-month paper shadow beside the crisis-trend hedge pod",
+        "untested guardrails to specify before live: 20% per-name cap, de-lever to 1x after a -25% drawdown until a new high, faster (weekly) exit with monthly re-entry"
+      ],
+      "notebook": "pakal-research/reports/megacap_concentration_beta_boost/megacap_concentration_beta_boost.ipynb",
+      "objective": "Owner goal: a very large CAGR boost through deliberately high beta in the largest US stocks. Test whether concentration adds CAGR beyond beta, whether the mega-cap premium is structural, and whether the regime can be timed.",
+      "portal_images": [
+        "assets/megacap_concentration_beta_boost/01-1_growth_drawdown_key_books.png",
+        "assets/megacap_concentration_beta_boost/02-2_grid_cagr_vs_maxdd.png"
+      ],
+      "primary_cost_layer": "central_research",
+      "primary_metrics": {
+        "CAGR": 0.1380379357206225,
+        "Sharpe": 0.6066398824403856,
+        "alpha_ann": 0.0187560160709393,
+        "alpha_t_nw": 0.9932564952016772,
+        "annualized_volatility": 0.2035409168316679,
+        "benchmark_sharpe": 0.5411217151740236,
+        "best_family_member": "biggest-5 gated 1x, +3.7 pp/yr, t 1.57, Holm p 0.46",
+        "boost_candidate": {
+          "CAGR": 0.2074729447074528,
+          "beta_on": 2.7455762667035377,
+          "book": "biggest-10 gated 2x",
+          "maxdd": -0.7227368500999396,
+          "yardstick_maxdd": -0.4837957514032954,
+          "yardstick_spx_2x_gate_CAGR": 0.1625910706483091
+        },
+        "cost_layer": "central_research (5 bps per side for mega-caps; borrowing %3MTCM + 1%)",
+        "maximum_drawdown": -0.4156121366732873,
+        "n_trials": 244,
+        "period": "1991-02-04..2026-09-25",
+        "turnover": null,
+        "universe": "S&P 500 biggest 10 by 252d turnover, EW, SMA200 gate, 1x (primary member)"
+      },
+      "replication_outcome": "owner_hypothesis_not_supported",
+      "research_status": "diagnostic",
+      "signal_family": "size_concentration_beta_overlay",
+      "soft_capacity": "$200M-1B",
+      "sources": [
+        "Owner request 2026-10-10 (chat, Hebrew)",
+        "Ken French data library, Portfolios Formed on ME (CRSP 202605)",
+        "alpha_super alpha/scout/specs/core5.py (CORE5 adaptive trend)",
+        "pakal-research/biggest_n_trend_gate (rounds 1-2, same day)"
+      ],
+      "study_id": "megacap_concentration_beta_boost",
+      "tags": [
+        "mega_cap",
+        "concentration",
+        "beta",
+        "leverage",
+        "trend_gate",
+        "sma200",
+        "core5",
+        "size_deciles",
+        "century",
+        "us_equities",
+        "rejected"
+      ],
+      "timing_attribution": {
+        "artifact": "pakal-research/reports/megacap_concentration_beta_boost/tables/primary_family_holm_v11.csv",
+        "diagnostic_path": "century regressions on CRSP deciles (overlapping 12m, NW)",
+        "executable_path": "stateful monthly/weekly engine with leverage, drift, financing and tiered costs; beta-matched S&P controls",
+        "headline_result": "biggest-10 gated vs S&P at beta 1.34: 1.9 pp/yr, t 0.99, Holm p 0.80",
+        "method": "frozen v1 spec + v1.1 control amendment, 244 books, primary family 8 tests Holm, bootstrap, secondary 6+1",
+        "metrics": {
+          "big10_gate_diff_t_nw": 0.9932564952016772,
+          "big10_gate_holm_p": 0.8014624321179714,
+          "grid_share_t_gt_2": 0.24479166666666666
+        },
+        "status": "tested",
+        "unavailable_reason": null
+      },
+      "title": "Mega-cap concentration as a beta boost: biggest-N S&P 500 / Nasdaq-100 books with trend gates and leverage against the S&P at matched beta, plus a century of CRSP size deciles",
+      "universes": [
+        "S&P 500 PIT (primary), Nasdaq-100 PIT (secondary), S&P 100 pool as a cap proxy; $5 raw floor; delisted names included",
+        "CRSP size deciles 1926-2026 (Ken French) for the century context"
+      ],
+      "verdict": "REJECTED AS ALPHA, ACCEPTED AS BETA. Against the S&P 500 held at the same on-day beta, the biggest-10 S&P 500 book adds 1.9 pp/yr (t 1.0, Holm p 0.80); no primary member passes the frozen rule. The gain is a 2009-2026 regime (biggest-10 gated: -0.7 pp/yr vs control in 1991-2008, +4.5 pp/yr in 2009-2026); over 1926-2026 the largest CRSP decile trailed the market by 0.4 pp/yr and concentration is at a century high. A levered gated S&P (2x + SMA200: 16.3%/yr, DD -48%) delivers the boost with less risk than the 2x gated biggest-10 (20.7%/yr, DD -72%, beta 2.7). Regime timing adds nothing (Holm p 1). Forward hypothesis only: a 3-year turnover size proxy (t 2.7) and the Nasdaq-100 universe.",
+      "verdicts": {
+        "economic_value": "none beyond beta after costs and financing; the levered gated index dominates on drawdown",
+        "predictive_value": "mega-cap tilt positive after 2009 only; century relative momentum t 2.9 but tiny; concentration level does not predict",
+        "promotion": "none; shadow-only idea: 756-day proxy, N 5-10, SMA200 gate, CORE5 per stock, 1.5x",
+        "source_replication": "owner hypothesis; two prior exploratory rounds (biggest_n_trend_gate) disclosed in the spec"
+      }
     },
     {
       "CAGR": 0.0342070101743816,
@@ -20792,6 +21884,337 @@
         "predictive_value": "positive 1991-2000, flat 2001-2018, insignificant 2019-2026 (all 11 family tests Holm p = 1)",
         "promotion": "none; suddenness frozen as forward diagnostic only",
         "source_replication": "directionally replicated: same construction (mean 1.04, turnover 34%) and sign; momentum not subsumed; suddenness explains less"
+      }
+    },
+    {
+      "CAGR": null,
+      "Sharpe": null,
+      "adaptive_lineage": {
+        "declared_total_variants": 56,
+        "post_hoc_items": [
+          "equal-vol SPY translation table",
+          "placebo exposure caveat"
+        ],
+        "stop_reason": "frozen tests decisive; neighbourhood fails 2000-09 everywhere"
+      },
+      "artifacts": {
+        "concise_report": "pakal-research/reports/ndx_dip_ladder_tqqq_study/REPORT.md",
+        "decision_log": "pakal-research/reports/ndx_dip_ladder_tqqq_study/decision_log.jsonl",
+        "frozen_specification": "pakal-research/reports/ndx_dip_ladder_tqqq_study/research_spec_frozen.json",
+        "full_report": "pakal-research/reports/ndx_dip_ladder_tqqq_study/REPORT_FULL.md",
+        "manifest": "pakal-research/reports/ndx_dip_ladder_tqqq_study/run_manifest.json",
+        "notebook": "pakal-research/reports/ndx_dip_ladder_tqqq_study/ndx_dip_ladder_tqqq_study.ipynb",
+        "primary_charts": [
+          "pakal-research/reports/ndx_dip_ladder_tqqq_study/charts/01_equity_curves.png",
+          "pakal-research/reports/ndx_dip_ladder_tqqq_study/charts/02_drawdown_and_weight.png",
+          "pakal-research/reports/ndx_dip_ladder_tqqq_study/charts/03_episode_payoffs.png",
+          "pakal-research/reports/ndx_dip_ladder_tqqq_study/charts/04_rolling_10y.png",
+          "pakal-research/reports/ndx_dip_ladder_tqqq_study/charts/05_grid_by_era.png",
+          "pakal-research/reports/ndx_dip_ladder_tqqq_study/charts/06_placebo_sharpe.png"
+        ],
+        "primary_source_code": [
+          "pakal-research/ndx_dip_ladder/ndl_lib.py",
+          "pakal-research/ndx_dip_ladder/ndl_run.py",
+          "pakal-research/ndx_dip_ladder/ndl_charts.py",
+          "pakal-research/ndx_dip_ladder/test_ndl_timing.py",
+          "pakal-research/ndx_dip_ladder/ndl_build_artifacts.py"
+        ],
+        "primary_tables": [
+          "pakal-research/reports/ndx_dip_ladder_tqqq_study/tables/table_main.csv",
+          "pakal-research/reports/ndx_dip_ladder_tqqq_study/tables/table_tests.csv",
+          "pakal-research/reports/ndx_dip_ladder_tqqq_study/tables/table_variants.csv",
+          "pakal-research/reports/ndx_dip_ladder_tqqq_study/tables/table_equal_vol_spy.csv",
+          "pakal-research/reports/ndx_dip_ladder_tqqq_study/tables/table_episodes_b0.csv",
+          "pakal-research/reports/ndx_dip_ladder_tqqq_study/tables/table_stress_2000_peak.csv",
+          "pakal-research/reports/ndx_dip_ladder_tqqq_study/tables/table_rolling10y.csv"
+        ]
+      },
+      "comfortable_capacity": null,
+      "concise_report": "pakal-research/reports/ndx_dip_ladder_tqqq_study/REPORT.md",
+      "cost_capacity": {
+        "capacity_impact_separate": true,
+        "central_research_one_way_bps": 5,
+        "comfortable_capacity": null,
+        "conservative_survival_one_way_bps": 15,
+        "hard_capacity": null,
+        "paper_like_round_trip_bps": 0,
+        "soft_capacity": null,
+        "strained_capacity": null,
+        "unresolved_reason": "rejected; SPY/TQQQ liquidity not binding for a personal book"
+      },
+      "created_at": "2026-10-16T06:38:22+00:00",
+      "decision_timing": "after Close_T of $NDX",
+      "disposition": "rejected",
+      "feature_findings": [
+        {
+          "corrected_significance": "H1 Holm 0.70, H2 1.0, H3 1.0",
+          "direction": "add leverage after drawdowns",
+          "economic_mechanism": "short-put-like payoff: many small recovery wins, one ruinous long drawdown with decaying 3x",
+          "effect_size": "CAGR +0.9 pp, Sharpe -0.015, max DD -15 pp vs SPY",
+          "feature": "NDX drawdown ladder into TQQQ (5% start, 3% step, 2% tranches, exit at old peak)",
+          "period_consistency": "+ 1988-99, - 2000-09, + 2010-26",
+          "recommended_action": "do not use; a constant small leverage slice dominates it",
+          "role": "exposure/sizing",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "not tested (declared variant, no selection)",
+          "direction": "sell leverage when half of the drawdown is recovered",
+          "economic_mechanism": "caps holding time in deep bears; leaves little exposure",
+          "effect_size": "max DD equal to SPY, Sharpe +0.005, CAGR +0.4 pp",
+          "feature": "Half-retrace exit (E1) for dip ladders",
+          "period_consistency": "slightly negative 2010-26",
+          "recommended_action": "only form of the ladder that adds no drawdown; not worth running",
+          "role": "exit",
+          "status": "diagnostic"
+        }
+      ],
+      "fill_timing": "Close_(T+1); sensitivity Close_T (MOC) and Close_(T+5)",
+      "hard_capacity": null,
+      "knowledge_record": "pakal-research/reports/ndx_dip_ladder_tqqq_study/knowledge_record.json",
+      "last_reviewed_at": "2026-10-16T06:38:22+00:00",
+      "limitations": [
+        "synthetic TQQQ before 2010; index-based S&P before 1993; constant NDX dividend yield before 1999",
+        "1988 start inside the post-1987 drawdown (B0 opens with 8 tranches)",
+        "taxes ignored",
+        "author's own simulations unavailable"
+      ],
+      "maximum_drawdown": null,
+      "next_test": "none",
+      "next_tests": [
+        "none"
+      ],
+      "notebook": "pakal-research/reports/ndx_dip_ladder_tqqq_study/ndx_dip_ladder_tqqq_study.ipynb",
+      "objective": "Test a social-post claim that laddering S&P money into TQQQ on Nasdaq-100 drawdowns beats the index systematically and in every decade; test variants (thresholds, tranche size, vehicle, exits, caps, trend gate, S&P/UPRO, timing).",
+      "portal_images": [
+        "assets/ndx_dip_ladder_tqqq_study/01-01_equity_curves.png",
+        "assets/ndx_dip_ladder_tqqq_study/02-02_drawdown_and_weight.png"
+      ],
+      "primary_cost_layer": "central_research",
+      "primary_metrics": {
+        "H1_p_holm": 0.6984,
+        "H2_p_holm": 1.0,
+        "H3_p_holm": 1.0,
+        "avg_tqqq_weight": 0.06892407398459757,
+        "b0_cagr": 0.12339735925457296,
+        "b0_max_dd": -0.7025926729423445,
+        "b0_sharpe_ex": 0.50288493605923,
+        "episodes": 57,
+        "period": "1988-01-04..2026-10-15",
+        "rolling10y_share_sharpe_win": 0.5304347826086957,
+        "spy_cagr": 0.1135941868213699,
+        "spy_max_dd": -0.5518911920565711,
+        "spy_sharpe_ex": 0.5181703358774126
+      },
+      "replication_outcome": "claim_not_supported",
+      "research_status": "diagnostic",
+      "signal_family": "drawdown_ladder_leveraged_dip_buying",
+      "soft_capacity": null,
+      "sources": [
+        "pakal-research/reports/ndx_dip_ladder_tqqq_study/sources/post_screenshot.webp | sha256:91d0aa959844b87a1ebde99881f5c844bbe0de09bd52ae0a55437ae53d6a1544"
+      ],
+      "study_id": "ndx_dip_ladder_tqqq_study",
+      "tags": [
+        "tqqq",
+        "leveraged_etf",
+        "buy_the_dip",
+        "drawdown_ladder",
+        "nasdaq_100",
+        "social_media_claim",
+        "leverage_not_alpha"
+      ],
+      "timing_attribution": {
+        "artifact": "pakal-research/reports/ndx_dip_ladder_tqqq_study/tables/table_variants.csv",
+        "diagnostic_path": "Close_T fill",
+        "executable_path": "Close_(T+1) fill",
+        "headline_result": "full-window Sharpe 0.512 (same day) vs 0.503 (next day) vs 0.504 (5 days late)",
+        "status": "tested"
+      },
+      "title": "NDX dip ladder into TQQQ: 100% S&P, 2% into 3x Nasdaq at -5% and each further -3%, back to 100% S&P at the old NDX peak",
+      "universes": [
+        "SPY + TQQQ (synthetic 3x NDX TR before 2010-02-11)",
+        "variants: QQQ, QLD, UPRO"
+      ],
+      "verdict": "Rejected. 1988-2026: B0 12.3%/yr, Sharpe 0.50, max DD -70% vs SPY 11.4%, 0.52, -55%. The extra return is leverage (average 7% TQQQ, ~1.2x): SPY levered to B0's risk earns 12.7% and constant 7% TQQQ without timing 12.9%/0.54/-64%. H1-H3 all fail (Holm). 56 of 57 dip episodes win small; the 2000-2015 episode (NDX -83%, 26 tranches, 15.6 years held) loses 54% of the book vs SPY. Wins 1988-99 and 2010-26, loses 2000-09; 10-year windows starting 1990-99 trail SPY 89% of the time. 0/36 grid cells beat SPY's Sharpe in all three eras.",
+      "verdicts": {
+        "economic_value": "fails: H2 Sharpe diff -0.015 (p 0.65)",
+        "predictive_value": "none: random-date placebo Sharpe median 0.51 vs B0 0.50; constant weight beats dip timing",
+        "promotion": "none",
+        "source_replication": "claim not supported: beats SPY in raw return only, not in every decade, not at equal risk"
+      }
+    },
+    {
+      "CAGR": 0.2370906686427951,
+      "Sharpe": 0.7944021363516469,
+      "adaptive_lineage": null,
+      "artifacts": {
+        "concise_report": "pakal-research/reports/ndx_megacap_tilt_sleeve/REPORT.md",
+        "frozen_specification": "pakal-research/reports/ndx_megacap_tilt_sleeve/research_spec_frozen.json",
+        "full_report": "pakal-research/reports/ndx_megacap_tilt_sleeve/REPORT_FULL.md",
+        "manifest": "pakal-research/reports/ndx_megacap_tilt_sleeve/run_manifest.json",
+        "notebook": "pakal-research/reports/ndx_megacap_tilt_sleeve/ndx_megacap_tilt_sleeve.ipynb",
+        "primary_charts": [
+          "pakal-research/reports/ndx_megacap_tilt_sleeve/charts/1_growth_drawdown.png",
+          "pakal-research/reports/ndx_megacap_tilt_sleeve/charts/2_sleeve_anatomy.png",
+          "pakal-research/reports/ndx_megacap_tilt_sleeve/charts/3_tilt_ladder.png",
+          "pakal-research/reports/ndx_megacap_tilt_sleeve/charts/4_leverage_ladder.png",
+          "pakal-research/reports/ndx_megacap_tilt_sleeve/charts/5_walk_forward.png",
+          "pakal-research/reports/ndx_megacap_tilt_sleeve/charts/9_primary_family.png"
+        ],
+        "primary_source_code": [
+          "pakal-research/ndx_megacap_tilt_sleeve/nmts_lib.py",
+          "pakal-research/ndx_megacap_tilt_sleeve/nmts_run.py",
+          "pakal-research/ndx_megacap_tilt_sleeve/nmts_charts.py",
+          "pakal-research/ndx_megacap_tilt_sleeve/nmts_build_artifacts.py",
+          "pakal-research/ndx_megacap_tilt_sleeve/test_nmts_timing.py",
+          "pakal-research/megacap_concentration_beta_boost/mcbb_lib.py"
+        ],
+        "primary_tables": [
+          "pakal-research/reports/ndx_megacap_tilt_sleeve/tables/primary_family_holm.csv",
+          "pakal-research/reports/ndx_megacap_tilt_sleeve/tables/decision_rule.json",
+          "pakal-research/reports/ndx_megacap_tilt_sleeve/tables/book_stats.csv",
+          "pakal-research/reports/ndx_megacap_tilt_sleeve/tables/walk_forward.csv",
+          "pakal-research/reports/ndx_megacap_tilt_sleeve/tables/guardrails.csv",
+          "pakal-research/reports/ndx_megacap_tilt_sleeve/tables/ladders_ndx.csv",
+          "pakal-research/reports/ndx_megacap_tilt_sleeve/tables/crisis_returns.csv",
+          "pakal-research/reports/ndx_megacap_tilt_sleeve/tables/yearly_returns.csv",
+          "pakal-research/reports/ndx_megacap_tilt_sleeve/tables/primary_sleeve_exposure.csv"
+        ]
+      },
+      "comfortable_capacity": "<= $500M",
+      "concise_report": "pakal-research/reports/ndx_megacap_tilt_sleeve/REPORT.md",
+      "cost_capacity": {
+        "capacity_impact_separate": true,
+        "central_research_round_trip_bps": 10,
+        "comfortable_capacity": "<= $500M",
+        "conservative_survival_round_trip_bps": 20,
+        "hard_capacity": "> $10B",
+        "note": "NQ futures and $1B+/day mega-caps; 7.5% per name at 1.5x is the constraint; financing dominates costs",
+        "paper_like_round_trip_bps": 0,
+        "soft_capacity": "$500M-2B",
+        "strained_capacity": "$2-10B"
+      },
+      "created_at": "2026-10-10T00:00:00+03:00",
+      "decision_timing": "Close_t at month end (gate, selection, leverage); weekly-exit variant reads the gate at week ends (rejected)",
+      "disposition": "paper_shadow",
+      "feature_findings": [
+        {
+          "feature": "mega-cap tilt 0-100% of the book (biggest 10 NDX by 3y turnover)",
+          "finding": "Sharpe 0.72 -> 0.83 monotone in the tilt, all post-2009; 1995-2008 flat; 50% kept (half-Kelly), 75% defensible"
+        },
+        {
+          "feature": "CORE5 per stock inside the stock leg",
+          "finding": "lowers max DD in every era (-51% -> -43% at 50% tilt); without it the tilt gives the same Sharpe with a -51% DD"
+        },
+        {
+          "feature": "constant leverage 1-2x on the gated sleeve",
+          "finding": "Sharpe flat 0.79-0.80; +3 pp CAGR and +6 pp DD per 0.25x"
+        },
+        {
+          "feature": "weekly exit / drawdown de-lever guardrails",
+          "finding": "rejected: lower CAGR and Sharpe in both eras"
+        },
+        {
+          "feature": "walk-forward tilt choice (trailing 10y / 5y Sharpe)",
+          "finding": "OOS Sharpe 0.68 / 0.71 vs fixed 50/50 0.70 and index leg 0.62; picks tilt 100% since 2021"
+        },
+        {
+          "feature": "3-year vs 1-year turnover proxy",
+          "finding": "0.79 vs 0.77 Sharpe at 50% tilt; consistent with the parent study"
+        }
+      ],
+      "fill_timing": "Close_(t+1) MOC; Open_(t+1) sensitivity",
+      "hard_capacity": "> $10B",
+      "knowledge_record": "pakal-research/reports/ndx_megacap_tilt_sleeve/knowledge_record.json",
+      "last_reviewed_at": "2026-10-10T00:00:00+03:00",
+      "limitations": [
+        "tilt direction known before the study (holdout contaminated, disclosed)",
+        "turnover size proxy, not market cap",
+        "monthly leverage reset, no intramonth margin calls",
+        "$NDX price index for the 1994-1999 index leg",
+        "delisting returns after the last bar not modelled"
+      ],
+      "maximum_drawdown": -0.431709957428427,
+      "next_test": "6-month paper shadow beside the crisis-trend hedge pod: monthly decisions, log holdings, gate state, gross and realized slippage",
+      "next_tests": [
+        "6-month paper shadow beside the crisis-trend hedge pod: monthly decisions, log holdings, gate state, gross and realized slippage",
+        "sizing in the book: correlation with the NDX family pods and the tail-hedge budget at 1.5x",
+        "financing the index leg with NQ futures (spread ~0.3-0.5%) and the stock leg on margin: realized cost audit"
+      ],
+      "notebook": "pakal-research/reports/ndx_megacap_tilt_sleeve/ndx_megacap_tilt_sleeve.ipynb",
+      "objective": "Owner goal: high CAGR with a good Sharpe through the biggest names. Pre-registered test of the sleeve suggested by megacap_concentration_beta_boost: 50% gated Nasdaq-100 index + 50% biggest-10 with CORE5 per stock, constant 1.5x.",
+      "portal_images": [
+        "assets/ndx_megacap_tilt_sleeve/01-1_growth_drawdown.png",
+        "assets/ndx_megacap_tilt_sleeve/02-2_sleeve_anatomy.png"
+      ],
+      "primary_cost_layer": "central_research",
+      "primary_metrics": {
+        "CAGR": 0.2370906686427951,
+        "Sharpe": 0.7944021363516469,
+        "alpha_ann": 0.0197819214840775,
+        "alpha_t_nw": 1.289911956375802,
+        "annualized_volatility": 0.2891159279531178,
+        "benchmark_sharpe": 0.722954453009264,
+        "best_family_member": "tilt 1.0 (Sharpe 0.83) - 2009-2026 driven, not adopted",
+        "cost_layer": "central_research (5 bps stocks, 2 bps index per side; borrowing %3MTCM + 1%)",
+        "leverage_ladder_sleeve_50": {
+          "1.5x": "23.7% / 0.79 / -43%",
+          "1x": "17.3% / 0.80 / -30%",
+          "2x": "29.4% / 0.79 / -55%"
+        },
+        "maximum_drawdown": -0.431709957428427,
+        "n_trials": 131,
+        "period": "1994-10-03..2026-09-25",
+        "turnover": null,
+        "universe": "Nasdaq-100, sleeve 50/50 at 1.5x, 3-year turnover proxy, CORE5 per stock, SMA200 monthly gate"
+      },
+      "replication_outcome": "owner_sleeve_passes_pre_registered_rule",
+      "research_status": "forward_hypothesis",
+      "signal_family": "levered_trend_gated_index_with_size_tilt",
+      "soft_capacity": "$500M-2B",
+      "sources": [
+        "Owner request 2026-10-10 (chat, Hebrew)",
+        "pakal-research/reports/megacap_concentration_beta_boost (parent study, same day)",
+        "alpha_super alpha/scout/specs/core5.py"
+      ],
+      "study_id": "ndx_megacap_tilt_sleeve",
+      "tags": [
+        "nasdaq100",
+        "mega_cap",
+        "tilt",
+        "leverage",
+        "sma200",
+        "core5",
+        "pre_registered",
+        "walk_forward",
+        "paper_shadow"
+      ],
+      "timing_attribution": {
+        "artifact": "pakal-research/reports/ndx_megacap_tilt_sleeve/tables/primary_family_holm.csv",
+        "diagnostic_path": "walk-forward tilt choice from trailing 10y / 5y Sharpe, OOS 2005-2026",
+        "executable_path": "stateful monthly engine with leverage, drift, financing, tiered costs; NAV-at-decision state for the drawdown rule",
+        "headline_result": "sleeve vs index leg: Sharpe 0.79 vs 0.72, boot P 0.95, CAGR diff t 1.29",
+        "method": "frozen spec, 131 books, 4 + 4 Holm tests, block bootstrap, walk-forward, guardrail rule",
+        "metrics": {
+          "boot_p_sharpe": 0.9505,
+          "cagr_diff_t_nw": 1.289911956375802,
+          "sleeve_sharpe": 0.7944021363516469,
+          "tilt0_sharpe": 0.722954453009264,
+          "wf10_oos_sharpe": 0.6830479361809247
+        },
+        "status": "tested",
+        "unavailable_reason": null
+      },
+      "title": "Levered gated Nasdaq-100 with a half-sized mega-cap tilt (biggest 10 by 3-year turnover, CORE5 per stock, SMA200 gate, 1.5x): pre-registered sleeve with walk-forward",
+      "universes": [
+        "Nasdaq-100 PIT (primary), S&P 500 PIT (secondary); index leg QQQ TR / $SPXTR"
+      ],
+      "verdict": "PROMOTED TO PAPER SHADOW by the pre-registered rule. Sleeve 1994-2026: CAGR 23.7%, Sharpe 0.79, max DD -43% vs the levered gated index alone 21.7% / 0.72 / -51%. Sharpe gain bootstrap P 0.95; CAGR difference t 1.3 (Holm p 0.35, not significant). The tilt did not hurt in 1995-2008 (Sharpe 0.71 vs 0.68); walk-forward OOS Sharpe 0.68 vs index leg 0.62. Guardrails (weekly exit, drawdown de-lever) rejected. Leverage is a clean dial (Sharpe flat 0.79-0.80 from 1x to 2x).",
+      "verdicts": {
+        "economic_value": "Sharpe +0.07 and DD -8 pp over the levered gated index after costs and financing; CAGR +2 pp not significant",
+        "predictive_value": "tilt Sharpe gain is 2009-2026; CORE5 per stock lowers drawdown in every era",
+        "promotion": "paper shadow 6 months beside the crisis-trend hedge pod; live only after the shadow and a sizing decision",
+        "source_replication": "owner sleeve, pre-registered; tilt direction known from the parent study (disclosed)"
       }
     },
     {
@@ -26045,6 +27468,240 @@
         "predictive_value": "Discovery gains do not transfer (corr -0.11); two sign flips.",
         "promotion": "Rejected under the frozen rule; no candidate.",
         "source_replication": "Base reproduced exactly (0.0 max abs daily difference)."
+      }
+    },
+    {
+      "CAGR": -0.011511951809102092,
+      "Sharpe": -0.22010942389833688,
+      "adaptive_lineage": {
+        "active_minutes": 210,
+        "active_minutes_used": 210,
+        "actual_total_variants": 3982,
+        "actual_variants": 3744,
+        "declared_total_variants": 3982,
+        "declared_variants": 3744,
+        "profile": "standard",
+        "rounds_completed": 0,
+        "stop_reason": "frozen baseline failed locked holdout; null shows the selection process itself manufactures the backtest"
+      },
+      "artifacts": {
+        "charts": "pakal-research/reports/rangerz_breakout_generator_study/charts/",
+        "concise_report": "pakal-research/reports/rangerz_breakout_generator_study/REPORT.md",
+        "decision_log": "pakal-research/reports/rangerz_breakout_generator_study/decision_log.jsonl",
+        "experiment_ledger": "pakal-research/reports/rangerz_breakout_generator_study/experiment_ledger.jsonl",
+        "frozen_specification": "pakal-research/reports/rangerz_breakout_generator_study/research_spec_frozen.json",
+        "full_report": "pakal-research/reports/rangerz_breakout_generator_study/REPORT_FULL.md",
+        "hypothesis_registry": "pakal-research/reports/rangerz_breakout_generator_study/hypothesis_registry.json",
+        "manifest": "pakal-research/reports/rangerz_breakout_generator_study/run_manifest.json",
+        "notebook": "pakal-research/rangerz_breakout_generator_study.ipynb",
+        "primary_charts": [
+          "pakal-research/reports/rangerz_breakout_generator_study/charts/equity_selected_vs_benchmarks.png",
+          "pakal-research/reports/rangerz_breakout_generator_study/charts/selection_bias_null_and_random.png",
+          "pakal-research/reports/rangerz_breakout_generator_study/charts/rank_buckets_and_building_blocks.png",
+          "pakal-research/reports/rangerz_breakout_generator_study/charts/mrc_vendor_style.png"
+        ],
+        "primary_source_code": [
+          "pakal-research/rangerz_breakout_generator/rz_engine.py",
+          "pakal-research/rangerz_breakout_generator/rz_pipeline.py",
+          "pakal-research/rangerz_breakout_generator/rz_run.py",
+          "pakal-research/rangerz_breakout_generator/zorro/RangerLite.c"
+        ],
+        "primary_tables": [
+          "pakal-research/reports/rangerz_breakout_generator_study/tables/selected_algos.csv",
+          "pakal-research/reports/rangerz_breakout_generator_study/tables/all_jobs_discovery_holdout.csv",
+          "pakal-research/reports/rangerz_breakout_generator_study/tables/null_worlds.csv",
+          "pakal-research/reports/rangerz_breakout_generator_study/holdout_results.json"
+        ],
+        "research_state": "pakal-research/reports/rangerz_breakout_generator_study/research_state.json",
+        "source_code": "pakal-research/rangerz_breakout_generator/",
+        "source_rule_map": "pakal-research/reports/rangerz_breakout_generator_study/SOURCE_RULE_MAP.md",
+        "tables": "pakal-research/reports/rangerz_breakout_generator_study/tables/",
+        "zorro_script": "pakal-research/rangerz_breakout_generator/zorro/RangerLite.c"
+      },
+      "comfortable_capacity": "retail 1-lot CFD/futures sizes",
+      "concise_report": "pakal-research/reports/rangerz_breakout_generator_study/REPORT.md",
+      "cost_capacity": {
+        "capacity_impact_separate": true,
+        "central_research_round_trip_bps": 2.0,
+        "central_round_trip_bps": 2.0,
+        "comfortable": "retail 1-lot",
+        "comfortable_capacity": "retail 1-lot CFD/futures sizes",
+        "conservative_round_trip_bps": 5.0,
+        "conservative_survival_round_trip_bps": 5.0,
+        "hard": null,
+        "hard_capacity": null,
+        "note": "index class; gold 1/3/6, crypto 5/10/20 bps round trip plus financing",
+        "paper_like_round_trip_bps": 1.0,
+        "soft": null,
+        "soft_capacity": null,
+        "strained": null,
+        "strained_capacity": null,
+        "unresolved_reason": "not modelled; strategy rejected before capacity matters"
+      },
+      "created_at": "2026-10-12T21:12:28+00:00",
+      "decision_timing": "Close of bar t-1 (resting stop/limit orders for bar t)",
+      "disposition": "rejected",
+      "feature_findings": [
+        {
+          "corrected_significance": "null worlds p 0.90",
+          "direction": "negative",
+          "economic_mechanism": "selection from thousands of WFO backtests and cross-market ranking chase the last regime (BTC 2018-21)",
+          "effect_size": "holdout Sharpe -0.22 vs random median 0.16",
+          "feature": "Evaluation Shell selection (WFO summary, PF/R2, 3x3 cluster, AR rank, correlation prune)",
+          "period_consistency": "discovery 2.50 -> holdout -0.22",
+          "recommended_action": "never trust a selected-portfolio backtest or its MRC p-value; demand a frozen cut-off and later data",
+          "role": "portfolio_construction",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "descriptive",
+          "direction": "positive for stop",
+          "economic_mechanism": "time-series momentum at the range edge",
+          "effect_size": "median holdout Sharpe 0.12 vs -0.17",
+          "feature": "Breakout stop entry vs limit (fade) entry",
+          "period_consistency": "same sign discovery and holdout",
+          "recommended_action": "consistent with existing trend work; nothing new",
+          "role": "signal",
+          "status": "diagnostic"
+        },
+        {
+          "corrected_significance": "t 2.84 across markets",
+          "direction": "positive",
+          "economic_mechanism": "separates long-only/stop/with-trend families (drift + trend) more than parameters",
+          "effect_size": "rank IC 0.114",
+          "feature": "Within-market walk-forward rank",
+          "period_consistency": "12 of 13 markets checked in aggregate",
+          "recommended_action": "forward hypothesis at most: one with-trend breakout per market, daily",
+          "role": "validation",
+          "status": "diagnostic"
+        },
+        {
+          "corrected_significance": "n/a",
+          "direction": "inflating",
+          "economic_mechanism": "profit / (drawdown x sqrt(3/years) + margin); Sharpe on in-market bars",
+          "effect_size": "RangerLite SPX500: AR 75% vs ~7.6%/yr on notional",
+          "feature": "Zorro 'Annual return' and Sharpe definitions",
+          "period_consistency": "n/a",
+          "recommended_action": "translate vendor AR to return on notional before comparing",
+          "role": "diagnostic",
+          "status": "documented"
+        }
+      ],
+      "fill_timing": "Inside bar t at the order level, or Open_t on a gap",
+      "hard_capacity": null,
+      "knowledge_record": "pakal-research/reports/rangerz_breakout_generator_study/knowledge_record.json",
+      "last_reviewed_at": "2026-10-12T21:12:28+00:00",
+      "limitations": [
+        "Ranger rules (about 3000 lines of EasyLanguage) and the RangerZ jobs and portfolios are not public. This rebuilds the public architecture; it does not replicate RangerZ trades.",
+        "Intrabar path heuristic on H1/H4/D1 bars instead of M1/tick fills.",
+        "No DJI/DAX intraday; CFD spreads and financing approximated in bps.",
+        "Brute-force PRR training instead of Zorro Ascent with parameter-chart smoothing.",
+        "Intraday discovery is short: walk-forward OOS covers about 2018-09..2021-12.",
+        "The real shell lets the user drop algos with unconvincing equity curves by eye; that discretionary step is replaced by the mechanical rank/correlation rule."
+      ],
+      "maximum_drawdown": -0.18419770022358384,
+      "next_test": "None for RangerZ itself unless job files are obtained; then: frozen cut-off audit vs random picks.",
+      "next_tests": [
+        "None for RangerZ itself unless job files are obtained; then: frozen cut-off audit vs random picks.",
+        "Forward-only hypothesis: one with-trend breakout stop per market on daily bars (overlaps existing trend sleeves)."
+      ],
+      "notebook": "pakal-research/rangerz_breakout_generator_study.ipynb",
+      "objective": "Does a Ranger-structured range-breakout strategy generator (public Ranger variable structure, public proxies for the proprietary TI trend indicators) plus the Zorro Evaluation Shell selection process (walk-forward summary, PF/R2 prefilter, 3x3 WFO cluster analysis, annual-return ranking, correlation pruning to 11 algos) deliver out-of-sample risk-adjusted returns on the RangerZ basic-portfolio markets (S&P500, DJI, DAX, gold, bitcoin; plus NQ) at 60m/4h/daily bars after costs on a locked 2022-2026 holdout, better than random selection from the same generator and better than a classic Donchian breakout?",
+      "portal_images": [
+        "assets/rangerz_breakout_generator_study/01-equity_selected_vs_benchmarks.png",
+        "assets/rangerz_breakout_generator_study/02-mrc_vendor_style.png"
+      ],
+      "primary_cost_layer": "central_research",
+      "primary_metrics": {
+        "CAGR": -0.011511951809102092,
+        "Sharpe": -0.22010942389833688,
+        "annualized_volatility": 0.05230104011547991,
+        "benchmarks_holdout_Sharpe": {
+          "buy_hold": 0.946271073607681,
+          "classic_donchian": 0.32096005137543543,
+          "generator_average": 0.27610578918954576,
+          "random_11_median": 0.16201168019069323
+        },
+        "cost_layer": "central_research",
+        "discovery_Sharpe": 2.496100435652137,
+        "maximum_drawdown": -0.18419770022358384,
+        "null_worlds": {
+          "max": 4.4297245445788,
+          "median": 3.608359744797384,
+          "min": 1.783909862703569,
+          "n": 30,
+          "p": 0.9,
+          "real": 2.496100435652137
+        },
+        "period": "holdout 2022-01-01..2026-10-09 (discovery WFO OOS 2018-10..2021-12 for the selected algos)",
+        "series": "Shell-selected 11 algos, inverse-vol weights scaled to 10% vol in discovery",
+        "turnover": "1-lot round trips; selected algos about 2,060 trades in the holdout",
+        "universe": "13 markets (see universes)",
+        "vendor_claims": {
+          "apex_l_AR_100to1": 3.5,
+          "apex_l_sharpe": 2.5,
+          "apex_s_sharpe": 2.2,
+          "basic_AR_20to1": 0.35,
+          "basic_sharpe": 1.3
+        },
+        "vendor_style_mrc": {
+          "bootstrap_pf_median": 1.0978396950784362,
+          "cycles": 200,
+          "original_pf": 1.8090039747579496,
+          "p_value": 0.01,
+          "seconds": 323.67918062210083
+        },
+        "zorro_annual_return_20to1_discovery": 2.538826605209998
+      },
+      "replication_outcome": "not_reproducible",
+      "research_status": "diagnostic",
+      "signal_family": "range_breakout_strategy_generator_and_walk_forward_selection",
+      "soft_capacity": null,
+      "sources": [
+        "https://zorro-project.com/rangerz.php",
+        "https://zorro-project.com/manual/en/rangerz.htm",
+        "https://zorro-project.com/manual/en/shell.htm",
+        "https://zorro-project.com/manual/en/performance.htm",
+        "https://financial-hacker.com/implementing-robert-pardos-ranger-system/",
+        "https://financial-hacker.com/coding-the-largest-strategy-ever/",
+        "https://financial-hacker.com/build-better-strategies-part-6-evaluation/",
+        "https://pardo.space"
+      ],
+      "study_id": "rangerz_breakout_generator_study",
+      "tags": [
+        "zorro",
+        "rangerz",
+        "pardo",
+        "breakout",
+        "donchian",
+        "walk_forward",
+        "selection_bias",
+        "vendor_audit",
+        "intraday",
+        "bitcoin"
+      ],
+      "timing_attribution": {
+        "artifact": null,
+        "diagnostic_path": "n/a",
+        "executable_path": "n/a",
+        "headline_result": "No close-to-open boundary to attribute.",
+        "method": "Resting stop/limit orders; no Close_T fills",
+        "metrics": {},
+        "status": "not_applicable",
+        "unavailable_reason": "not applicable by construction"
+      },
+      "title": "RangerZ (Pardo Ranger on Zorro) range-breakout strategy generator: public-rule rebuild and Evaluation-Shell selection-bias audit",
+      "universes": [
+        "ES/NQ/GC continuous futures H1/H4 2016-2026",
+        "BTC spot H1/H4/D1 2017-2026",
+        "SPY, DIA, GLD (Norgate total return) and $DAX daily 1999-2026"
+      ],
+      "verdict": "The public Ranger architecture (3,744 job-market cells) plus a mechanical Evaluation Shell selected 11 algos with discovery Sharpe 2.50; on the locked 2022-2026 holdout they lost money (Sharpe -0.22, 19th percentile of random 11-job picks, below classic Donchian 0.32, generator average 0.28 and buy-and-hold 0.95). The same pipeline on 30 bootstrapped random-price worlds gives discovery Sharpe 1.8-4.4 (p 0.90); the shell's own Montecarlo check still reports p 0.01. RangerZ's 35-350% 'annual return' is profit / (normalized drawdown + margin) on 1-lot CFDs.",
+      "verdicts": {
+        "economic_value": "None: holdout Sharpe paper 0.38 / central -0.22 / conservative -0.67.",
+        "predictive_value": "Weak within-market: rank IC of discovery vs holdout Sharpe 0.114 (t 2.84, p 0.007, 13 markets); top-1% jobs median holdout Sharpe 0.19. Cross-market ranking reversed (BTC best -> worst, gold worst -> best).",
+        "promotion": "Fails 6 of 7 frozen conditions (only rank IC passes). Diagnostic; do not buy or implement.",
+        "source_replication": "not_reproducible: Ranger code, RZ jobs and portfolios are paid/NDA; public variable structure rebuilt with proxies for proprietary TI indicators."
       }
     },
     {
@@ -36937,6 +38594,233 @@
       ],
       "verdict": "No risk overlay passed the frozen validation and confirmation gate.",
       "verdicts": null
+    },
+    {
+      "CAGR": -0.0558,
+      "Sharpe": -1.55,
+      "adaptive_lineage": {
+        "active_minutes_used": 230,
+        "actual_total_variants": 246,
+        "declared_total_variants": 246,
+        "profile": "standard",
+        "rounds_completed": 1,
+        "stop_reason": "faithful baseline and one mechanism round show no tradable edge"
+      },
+      "artifacts": {
+        "concise_report": "pakal-research/reports/valuelytica_fx_us_hours_study/REPORT.md",
+        "decision_log": "pakal-research/reports/valuelytica_fx_us_hours_study/decision_log.jsonl",
+        "experiment_ledger": "pakal-research/reports/valuelytica_fx_us_hours_study/experiment_ledger.jsonl",
+        "frozen_specification": "pakal-research/reports/valuelytica_fx_us_hours_study/research_spec_frozen.json",
+        "full_report": "pakal-research/reports/valuelytica_fx_us_hours_study/REPORT_FULL.md",
+        "hypothesis_registry": "pakal-research/reports/valuelytica_fx_us_hours_study/hypothesis_registry.json",
+        "manifest": "pakal-research/reports/valuelytica_fx_us_hours_study/run_manifest.json",
+        "notebook": "pakal-research/reports/valuelytica_fx_us_hours_study/valuelytica_fx_us_hours_study.ipynb",
+        "primary_charts": [
+          "pakal-research/reports/valuelytica_fx_us_hours_study/charts/c01_sharpe_by_currency_by_period.png",
+          "pakal-research/reports/valuelytica_fx_us_hours_study/charts/c02_basket_cumulative.png",
+          "pakal-research/reports/valuelytica_fx_us_hours_study/charts/c03_hour_of_day_profile.png",
+          "pakal-research/reports/valuelytica_fx_us_hours_study/charts/c04_yenstrike.png"
+        ],
+        "primary_source_code": [
+          "pakal-research/valuelytica_fx_us_hours/fxh_lib.py",
+          "pakal-research/valuelytica_fx_us_hours/fxh_run.py",
+          "pakal-research/valuelytica_fx_us_hours/fxh_histdata.py",
+          "pakal-research/valuelytica_fx_us_hours/fxh_supplement.py",
+          "pakal-research/valuelytica_fx_us_hours/fxh_spread_probe.py"
+        ],
+        "primary_tables": [
+          "pakal-research/reports/valuelytica_fx_us_hours_study/tables/t01_per_currency.csv",
+          "pakal-research/reports/valuelytica_fx_us_hours_study/tables/t02_baskets.csv",
+          "pakal-research/reports/valuelytica_fx_us_hours_study/tables/t06_yenstrike.csv",
+          "pakal-research/reports/valuelytica_fx_us_hours_study/tables/t12_post_measured_cost_layer.csv"
+        ],
+        "research_state": "pakal-research/reports/valuelytica_fx_us_hours_study/research_state.json",
+        "source_rule_map": "pakal-research/reports/valuelytica_fx_us_hours_study/SOURCE_RULE_MAP.md"
+      },
+      "comfortable_capacity": null,
+      "concise_report": "pakal-research/reports/valuelytica_fx_us_hours_study/REPORT.md",
+      "cost_capacity": {
+        "capacity_impact_separate": true,
+        "capacity_unresolved_reason": "waived: no edge survives cost, spot FX deep at these hours",
+        "central_research_round_trip_bps": "0.8-7 by currency (basket mean 2.9; G10 1.7)",
+        "comfortable_capacity": null,
+        "conservative_survival_round_trip_bps": "2x central",
+        "hard_capacity": null,
+        "measured_round_trip_bps": {
+          "CZK": 4.4,
+          "EUR": 0.2,
+          "GBP": 0.63,
+          "HUF": 4.17,
+          "JPY": 0.29,
+          "MXN": 2.19,
+          "PLN": 3.17,
+          "SEK": 1.87,
+          "note": "Dukascopy 11:00/15:00 NY, 2019-01, 2019-10, 2023-10, incl. bid-only bias, before ~0.4 bp commission"
+        },
+        "paper_like_round_trip_bps": 0,
+        "soft_capacity": null,
+        "strained_capacity": null
+      },
+      "created_at": "2026-10-16T17:05:00+03:00",
+      "decision_timing": "calendar rule known in advance (clock time and weekday)",
+      "disposition": "rejected",
+      "feature_findings": [
+        {
+          "corrected_significance": "BH q<0.10 for CZK HUF PLN EUR DKK GBP SEK (2008-20, gross)",
+          "direction": "positive (foreign up)",
+          "economic_mechanism": "dollar demand into the London 4pm fix released afterwards; home-hours currency weakness",
+          "effect_size": "basket +0.93 / +0.26 / -1.36 bp per day (2008-20 / 2021-25 / 2026); per currency 0.5-2.6 bp in 2008-20",
+          "feature": "Long foreign vs USD 11:00-15:00 NY (Four-Hour)",
+          "period_consistency": "positive 13/19 years; fading after 2020; negative 2026 for 14/15 currencies",
+          "recommended_action": "do not trade; cost exceeds edge",
+          "role": "signal",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "CZK HUF GBP PLN q<0.10",
+          "direction": "positive",
+          "economic_mechanism": "adds the pre-fix hour, which has the opposite sign",
+          "effect_size": "weaker than 11-15 (basket Sharpe 0.46 vs 0.61 gross 2008-20)",
+          "feature": "Jiang window 10:00-16:00 NY",
+          "period_consistency": "same pattern",
+          "recommended_action": "drop",
+          "role": "signal",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "1/75 currency x weekday cells q<0.10",
+          "direction": "positive",
+          "economic_mechanism": "none identified",
+          "effect_size": "Wed-minus-rest +1.0 bp (NW t 0.73) in 2008-20; -7.1 bp in 2026",
+          "feature": "Wednesday effect",
+          "period_consistency": "only 2021-25",
+          "recommended_action": "drop",
+          "role": "filter",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "n/a (fails out of sample)",
+          "direction": "as source",
+          "economic_mechanism": "claimed pre-weekend safe-haven demand; weekday signs flip by era",
+          "effect_size": "2021-25 Sharpe 1.30 gross; 2008-20 0.01; 2026 -0.11; walk-forward 0.06/-0.01",
+          "feature": "YenStrike: short JPY Mon/Tue, long JPY Fri, 11-15 NY",
+          "period_consistency": "only 2021-25 (2022 = one third)",
+          "recommended_action": "drop",
+          "role": "signal",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "post-hoc, not corrected",
+          "direction": "foreign down before fix, up after",
+          "economic_mechanism": "benchmark-fix currency hedging flows (Krohn, Mueller, Whelan 2024)",
+          "effect_size": "-0.49 bp (t -2.06) / +0.33 bp (t 1.80) per hour; DST-mismatch contrast -1.0 vs +0.4 bp (p 0.15)",
+          "feature": "London 4pm fix dollar bid (pre-fix hour USD up, post-fix USD down)",
+          "period_consistency": "2008-20 clear, 2021-26 weak",
+          "recommended_action": "execution note: avoid buying USD in the hour before the 4pm London fix",
+          "role": "diagnostic",
+          "status": "diagnostic"
+        },
+        {
+          "corrected_significance": "n/a",
+          "direction": "n/a",
+          "economic_mechanism": "data hygiene",
+          "effect_size": "HistData stamps are NY local time with DST (vendor docs say EST without DST)",
+          "feature": "Vendor clock audit via NFP spike",
+          "period_consistency": "every pair-year",
+          "recommended_action": "reuse fxh_histdata.py loader; always audit intraday vendor clocks with a scheduled-release spike",
+          "role": "diagnostic",
+          "status": "note"
+        }
+      ],
+      "fill_timing": "entry first trade at/after 11:00:00 NY, exit last trade before 15:00:00 NY, same day",
+      "hard_capacity": null,
+      "knowledge_record": "pakal-research/reports/valuelytica_fx_us_hours_study/knowledge_record.json",
+      "last_reviewed_at": "2026-10-16T17:05:00+03:00",
+      "limitations": [
+        "HistData is bid-only and has hour gaps (Feb-Jul 2023, AUDJPY 2012); measured spreads are a 3-month Dukascopy sample",
+        "ILS and KRW (two of the source's best currencies) only from 2024 via Yahoo hourly",
+        "Source vendor, timestamps and G10 list unknown; replication is directional",
+        "Fix-mechanism tests are post-hoc and only moderately significant"
+      ],
+      "maximum_drawdown": -1.1,
+      "next_test": "none for trading; if FX conversion timing ever matters for the book, measure the fix-hour dollar bid on the user's actual conversion venue",
+      "next_tests": [
+        "none for trading; if FX conversion timing ever matters for the book, measure the fix-hour dollar bid on the user's actual conversion venue"
+      ],
+      "notebook": "pakal-research/reports/valuelytica_fx_us_hours_study/valuelytica_fx_us_hours_study.ipynb",
+      "objective": "Does long-foreign/short-USD held only 11:00-15:00 New York earn a premium that reproduces the source's 2021-2025 result, exists in unseen 2008-2020 and 2026, and survives spreads; does the YenStrike weekday JPY rule survive the same tests?",
+      "portal_images": [
+        "assets/valuelytica_fx_us_hours_study/01-c01_sharpe_by_currency_by_period.png",
+        "assets/valuelytica_fx_us_hours_study/02-c02_basket_cumulative.png"
+      ],
+      "primary_cost_layer": "central_research",
+      "primary_metrics": {
+        "CAGR": -0.0558,
+        "Sharpe": -1.55,
+        "annualized_volatility": 0.0371,
+        "cost_layer": "central_research (basket mean 2.9 bp round trip)",
+        "gross_reference": {
+          "CAGR": 0.0168,
+          "Sharpe": 0.45,
+          "maximum_drawdown_log": -0.063
+        },
+        "maximum_drawdown": -1.1,
+        "maximum_drawdown_note": "cumulative log return on notional (unfunded overlay)",
+        "period": "2008-01-02 to 2026-09-30",
+        "turnover": 252.0,
+        "turnover_note": "one round trip per weekday",
+        "universe": "ALL15 equal-weight basket, long foreign vs USD 11-15 NY"
+      },
+      "replication_outcome": "directionally_replicated",
+      "research_status": "diagnostic",
+      "signal_family": "calendar_intraday_fx_time_of_day",
+      "soft_capacity": null,
+      "sources": [
+        "https://valuelytica.substack.com/p/the-four-hour-fx-trade",
+        "https://valuelytica.substack.com/p/yenstrike-weekly-fx-seasonality",
+        "Jiang (2019) SSRN 2613592",
+        "Krohn, Mueller, Whelan (2024) Journal of Finance",
+        "HistData.com 1-minute bid; Dukascopy bid/ask sample; Yahoo Finance hourly"
+      ],
+      "study_id": "valuelytica_fx_us_hours_study",
+      "tags": [
+        "research-only",
+        "fx",
+        "intraday",
+        "time-of-day",
+        "calendar",
+        "london-fix",
+        "valuelytica",
+        "rejected"
+      ],
+      "timing_attribution": {
+        "artifact": "pakal-research/reports/valuelytica_fx_us_hours_study/tables/t10_post_fix_tests.csv",
+        "diagnostic_path": "n/a (no close-derived signal)",
+        "executable_path": "11:00 to 15:00 NY intraday window",
+        "headline_result": "drift sits in the hours after the London 4pm fix; the hour before the fix has the opposite sign",
+        "method": "hour-of-day decomposition and DST-mismatch natural experiment replace close/open attribution",
+        "metrics": {
+          "post_fix_hour_bps": 0.33,
+          "post_fix_hour_t": 1.8,
+          "pre_fix_hour_bps": -0.49,
+          "pre_fix_hour_t": -2.06
+        },
+        "status": "not_applicable",
+        "unavailable_reason": "calendar rule"
+      },
+      "title": "Valuelytica 'The Four-Hour FX Trade' (long foreign currencies vs USD 11:00-15:00 New York) and 'YenStrike' (weekday JPY rule): 15 currencies, 2008-2026 1-minute data, London-fix mechanism, measured spreads",
+      "universes": [
+        "15 USD pairs: EUR GBP JPY CHF AUD NZD CAD NOK SEK (G10) + CZK DKK HUF MXN PLN ZAR, HistData 1-minute bid 2008/2010-2026",
+        "ILS, KRW via Yahoo hourly 2024-2026 (diagnostic)",
+        "EURJPY, AUDJPY (YenStrike vehicles)"
+      ],
+      "verdict": "Both posts reproduce on 2021-2025 (GBP 0.30, MXN 1.11 vs 1.08, JPY -0.67; YenStrike Sharpe 1.30 vs 1.23). The US-hours drift against the dollar is real but tiny: 15-currency basket +0.93 bp/day in 2008-2020 (t 2.3), +0.26 bp in 2021-2025, -1.36 bp in 2026; central and measured costs exceed it in every period after 2020. YenStrike earns zero in 2008-2020 (Sharpe 0.01) and 2026; walk-forward signs earn nothing. Wednesday effect rejected. Mechanism: dollar bought into the London 4pm WM/R fix (11:00 NY) and released after it (pre-fix hour t -2.1). Rejected; diagnostic only.",
+      "verdicts": {
+        "economic_value": "none: edge 0.5-2.5 bp/window vs measured round trips 0.2-4.4 bp + commission; every pair negative after 2020 at measured cost",
+        "predictive_value": "Four-Hour drift significant gross in 2008-2020 (7 currency cells BH q<0.10), fading since 2021, negative 2026; YenStrike none out of sample; Wednesday none",
+        "promotion": "none; no shadow line; execution-timing note only (avoid buying USD in the hour before the London 4pm fix)",
+        "source_replication": "directionally replicated for both posts; YenStrike level 3.1% vs 4.27% claimed with the same Sharpe"
+      }
     },
     {
       "CAGR": 0.116,

@@ -1,0 +1,95 @@
+import { Stack, Row, H1, H2, H3, Text, Stat, Table, Select, Button, Divider, LineChart, CollapsibleSection, useCanvasState, useHostTheme, useCanvasAction } from "cursor/canvas";
+
+// Data are embedded. This artifact never fetches data or executes trade commands.
+const audit: any = __AUDIT_JSON__;
+const percent = (value: number | null | undefined) => value == null ? "לא זמין" : `${(value * 100).toFixed(2)}%`;
+const decimal = (value: number | null | undefined) => value == null ? "לא זמין" : value.toFixed(2);
+
+export default function WiredSignoffReport() {
+  const theme = useHostTheme();
+  const dispatch = useCanvasAction();
+  const [family, setFamily] = useCanvasState<string>("wired-signoff-family", "all");
+  const [priority, setPriority] = useCanvasState<string>("wired-signoff-priority", "1");
+  const [selected, setSelected] = useCanvasState<string>("wired-signoff-strategy", audit.cards[0].variant);
+  const cards = audit.cards.filter((card: any) => family === "all" || card.family === family);
+  const card = cards.find((item: any) => item.variant === selected) || cards[0];
+  const variants = new Set(cards.map((item: any) => item.variant));
+  const findings = (audit.remaining_items || audit.findings).filter((item: any) => item.priority <= Number(priority) && (family === "all" || (item.affected ? (!item.affected.length || item.affected.some((key: string) => variants.has(key))) : (!item.finding_ids?.length || audit.findings.some((source: any) => item.finding_ids.includes(source.id) && (!source.affected.length || source.affected.some((key: string) => variants.has(key))))))));
+  const families = [...new Set(audit.cards.map((item: any) => item.family))] as string[];
+  const benchmark = card.benchmark;
+  const stress = card.costs.extra7_5bps;
+  const liquidity = card.liquidity;
+  const recent = liquidity.period_details?.last3y;
+  const replay = card.replay || {};
+  const hostCount = replay.exact_int ?? replay.native_host_session_count_int ?? replay.passed_session_count_int;
+  const chart = card.chart.filter((point: any) => point.SPX_TR_strategy_common_close_equity != null && point.SPX_TR_benchmark_common_close_equity != null);
+  const previewStyle = { padding: "12px 16px", background: theme.fill.tertiary, color: theme.text.primary };
+  const preStyle = { whiteSpace: "pre-wrap" as const, overflowWrap: "anywhere" as const, direction: "ltr" as const, textAlign: "left" as const, fontSize: 12, maxHeight: 440, overflow: "auto", padding: 12, background: theme.fill.tertiary };
+  return <Stack gap={18} style={{ direction: "rtl", color: theme.text.primary, maxWidth: 1180, margin: "0 auto", padding: 24 }}>
+    <Text size="small" tone="secondary">ביקורת מחקר ומימוש · הון לדוגמה של מיליון דולר לכל אסטרטגיה</Text>
+    <H1>ביקורת וחתימה לאסטרטגיות המחוברות</H1>
+    <Text>סיכום: {audit.summary}</Text>
+    <div style={previewStyle}><Text>{audit.owner_review?.summary || audit.summary}</Text></div>
+    <Row gap={28} wrap><Stat value={audit.cards.length} label="אסטרטגיות בתוצר"/><Stat value={audit.tests.passed.toLocaleString()} label="בדיקות ייחודיות שעברו"/><Stat value={audit.tests.skipped} label="בדיקות שדולגו"/><Text size="small">גרסה: {audit.head.slice(0,7)} · סוף נתוני המחיר: {audit.data_endpoint}</Text></Row>
+    <Divider/>
+    {audit.owner_review && <CollapsibleSection title="ההחלטות שסוכמו"><Text>{audit.owner_review.review_date} · {audit.owner_review.scope}</Text>{audit.owner_review.decisions.map((item: any) => <Stack key={item.id} gap={6}><H3>{item.label}</H3><Text>{item.note}</Text><Text>{item.action}</Text></Stack>)}</CollapsibleSection>}
+    <H2>מה נותר פתוח, לפי עדיפות</H2>
+    <Row gap={12} wrap>
+      <Text size="small">משפחה:</Text><Select value={family} onChange={setFamily} options={[{value:"all",label:"כל המשפחות"},...families.map(key=>({value:key,label:audit.family_labels[key]}))]}/>
+      <Text size="small">עדיפות:</Text><Select value={priority} onChange={setPriority} options={[{value:"1",label:"הצעדים הראשונים"},{value:"2",label:"כולל מגבלות וניטור"},{value:"3",label:"כל הממצאים"}]}/>
+    </Row>
+    {findings.map((finding: any) => <CollapsibleSection key={finding.id} title={`עדיפות ${finding.priority}: ${finding.title}`} trailing={<Text size="small" tone="secondary">מזהה {finding.id}</Text>}>
+      <Text>{finding.body}</Text><Text weight="semibold">הפעולה הנדרשת: {finding.action}</Text>
+      <Text size="small" tone="secondary">{finding.stage || "פירוט בראיות המקור"}</Text>
+      {finding.technical && <pre style={preStyle}>{JSON.stringify(finding.technical,null,2)}</pre>}
+    </CollapsibleSection>)}
+    <CollapsibleSection title="הממצאים המקוריים וההחלטות לגביהם"><pre style={preStyle}>{JSON.stringify(audit.findings,null,2)}</pre></CollapsibleSection>
+    <H2>האסטרטגיות לפי משפחה</H2>
+    {family !== "all" && <Text>{audit.family_explanations[family]}</Text>}
+    <Table headers={["אסטרטגיה","תשואה שנתית","שארפ","ירידה מרבית","חתימת מחקר","חתימת מימוש"]} rows={cards.map((item:any)=>[
+      <Button variant="ghost" onClick={()=>setSelected(item.variant)}>{item.title}</Button>,percent(item.metrics.cagr),decimal(item.metrics.sharpe_zero_rf),percent(item.metrics.max_drawdown),item.research_status,item.execution_status
+    ])} rowTone={cards.map((item:any)=>(item.execution_status.includes("חסום")||item.research_status.includes("חסום"))?"danger":"warning")} columnAlign={["right","right","right","right","right","right"]}/>
+    <Text size="small" tone="secondary">התקופות שונות בין משפחות. המספרים נטו מהעלויות והמסים שבמודל; חתימת המימוש אינה בדיקת קבלה של חשבון שנפרס. בחירת אסטרטגיה מציגה את התנאים והראיות שלה.</Text>
+    <Divider/>
+    <H2>{card.title}</H2>
+    <Text size="small" tone="secondary">משפחת {audit.family_labels[card.family]} · תקופה: {card.metrics.start} עד {card.metrics.end} · רישום {card.tier.toUpperCase()}</Text>
+    <Text>{audit.family_explanations[card.family]}</Text>
+    <Row gap={24} wrap><Stat value={percent(card.metrics.cagr)} label="תשואה שנתית"/><Stat value={decimal(card.metrics.sharpe_zero_rf)} label="שארפ, ריבית אפס"/><Stat value={percent(card.metrics.max_drawdown)} label="ירידה מרבית יומית"/><Stat value={percent(card.metrics.volatility)} label="תנודתיות שנתית"/></Row>
+    <Text>חתימת מחקר: {card.research_status} · חתימת מימוש: {card.execution_status} · קבלת סביבה: {card.deployment_status}</Text>
+    {card.conditions.map((condition:string,index:number)=><Text key={index}>תנאי: {condition}</Text>)}
+    <Text size="small" tone="secondary">אימות: תוצאות הון ועסקאות כלכליות זהות בחזרה; הון בפועל של מיליון דולר ושני מיליון דולר. ההשוואה למסלול ההחלטה מכסה {hostCount} מועדים, בכפוף לגבולות הראיות.</Text>
+    <Text size="small" tone="secondary">{audit.proof_limit}</Text>
+    <Text>{card.execution_contract}</Text>
+    {benchmark.status === "available" && <Stack gap={10}>
+      <H3>השוואה לבנצ׳מרק באותם תאריכים</H3>
+      <Text>תשואה שנתית בסגירות מיושרות: אסטרטגיה {percent(benchmark.strategy.cagr)}, מדד כולל דיבידנדים {percent(benchmark.benchmark.cagr)}. מתאם יומי {decimal(benchmark.daily_correlation)}, בטא {decimal(benchmark.daily_beta)}.</Text>
+      <Text size="small" tone="secondary">ציר אנכי: מדד צמיחה, מאה בסגירה הראשונה המשותפת. ציר אופקי: חודש. מקור: מסלולים יומיים שמורים; נקודות חודשיות, חודש אחרון חלקי.</Text>
+      <LineChart categories={chart.map((point:any)=>point.date.slice(0,7))} series={[{name:"אסטרטגיה",data:chart.map((point:any)=>point.SPX_TR_strategy_common_close_equity/10000),tone:"info"},{name:"מדד כולל דיבידנדים",data:chart.map((point:any)=>point.SPX_TR_benchmark_common_close_equity/10000),tone:"neutral"}]} beginAtZero={false} height={250}/>
+      <H3>ירידה מהשיא</H3>
+      <Text size="small" tone="secondary">ציר אנכי: ירידה מהשיא באחוזים. ציר אופקי: חודש. כל נקודה היא הירידה היומית העמוקה ביותר בחודש; המדד המרבי חושב מכל הימים.</Text>
+      <LineChart categories={card.chart.map((point:any)=>point.date.slice(0,7))} series={[{name:"ירידה יומית מרבית בחודש",data:card.chart.map((point:any)=>point.drawdown*100),tone:"neutral"}]} valueSuffix="%" height={200}/>
+    </Stack>}
+    <H3>מה העלויות משנות בתוצאה</H3>
+    <Text>רגישות לתוספת שבע נקודה חמש נקודות בסיס לכל צד ביומן הקבוע: תשואה שנתית {percent(stress?.metrics?.cagr)}, לעומת {percent(card.metrics.cagr)} בבסיס. זו רגישות חשבונאית ללא תגובת כמויות או תשואה אבודה; אינה מבחן השפעת שוק.</Text>
+    <Text>מזומן שלילי נרשם ב־{card.cash.negative_cash_days} ימים; יתרה מינימלית ביחס להון: {percent(card.cash.min_cash_fraction)}. רגישות המימון מפורטת בנספח.</Text>
+    <H3>תקופות משנה</H3>
+    <Table headers={["תקופה","תשואה שנתית","ירידה מרבית","שארפ"]} rows={Object.values(card.subperiods).map((item:any)=>[`${item.start} עד ${item.end}`,percent(item.cagr),percent(item.max_drawdown),decimal(item.sharpe_zero_rf)])}/>
+    <H3>סחירות במיליון דולר</H3>
+    <Text>כיסוי היסטורי: {liquidity.order_count} עסקאות; מחזור חסר או בלתי מספיק ב־{liquidity.missing_adv_order_count}. בשלוש השנים האחרונות: {recent?.orders} עסקאות, {recent?.missing_adv_orders} ללא מחזור מספיק; אחוזון תשעים ותשעה של השתתפות במחזור בהון קבוע {percent(recent?.constant_1m_available_subset?.p99)}. זהו מחזור יומי מצרפי, ולא עומק מכרז.</Text>
+    <CollapsibleSection title="כללים, נוסחאות ותזמון">
+      {audit.family_formulas[card.family].map((formula:string,index:number)=><Text key={index}>{formula}</Text>)}
+      <Text>תזמון: מידע זמין עד סגירת יום ההחלטה בלבד, לביצוע בפתיחה הבאה. במשפחות החודשיות מדובר בסגירת סוף החודש ובפתיחה הראשונה בחודש הבא.</Text>{card.config && <pre style={preStyle}>{JSON.stringify(card.config,null,2)}</pre>}
+    </CollapsibleSection>
+    <CollapsibleSection title="תקופות משנה ורגישות לעלויות">
+      <Text>הבהרה: חיובים נוספים ביומן קבוע אינם הרצת אסטרטגיה מחדש; אין תגובת כמות, פוזיציות או תשואה אבודה על העלות.</Text><pre style={preStyle}>{JSON.stringify({subperiods:card.subperiods,costs:card.costs},null,2)}</pre>
+    </CollapsibleSection>
+    <CollapsibleSection title="חשבונאות וראיות החתימה"><pre style={preStyle}>{JSON.stringify({accounting:card.accounting,baseline:card.baseline_evidence,replay:card.replay,liquidity:card.liquidity},null,2)}</pre></CollapsibleSection>
+    <Row><Button variant="secondary" onClick={()=>dispatch({type:"openFile",path:`results/review/wired_signoff_20261015/${card.evidence}`})}>פתיחת הראיות</Button></Row>
+    <Divider/>
+    <H2>הנחות וגבולות</H2>{audit.global_assumptions.map((text:string,index:number)=><Text key={index}>{text}</Text>)}
+    <H2>קבלה לאחר פריסה</H2>{audit.post_deploy.map((text:string,index:number)=><Text key={index}>בדיקה: {text}</Text>)}
+    <H2>שיפורים ממוקדים לאבחון ולדשבורד</H2>{audit.operator_improvements.map((text:string,index:number)=><Text key={index}>{text}</Text>)}
+    <CollapsibleSection title="גרסה, בדיקות ומקורות"><Text>בדיקות סופיות שנבחרו: {audit.tests.passed} עברו, {audit.tests.skipped} דולגו, {audit.tests.failed} נכשלו. הספירה מנוכה מכפילויות; בדיקות שדולגו אינן נחשבות הצלחה.</Text><pre style={preStyle}>{JSON.stringify({head:audit.head,generated:audit.generated_utc,xml:audit.tests.xml,primarySources:audit.primary_sources},null,2)}</pre></CollapsibleSection>
+    <Text size="small" tone="secondary">גבול הביקורת: ללא פעולה בברוקר, פריסה, הפעלת מתזמן, הודעות או שינוי הקצאה. הפעלת קובץ זה מציגה ראיות בלבד.</Text>
+  </Stack>;
+}
