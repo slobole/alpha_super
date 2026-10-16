@@ -57,6 +57,11 @@ FAMILY_DESCRIPTION_DICT: dict[str, str] = {
         "Alpha101. Trials here are expected to be numerous and weakly motivated."
     ),
     "merger_arbitrage": "Capturing deal spreads between announcement and completion.",
+    "index_drawdown_dip_buying": (
+        "Adding broad-index exposure, often leveraged, in tranches after large drawdowns from the index high and "
+        "holding until recovery, paid for bearing crash risk and long-horizon mean reversion. Example: the NDX "
+        "dip ladder into TQQQ."
+    ),
 }
 
 

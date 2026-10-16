@@ -1197,6 +1197,23 @@ Report: `docs/research/SCOUT_DV2_LIMIT_ANCHOR_20261003.md`.
 - **Practice:** variants of an execution rule are compared at equal activity (fill rate), with a parameter-jitter band
   and a multiplicity adjustment. The MCPT does not separate variants of a rule that already has an edge.
 
+**A19 (2026-10-16, retro registration of the October studies).**
+Script: `scripts/research/scout_retro_registrations_20261016/register.py`, ledger rows 41-51.
+
+- **Gap:** ten studies run in pakal-research between 2026-10-10 and 2026-10-16 had their own frozen specs, but none
+  was written to this ledger. Their trials were missing from every family's N.
+- **Fix:** 11 retro registrations. `prior_trials_int` is what each study evaluated, taken from its knowledge record
+  or result tables. Antonacci is split three ways (GEM, trend models, reversal overlays), and the FIRM overlap is
+  double counted. `book_picture_20261014` is not registered, because it combines sleeves that are already registered.
+- **Families:** a new family, `index_drawdown_dip_buying` (the NDX dip ladder). RangerZ goes to
+  `formulaic_alpha_mining` (a generator search with no single mechanism). The megacap studies follow row 40 into
+  `time_series_trend_and_breakout`.
+- **Effect on prior counts:** calendar_and_flow 50 → 413 (EOM's family, from the bond-flow and FX-hours studies),
+  equity_cross_sectional_momentum 658 → 1,422, time_series_trend_and_breakout 1,806 → 2,987, tactical_asset_allocation
+  618 → 642, etf_short_term_reversal 250 → 295. The DSR is a WARN, not a gate, so no grade changes until a card is
+  re-issued.
+- **Practice:** a study run outside Scout gets its registration in the same week, so the ledger stays complete.
+
 **Not adopted from the critique.** One correction: the critique said the kill rule closes gap G-006.
 It does not. G-006's missing circuit breaker is about **repeated reconciliation failures**, not about
 performance. A performance kill rule is a separate, currently unrecorded gap, and P1 should add it to
