@@ -748,7 +748,7 @@ strategies and can start now. P3 gates each strategy only after the readiness-au
 | **P5 Strategy, luck, book and card** | S4, the three S5 gates and their diagnostics, S6, the research card, re-audition cards for TAA 3x and NDX VXN | Done 2026-10-02 (A9): cards issued; TAA 3x CANDIDATE (S3 pending), NDX VXN WATCHLIST |
 | **P6 Re-audition, classes W and X** | Retro registrations, prior-trial counts, cards for the remaining W and X strategies in section 10 order, Bench page | One card per strategy |
 | **P7 Path engine** | `engines/path.py`, gates for DV2 and HPI, then their re-audition | DV2 and HPI pass the gate; cards issued |
-| **P8 Discovery and shadow** | S7 vault opening with contamination rules, S8 monitor for new candidates, BY-FDR ledger report | Done 2026-10-16 (A20): `vault.py`, `shadow.py`, `fdr_report.py`; first new family (dividend month premium) run S0-S6 and into S8. A21: every registration graded in the ledger, the four FDR survivors in S8, a daily run |
+| **P8 Discovery and shadow** | S7 vault opening with contamination rules, S8 monitor for new candidates, BY-FDR ledger report | Done 2026-10-16 (A20): `vault.py`, `shadow.py`, `fdr_report.py`; first new family (dividend month premium) run S0-S6 and into S8. A21: every registration graded in the ledger, the four FDR survivors in S8, a daily run. A22: knowledge base linked to the ledger (36 retro rows, `kb` daily check) |
 
 ## 14. Known limitations of this design
 
@@ -1320,6 +1320,89 @@ CLI `daily`. Tests: `tests/test_scout_ledger_completeness.py`.
 - **Practice:** the knowledge base and the ledger still have no automatic link. Until one exists, a study added to the
   knowledge base gets its retro registration the same day (A19 said the same week; this session found the nine on the
   day they were written).
+
+**A22 (2026-10-17, the knowledge base linked to the ledger).**
+Script: `scripts/research/scout_kb_link_20261017/register.py`, ledger rows 302-373. Code: `alpha/scout/kb_link.py`, the
+`kb` part of `alpha/scout/daily.py`, CLI `kb`. Tests: `tests/test_scout_kb_link.py`.
+
+- **Gap:** the Scout research site mockup (2026-10-17) matched the 181 knowledge-base studies to the ledger. Only 18
+  were cited by a registration. 20 studies dated 2026-10-01..10-16 had none, including 7 written on 2026-10-16 after A21
+  ran. A21's "same day" rule depended on someone remembering it.
+- **Link rule:** a registration cites a study when its `source_str` contains `reports/<folder>`. `<folder>` is the path
+  between `reports/` and `/REPORT` in the study's `concise_report`, with Windows separators normalised (four A21 records
+  use backslash paths). The next character must not continue the name, so `x_v2` does not cite `x`. Citing a
+  sub-folder (`x/lane`) also cites `x`. Studies dated before 2026-10-01 are listed as pre-Scout, not gaps (142).
+  `book_picture_20261014` is not registrable, as in A19.
+- **Fix:** 36 retro registrations for the 20 studies, each with one grade row, "(outside Scout)". `prior_trials_int` is
+  the study's own `actual_total_variants`. A study that recorded no count is counted from its tables: every real-data
+  evaluation counts; placebo, random-pick and rank-noise draws are a null and do not (8.2). That gives concretum 49
+  (not 549), optimumv 155 (not 355) and trend-breakout candidates 86 (not 286).
+- **Splits:** a study with parts in several families gets one row per family. Each evaluation counts once, and a
+  study's rows sum to its count:
+  - Radge strategies: momentum / trend / stock reversal.
+  - Optimum V: TAA / macro.
+  - Calendar ETF pack: calendar / ETF reversal.
+  - Index membership: listing events / the NDX pod filter.
+  - Trend-breakout candidates: trend / momentum / listing events.
+  - The four QuantSeeker studies: 2-5 families each.
+  - Two QuantSeeker sub-counts are estimates: M13/M14 split 37 evaluations as 17/20.
+- **Parents:** same family only.
+  - Radge improvement → the Radge momentum row.
+  - SPY gate → row 128.
+  - Index-membership pod filter → NDX VXN.
+  - Dividend study → row 52.
+  - Intraday component reversal → row 124. It is the first executed test of that intake (Dai et al., 120 evaluations).
+  - GQR audit → row 21.
+- **GQR audit counts 0.** It is the "Pakal audit (866 runs)" that rows 21 and 22 already count. Its row only links the
+  record.
+- **Grades:** 8 WATCHLIST, 24 REJECTED, 4 DIAGNOSTIC, no CANDIDATE. The WATCHLIST rows:
+  - IYR month-end and pre-holiday energy / airlines;
+  - the EVRP vol sleeve;
+  - Radge All Weather ETF trend;
+  - QuantSeeker ETF IBS (15:45 → MOC);
+  - momentum volatility scaling;
+  - IQR momentum timing;
+  - short-vol timing;
+  - the low-vol + momentum rotation.
+- **Effect on prior counts** (sum of `prior_trials_int` per family):
+
+| Family | Before | After |
+|---|---:|---:|
+| time_series_trend_and_breakout | 2,987 | 25,097 |
+| tactical_asset_allocation | 959 | 1,915 |
+| etf_short_term_reversal | 295 | 758 |
+| us_equity_short_term_reversal | 1,546 | 1,977 |
+| equity_cross_sectional_momentum | 2,475 | 2,835 |
+| volatility_premium_and_hedges | 0 | 281 |
+| calendar_and_flow | 413 | 590 |
+| optimized_low_risk_allocation | 50 | 186 |
+| dividend_seeking_demand | 0 | 97 |
+| index_and_listing_events | 0 | 65 |
+| macro_regime_allocation | 1,702 | 1,748 |
+| index_drawdown_dip_buying | 53 | 84 |
+
+  The trend jump is one study: the FH Market Meanness Index audit recorded 21,919 evaluations.
+  - They are a full factorial: 840 intraday systems × 9 gates, 6,750 daily, plus a 7,560 same-close fill re-run;
+    14,310 configurations are distinct.
+  - The rule takes the recorded count. The DSR's expected maximum grows only with √(2 ln N), so the bar rises by
+    about 12% (N 3k → 25k), not 8×.
+  - The DSR is a WARN, so no grade changes.
+- **Automatic check:** `kb_link_report` lists every study with no citing registration. The daily run has a fifth part,
+  `kb`, which reports the gap count and ids. It is report only: a gap or an unreadable knowledge base never fails the
+  run. `python -m alpha.scout kb` prints the list. After this amendment: 0 gaps, 38 cited, 142 pre-Scout.
+- **Found, not changed:**
+  - **The GQR audit is counted twice.** Rows 21 and 22 each declare 866 for the one audit, so the trend family carries
+    1,732 for it. Rows are never edited; this overstates the family's N, which only makes the DSR stricter.
+  - **The dividend family now has a retro registration.** The Pakal dividend study ran the same day as row 52 on
+    separate code (97 evaluations, H1 + a pre-ex-date run-up). Under A20 any later dividend_seeking_demand vault is
+    contaminated. Row 52 is REJECTED, so its vault stays closed anyway.
+  - **The Tuesday VTI / Friday gold study** recorded 69 evaluations, but its spec declares 104 cells. Its Friday gold
+    leg was reused from `friday_gold_conditional_edge` (pre-Scout).
+  - **Pre-Scout siblings stay unregistered by rule:** `evrp_crisis_tail_hedge_study`,
+    `bitcoin_gold_dual_momentum_signal_study`, `friday_gold_conditional_edge` and others. Their trials are not in any
+    family's N.
+- **Practice:** the daily status shows any new gap. A study in the knowledge base still gets its retro registration
+  the same day, but a missed one is now visible the next morning.
 
 **Not adopted from the critique.** One correction: the critique said the kill rule closes gap G-006.
 It does not. G-006's missing circuit breaker is about **repeated reconciliation failures**, not about
