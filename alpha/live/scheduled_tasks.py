@@ -116,8 +116,10 @@ def _contract_problem_list(task_dict, spec_obj):
                 ("false" if spec_obj.name_str.startswith("AlphaBacktest") else "true")):
             problem_list.append("wrong missed-start policy")
         principal_obj = root_obj.find("Principals/Principal")
+        # Windows may omit the default RunLevel in exported XML (observed on NORGAT).
+        # Absence means LeastPrivilege; explicit elevation and non-S4U logons still fail.
         if (principal_obj is None or principal_obj.findtext("LogonType") != "S4U"
-                or principal_obj.findtext("RunLevel") != "LeastPrivilege"):
+                or principal_obj.findtext("RunLevel", "LeastPrivilege") != "LeastPrivilege"):
             problem_list.append("wrong task principal policy")
         trigger_list = root_obj.findall("Triggers/*")
         if len(trigger_list) != 1 or trigger_list[0].findtext("Enabled", "true") != "true":

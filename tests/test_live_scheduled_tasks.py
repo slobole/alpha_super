@@ -162,3 +162,27 @@ def test_utc_boundary_allowed_only_for_interval_watchdog(task_index_int, expecte
     task_dict = _task(spec_obj.wrapper_str)
     task_dict['Xml'] = task_dict['Xml'].replace('</StartBoundary>', 'Z</StartBoundary>')
     assert _states({spec_obj.name_str: task_dict})[spec_obj.name_str]['state_str'] == expected_str
+
+
+@pytest.mark.parametrize('task_index_int', range(4))
+def test_omitted_default_run_level_matches_norgat_export(task_index_int):
+    spec_obj = st.TASK_TUPLE[task_index_int]
+    task_dict = _task(spec_obj.wrapper_str)
+    # Real NORGAT exports S4U but omits RunLevel; Get-ScheduledTask reports Limited.
+    task_dict['Xml'] = task_dict['Xml'].replace('<RunLevel>LeastPrivilege</RunLevel>', '')
+    assert _states({spec_obj.name_str: task_dict})[spec_obj.name_str]['state_str'] == 'PASS'
+
+
+@pytest.mark.parametrize('logon_str,run_level_str', [
+    ('S4U', 'HighestAvailable'), ('S4U', ''), ('Password', None), ('InteractiveToken', None), (None, None),
+])
+def test_omitted_default_does_not_accept_wrong_or_missing_principal_policy(logon_str, run_level_str):
+    spec_obj = st.TASK_TUPLE[1]
+    task_dict = _task(spec_obj.wrapper_str)
+    task_dict['Xml'] = task_dict['Xml'].replace('<LogonType>S4U</LogonType>',
+        '' if logon_str is None else f'<LogonType>{logon_str}</LogonType>')
+    task_dict['Xml'] = task_dict['Xml'].replace('<RunLevel>LeastPrivilege</RunLevel>',
+        '' if run_level_str is None else f'<RunLevel>{run_level_str}</RunLevel>')
+    row_dict = _states({spec_obj.name_str: task_dict})[spec_obj.name_str]
+    assert row_dict['state_str'] == 'FAIL'
+    assert 'wrong task principal policy' in row_dict['detail_str']
