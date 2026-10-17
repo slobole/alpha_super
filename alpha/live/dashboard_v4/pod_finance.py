@@ -184,6 +184,7 @@ def _build_report_finance_dict(workspace_dict, snapshot_obj, provider_obj, *, po
         chart_account_dict = chart_account_list[0] if len(chart_account_list) == 1 and chart_account_list[0]["to_date_str"] == closing_str else {}
         return_path_list = chart_account_dict["performance_dict"]["return_path_list"] if chart_account_dict.get("twr_float") is not None else []
         chart_dict = _chart_dict(return_path_list)
+        result_dict["return_path_list"] = return_path_list
         if chart_dict["available_bool"]:
             chart_dict.update(source_str="Demo account TWR" if client_dict.get("is_demo") else "IBKR account TWR",
                 detail_str="Cumulative account return for the selected period, adjusted for cash flows.")

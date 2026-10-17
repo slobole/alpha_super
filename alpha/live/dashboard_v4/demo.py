@@ -118,7 +118,7 @@ def build_demo_workspace_tuple(*, include_holdings_bool=False, include_daily_boo
     return workspace_dict, snapshot_dict[client_dict["client_id"]], provider_obj
 
 
-def create_demo_app(*, demo_tools_bool=False, console_appender_bool=False, demo_daily_bool=False):
+def create_demo_app(*, demo_tools_bool=False, console_appender_bool=False, demo_daily_bool=False, demo_backtest_bool=False):
     from alpha.live.dashboard_v4.app import create_app
 
     workspace_dict, snapshot_obj, provider_obj = build_demo_workspace_tuple(
@@ -127,6 +127,11 @@ def create_demo_app(*, demo_tools_bool=False, console_appender_bool=False, demo_
 
     def demo_now_ts():
         return DEMO_NOW_TS + timedelta(seconds=monotonic() - start_float)
+
+    if demo_backtest_bool:
+        # --demo-backtest only: a synthetic nightly backtest check report.
+        from alpha.live.dashboard_v4.backtest_check_demo import attach_demo_backtest_check
+        attach_demo_backtest_check(provider_obj, workspace_dict, snapshot_obj, now_fn=demo_now_ts)
 
     def operations_workspace_dict():
         current_ts = demo_now_ts()

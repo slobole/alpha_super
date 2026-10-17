@@ -11,6 +11,7 @@ import time
 from flask import Flask, Response, abort, jsonify, render_template, request, send_from_directory, url_for
 
 from alpha.live.dashboard_v4.account_alias import account_label_str, load_alias_by_pod_dict
+from alpha.live.dashboard_v4 import backtest_check_data
 from alpha.live.dashboard_v4.data import LiveDataProvider, load_workspace_snapshot_tuple
 from alpha.live.dashboard_v4.overview import STATE_RANK_DICT, build_overview_dict
 from alpha.live.dashboard_v4.pod import TAB_TUPLE, build_pod_page_dict
@@ -283,6 +284,7 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
                 demo_bool=demo_bool, as_of_ts=clock_fn())
             if overview_dict["source_fresh_bool"]:
                 attach_missing_trades_attention(overview_dict, workspace_dict)
+                attach_backtest_attention(overview_dict)
             return {"overview_dict": overview_dict}
         if not any(item_dict["pod_id_str"] == pod_id_str for item_dict in overview_dict["pod_list"]):
             abort(404)
@@ -350,8 +352,15 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         source_dict["selected_explicit_bool"] = bool(cycle_str)
         source_dict["selected_current_bool"] = selected_current_bool
         finalize_system_dict(overview_dict, workspace_dict)
+        backtest_view_dict = backtest_check_data.pod_view_dict(
+            backtest_check_data.load_report_dict(provider_obj, as_of_ts=clock_fn()), pod_id_str)
+        if backtest_view_dict and pod_finance_dict.get("chart_dict"):
+            pod_finance_dict["chart_dict"] = backtest_check_data.add_backtest_series(
+                pod_finance_dict["chart_dict"], pod_finance_dict.get("return_path_list") or [], backtest_view_dict)
         pod_page_dict = build_pod_page_dict(overview_dict, source_dict, pod_finance_dict,
-            pod_id_str=pod_id_str, as_of_ts=clock_fn(), tab_str=tab_str)
+            pod_id_str=pod_id_str, as_of_ts=clock_fn(), tab_str=tab_str,
+            backtest_table_dict=backtest_view_dict["table_dict"] if backtest_view_dict else None)
+        pod_page_dict["backtest_dict"] = backtest_view_dict
         pod_page_dict["orders_dict"] = build_orders_dict(pod_id_str, workspace_dict,
             overview_dict["source_fresh_bool"] and not pod_page_dict.get("historical_bool"))
         if pod_page_dict["attention_dict"] and not pod_page_dict["historical_bool"]:
@@ -384,6 +393,17 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         pod_page_dict.update(money_key_str=money_key_str, money_url_str=url_for("pod_money", pod_id_str=pod_id_str,
             period=period_str, cycle=cycle_str or None, tab=tab_str or None))
         return {"overview_dict": overview_dict, "pod_page_dict": pod_page_dict}
+
+    def attach_backtest_attention(overview_dict):
+        """Red and amber rows from the nightly backtest check; a normal day adds nothing."""
+        report_dict = backtest_check_data.load_report_dict(provider_obj, as_of_ts=clock_fn())
+        name_dict = {item_dict["pod_id_str"]: item_dict.get("name_str") or item_dict["pod_id_str"] for item_dict in overview_dict["pod_list"]}
+        added_list = backtest_check_data.attention_list(report_dict, name_dict)
+        overview_dict["attention_list"].extend(added_list)
+        fail_int = sum(1 for item_dict in added_list if item_dict["state_str"] in {"fail", "late"})
+        if fail_int and overview_dict.get("verdict_str") == "No action needed.":
+            overview_dict.update(verdict_str=f"{fail_int} item{'s' if fail_int > 1 else ''} need{'' if fail_int > 1 else 's'} review.",
+                verdict_detail_str="See the backtest check.")
 
     def attach_missing_trades_attention(overview_dict, workspace_dict):
         """One Overview line per pod with missing trades: "2 trades missing · APX BUY 300, MDLZ SELL 41"."""
@@ -641,8 +661,11 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         level_str = request.args.get("level", "portfolio")
         period_str = request.args.get("period", "All")
         unit_str = request.args.get("unit", "pct")
-        if level_str not in {"portfolio", "pods"} or period_str not in {"1W", "MTD", "YTD", "All"} or unit_str not in {"pct", "usd"}:
+        if level_str not in {"portfolio", "pods", "backtest"} or period_str not in {"1W", "MTD", "YTD", "All"} or unit_str not in {"pct", "usd"}:
             abort(400)
+        backtest_report_dict = backtest_check_data.load_report_dict(provider_obj, as_of_ts=clock_fn())
+        if level_str == "backtest" and (backtest_report_dict is None or "download" in request.args):
+            abort(404 if backtest_report_dict is None else 400)
         acquisition_ts = clock_fn()
         from_date_str, to_date_str = request.args.get("from"), request.args.get("to")
         if "from" in request.args or "to" in request.args:
@@ -663,7 +686,9 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             workspace_dict, snapshot_obj = workspace_snapshot_fn()
         performance_page_dict = build_performance_page_dict(workspace_dict, snapshot_obj,
             as_of_ts=acquisition_ts, period_str=period_str, from_date_str=from_date_str,
-            to_date_str=to_date_str, unit_str=unit_str, level_str=level_str)
+            to_date_str=to_date_str, unit_str=unit_str, level_str="pods" if level_str == "backtest" else level_str)
+        if level_str == "backtest":
+            performance_page_dict["level_str"] = "backtest"
         report_dict = performance_page_dict.get("report_dict") or {}
         if download_str:
             if expected_str != report_dict.get("report_hash_str"):
@@ -685,7 +710,11 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
 
         performance_page_dict.update(
             level_option_list=[{"label_str": label_str, "selected_bool": level_str == option_str,
-                "url_str": performance_url_str(level=option_str)} for option_str, label_str in (("portfolio", "Portfolio"), ("pods", "Pods"))],
+                "url_str": performance_url_str(level=option_str)} for option_str, label_str in (("portfolio", "Portfolio"), ("pods", "Pods"))]
+                + ([{"label_str": "Vs backtest", "selected_bool": level_str == "backtest", "url_str": performance_url_str(level="backtest"),
+                     "icon_str": "performance", "badge_str": str(sum(1 for item_dict in backtest_check_data.attention_list(
+                         backtest_report_dict, {pod_dict.get("pod_id_str"): "" for pod_dict in backtest_report_dict["pod_list"]})
+                         if item_dict["state_str"] == "fail") or "")}] if backtest_report_dict else []),
             period_option_list=[{"label_str": option_str, "selected_bool": from_date_str is None and period_str == option_str,
                 "url_str": url_for("performance", level=level_str, period=option_str, unit=unit_str)} for option_str in ("1W", "MTD", "YTD", "All")],
             unit_option_list=[{"label_str": label_str, "selected_bool": unit_str == option_str,
@@ -696,6 +725,13 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             pdf_url_str=performance_url_str(download="pdf", expected=report_dict["report_hash_str"]) if report_dict else "",
         )
         active_pod_set = {item_dict["pod_id_str"] for item_dict in overview_dict["pod_list"]}
+        if level_str == "backtest":
+            name_dict = {item_dict["pod_id_str"]: item_dict.get("name_str") or item_dict["pod_id_str"] for item_dict in overview_dict["pod_list"]}
+            backtest_dict = backtest_check_data.performance_view_dict(backtest_report_dict, name_dict)
+            performance_page_dict.update(backtest_dict=backtest_dict, backtest_name_dict=name_dict,
+                verdict_str=f"{backtest_dict['same_int']} of {backtest_dict['checked_int']} checked decisions match the backtest.",
+                verdict_detail_str=(f"{backtest_dict['differ_int']} pod{'s' if backtest_dict['differ_int'] != 1 else ''} differ{'' if backtest_dict['differ_int'] != 1 else 's'} now."
+                    if backtest_dict["differ_int"] else "No pod differs now."))
         for row_dict in performance_page_dict["pod_row_list"]:
             row_dict["url_str"] = url_for("pod", pod_id_str=row_dict["pod_id_str"]) if row_dict["pod_id_str"] in active_pod_set else ""
         overview_dict.update(refresh_url_str=url_for("performance_status"), refresh_seconds_int=15)

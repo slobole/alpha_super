@@ -12,7 +12,8 @@ from alpha.live.dashboard_v4.overview import STATE_RANK_DICT, _state_str
 from alpha.live.ops_report import parse_timestamp_ts
 
 
-TAB_TUPLE = (("plan", "Plan vs actual"), ("decision", "Decision"), ("orders", "Orders"),
+# "backtest" is listed only when the nightly backtest check has a result for the pod.
+TAB_TUPLE = (("plan", "Plan vs actual"), ("decision", "Decision"), ("backtest", "Backtest"), ("orders", "Orders"),
              ("fills", "Fills"), ("reconcile", "Reconcile"), ("exceptions", "Exceptions"),
              ("events", "Broker events"), ("files", "Files"))
 STEP_TAB_DICT = {"Data": "decision", "Decide": "decision", "Plan": "plan", "Submit": "orders",
@@ -285,7 +286,12 @@ def build_daily_exceptions_table_dict(daily_cycle_dict):
     return table_dict
 
 
-def build_pod_page_dict(overview_dict, source_dict, finance_dict, *, pod_id_str, as_of_ts, tab_str=""):
+def _backtest_tab_dict(table_dict):
+    differ_int = sum(1 for row_dict in table_dict["row_list"] if row_dict.get("state_str") == "fail")
+    return {"key_str": "backtest", "label_str": "Backtest", "count_int": differ_int or None, "bad_bool": bool(differ_int)}
+
+
+def build_pod_page_dict(overview_dict, source_dict, finance_dict, *, pod_id_str, as_of_ts, tab_str="", backtest_table_dict=None):
     pod_summary_dict = next(item_dict for item_dict in overview_dict["pod_list"] if item_dict["pod_id_str"] == pod_id_str)
     row_dict = deepcopy(source_dict.get("pod_row_dict") or {})
     row_dict.update(mode_str="live", pod_id_str=pod_id_str)
@@ -337,6 +343,8 @@ def build_pod_page_dict(overview_dict, source_dict, finance_dict, *, pod_id_str,
                 if step_dict["label_str"] == "Reconcile":
                     step_dict["tab_str"] = "exceptions"
     failed_step_dict = next((step_dict for step_dict in step_list if step_dict["state_str"] == "Failed"), {})
+    if backtest_table_dict is not None:
+        tables_dict["backtest"] = backtest_table_dict
     if tab_str not in tables_dict:
         tab_str = ""
     tab_str = tab_str or failed_step_dict.get("tab_str") or ("exceptions" if (tables_dict.get("exceptions") or {}).get("row_list") else "plan")
@@ -419,6 +427,7 @@ def build_pod_page_dict(overview_dict, source_dict, finance_dict, *, pod_id_str,
         "issue_bool": issue_bool, "issue_title_str": issue_title_str, "issue_detail_str": issue_detail_str,
         "step_list": step_list, "tab_str": tab_str, "table_dict": tables_dict[tab_str], "tables_dict": tables_dict,
         "tab_list": [{"key_str": key_str, "label_str": label_str, "count_int": len(tables_dict[key_str]["row_list"]) if key_str in {"orders", "fills", "exceptions"} else None}
+            if key_str != "backtest" else _backtest_tab_dict(tables_dict[key_str])
             for key_str, label_str in TAB_TUPLE if key_str in tables_dict and (key_str != "files" or tables_dict["files"]["row_list"])],
         "cycle_list": source_dict.get("cycle_list") or [], "selected_cycle_dict": selected_dict,
         "history_truncated_bool": source_dict.get("history_truncated_bool", False),

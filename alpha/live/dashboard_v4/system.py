@@ -320,6 +320,8 @@ def build_system_page_dict(overview_dict, workspace_dict, source_dict, *, as_of_
     scheduled_list = [_aux_row_dict(aux_source_dict, "watchdog", "Watchdog", as_of_ts=as_of_ts),
         _aux_row_dict(aux_source_dict, "deadman", "Dead-man ping", as_of_ts=as_of_ts), sync_row_dict,
         _aux_row_dict(aux_source_dict, "flex", "Flex import", as_of_ts=as_of_ts)]
+    if "backtest_check_dict" in source_dict:
+        scheduled_list.append(_aux_row_dict(aux_source_dict, "backtest_check", "Backtest check", as_of_ts=as_of_ts))
     market_state_str = _worst_str(norgate_state_list)
     if market_state_str not in {"fail", "late"} and (not need_list or "—" in need_list):
         market_state_str = "unk"

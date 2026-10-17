@@ -14,7 +14,7 @@
     </tbody></table><div class="pod-cash"><b>Cash <span class="mono">{{ pod_page_dict.cash_str }}</span></b><span class="pod-stamp" title="{{ pod_page_dict.cash_stamp_dict.title_str }}">{{ icon('calendar') }}<span class="sr-only">{{ pod_page_dict.cash_stamp_dict.title_str }}</span><span aria-hidden="true">{{ pod_page_dict.cash_stamp_dict.label_str }}</span></span></div>
   </section>{% endif %}
   <section class="panel"><div class="panel-h"><span class="panel-t">Return</span><nav class="seg" aria-label="Pod return period">{% for option_dict in pod_page_dict.period_option_list %}<a href="{{ option_dict.url_str }}" class="{{ 'on' if option_dict.selected_bool else '' }}" data-period="{{ option_dict.label_str }}">{{ option_dict.label_str }}</a>{% endfor %}</nav></div><div class="panel-b">
-    {% set chart_dict = pod_page_dict.chart_dict %}{% include '_value_chart.html' %}
+    {% set chart_dict = pod_page_dict.chart_dict %}{% include '_value_chart.html' %}{% if pod_page_dict.backtest_dict and pod_page_dict.backtest_dict.point_list %}{% include '_backtest_gap.html' %}{% endif %}
   </div>{% if chart_dict.source_str %}<div class="finance-source" title="{{ chart_dict.detail_str }}">{{ chart_dict.source_str }}</div>{% endif %}</section>
 </div>
 {% if pod_page_dict.issue_bool %}</details>{% endif %}

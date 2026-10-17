@@ -35,6 +35,8 @@ def main() -> int:
     parser_obj.add_argument("--demo-tools", action="store_true", help="Simulate Tools actions in memory; requires --demo.")
     parser_obj.add_argument("--demo-daily", action="store_true",
         help="Add five synthetic daily pods (CORE5, MR capsule) to the demo; requires --demo.")
+    parser_obj.add_argument("--demo-backtest", action="store_true",
+        help="Add a synthetic nightly backtest check report to the demo; requires --demo.")
     parser_obj.add_argument("--read-only", action="store_true", default=True, help="Everything except the order panel stays read-only.")
     parser_obj.add_argument("--disable-orders", action="store_true",
         help="Turn off the Pod order panel (Complete a missing trade, New order). It is on by default.")
@@ -47,10 +49,12 @@ def main() -> int:
         parser_obj.error("--demo-tools requires --demo; production execution is not connected.")
     if args_obj.demo_daily and not args_obj.demo:
         parser_obj.error("--demo-daily requires --demo.")
+    if args_obj.demo_backtest and not args_obj.demo:
+        parser_obj.error("--demo-backtest requires --demo.")
     if args_obj.demo:
         from alpha.live.dashboard_v4.demo import create_demo_app
         flask_app_obj = create_demo_app(demo_tools_bool=args_obj.demo_tools, console_appender_bool=True,
-            demo_daily_bool=args_obj.demo_daily)
+            demo_daily_bool=args_obj.demo_daily, demo_backtest_bool=args_obj.demo_backtest)
     else:
         if not args_obj.skip_env_file:
             from scripts.norgate_config_env import load_config_env_file
