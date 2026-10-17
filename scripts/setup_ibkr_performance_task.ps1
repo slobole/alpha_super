@@ -7,7 +7,8 @@ New York automatically.
 [CmdletBinding()]
 param(
     [string]$TaskName = "AlphaIbkrPerformanceSync",
-    [switch]$Unregister
+    [switch]$Unregister,
+    [switch]$Disabled
 )
 
 $ErrorActionPreference = "Stop"
@@ -34,9 +35,10 @@ $action_obj = New-ScheduledTaskAction -Execute "powershell.exe" `
     -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$wrapper_path_str`"" `
     -WorkingDirectory $repo_root_path_str
 $trigger_obj = New-ScheduledTaskTrigger -Daily -At "06:15"
+$trigger_obj.StartBoundary = (Get-Date).Date.AddHours(6).AddMinutes(15).ToString("s")
 $settings_obj = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew `
     -ExecutionTimeLimit (New-TimeSpan -Minutes 10) -StartWhenAvailable `
-    -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 15)
+    -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 15) -Disable:$Disabled
 $principal_obj = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" `
     -LogonType S4U -RunLevel Limited
 

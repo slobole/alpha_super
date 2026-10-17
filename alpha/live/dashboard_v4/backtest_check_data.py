@@ -83,6 +83,9 @@ def _valid_report_bool(payload_dict):
                for field_str in ("pod_id_str", "account_route_str", "release_id_str")):
             return False
         identity_list.append(pod_dict["pod_id_str"])
+        decision_id_obj = pod_dict.get("decision_plan_id_int")
+        if decision_id_obj is not None and (type(decision_id_obj) is not int or decision_id_obj <= 0):
+            return False
         if not isinstance(pod_dict.get("decision_dict"), dict) or not isinstance(pod_dict.get("curve_dict", {}), dict):
             return False
         decision_dict, curve_dict = pod_dict["decision_dict"], pod_dict.get("curve_dict", {})
@@ -120,7 +123,7 @@ def _valid_report_bool(payload_dict):
     gate_dict = payload_dict.get("cost_gate_dict")
     if gate_dict is not None:
         if (not isinstance(gate_dict, dict) or not isinstance(gate_dict.get("status_str"), str)
-                or gate_dict["status_str"] not in {"collecting", "on_track", "above", "passed", "failed", "time_cap"}
+                or gate_dict["status_str"] not in {"collecting", "on_track", "above", "passed", "failed", "time_cap", "incomplete"}
                 or type(gate_dict.get("fill_count_int")) is not int or gate_dict["fill_count_int"] < 0):
             return False
         for field_str in ("cost_bps_list", "pod_row_list", "pod_identity_list"):
@@ -185,6 +188,9 @@ def load_report_dict(provider_obj, *, as_of_ts):
                     if identity_set is None or (pod_dict.get("pod_id_str"), pod_dict.get("account_route_str"),
                                                 pod_dict.get("release_id_str")) in identity_set]
         pod_list = [_dated_evidence_dict(pod_dict, generated_ts, as_of_ts) for pod_dict in pod_list]
+        missing_pod_list = (sorted(identity_tuple[0] for identity_tuple in identity_set
+                                   if identity_tuple[0] not in {pod_dict["pod_id_str"] for pod_dict in pod_list})
+                            if identity_set is not None else [])
         gate_dict = payload_dict.get("cost_gate_dict")
         if gate_dict is not None:
             if not isinstance(gate_dict, dict):
@@ -199,6 +205,7 @@ def load_report_dict(provider_obj, *, as_of_ts):
                                not in identity_set for pod_dict in gate_identity_list)):
                     gate_dict = None
         result_dict = {**payload_dict, "pod_list": pod_list, "cost_gate_dict": gate_dict, "generated_ts": generated_ts,
+                       "missing_pod_list": missing_pod_list,
                        "stale_bool": _stale_bool(payload_dict, generated_ts, as_of_ts)}
         # *** CRITICAL*** build every view once here: a malformed or hand-edited report is dropped
         # whole instead of failing a page later.
@@ -303,6 +310,9 @@ def pod_view_dict(report_dict, pod_id_str):
     session_str = _text(decision_dict.get("session_str") or pod_dict.get("session_str"), 10)
     return {
         "status_str": status_str, "state_str": state_str, "title_str": title_str, "differ_int": differ_int,
+        "session_str": session_str,
+        "release_id_str": pod_dict.get("release_id_str"),
+        "decision_plan_id_int": pod_dict.get("decision_plan_id_int"),
         "detail_str": " · ".join(part_str for part_str in (
             f"session {_day_str(session_str)}" if session_str else "",
             f"checked {_time_str(pod_dict.get('generated_ts', report_dict['generated_ts']))}",
@@ -390,13 +400,15 @@ def gate_view_dict(report_dict):
     status_str = _text(gate_dict.get("status_str"), 20)
     average_obj = gate_dict.get("average_bps_float")
     label_dict = {"collecting": ("next", "Collecting fills"), "on_track": ("done", "On track"), "above": ("late", "Cost above the gate"),
-                   "passed": ("now", "Cost component passed"), "failed": ("fail", "Cost component failed"), "time_cap": ("late", "Time cap reached")}
+                   "passed": ("now", "Cost component passed"), "failed": ("fail", "Cost component failed"), "time_cap": ("late", "Time cap reached"),
+                   "incomplete": ("late", "Cost component incomplete")}
     state_str, label_str = label_dict.get(status_str, ("unk", "Unknown"))
     stale_bool = bool((report_dict or {}).get("stale_bool") or gate_dict.get("stale_bool"))
     if stale_bool:
         state_str, label_str = "unk", "Historical cost component · not current"
     cost_list = [value_obj for value_obj in _list(gate_dict.get("cost_bps_list")) if _finite(value_obj)][:2000]
     return {"status_str": status_str, "state_str": state_str, "label_str": label_str, "stale_bool": stale_bool, "count_int": count_int,
+            "reason_str": _text(gate_dict.get("reason_str")),
             "target_int": target_int, "gate_str": _bps_str(gate_dict.get("gate_bps_float")),
             "average_str": _bps_str(average_obj) if count_int >= 30 else "—",
             "buy_str": _bps_str(gate_dict.get("buy_bps_float")), "sell_str": _bps_str(gate_dict.get("sell_bps_float")),
@@ -529,8 +541,10 @@ def system_row_dict(report_dict, *, as_of_ts):
     pod_list = report_dict["pod_list"]
     differ_int = sum(1 for pod_dict in pod_list if (pod_dict.get("decision_dict") or {}).get("status_str") == "differs")
     failed_int = sum(1 for pod_dict in pod_list if pod_dict.get("reference_status_str") == "failed")
-    ok_int = sum(1 for pod_dict in pod_list if pod_dict.get("reference_status_str") == "ok")
-    now_str = f"{ok_int} of {len(pod_list)} pods checked" + (f" · {differ_int} differ{'s' if differ_int == 1 else ''}" if differ_int else "") + (f" · {failed_int} failed" if failed_int else "")
+    ok_int = sum(1 for pod_dict in pod_list if pod_dict.get("reference_status_str") == "ok"
+                 and (pod_dict.get("decision_dict") or {}).get("status_str") in {"same", "differs"})
+    expected_int = len(pod_list) + len(report_dict.get("missing_pod_list") or [])
+    now_str = f"{ok_int} of {expected_int} pods checked" + (f" · {differ_int} differ{'s' if differ_int == 1 else ''}" if differ_int else "") + (f" · {failed_int} failed" if failed_int else "")
     stale_pod_int = sum(1 for pod_dict in pod_list if pod_dict.get("stale_bool"))
     incomplete_int = sum(1 for pod_dict in pod_list if pod_dict.get("coverage_reason_str") or pod_dict.get("reference_status_str") == "incomplete")
     gate_stale_bool = bool((report_dict.get("cost_gate_dict") or {}).get("stale_bool"))
@@ -540,7 +554,11 @@ def system_row_dict(report_dict, *, as_of_ts):
         now_str += f" · {incomplete_int} incomplete"
     if gate_stale_bool:
         now_str += " · cost evidence stale"
-    state_str = "warning" if report_dict["stale_bool"] or failed_int or stale_pod_int or incomplete_int or gate_stale_bool else "ok"
+    gate_incomplete_bool = (report_dict.get("cost_gate_dict") or {}).get("status_str") == "incomplete"
+    if gate_incomplete_bool:
+        now_str += " · MR cost sources incomplete"
+    state_str = "warning" if (report_dict["stale_bool"] or failed_int or stale_pod_int or incomplete_int or gate_stale_bool
+                              or not expected_int or ok_int < expected_int or gate_incomplete_bool) else "ok"
     if report_dict["stale_bool"]:
         now_str = "Not from the latest session · " + now_str
     return {"state_str": state_str, "now_str": now_str[:200], "last_timestamp_str": report_dict["generated_ts"].isoformat(),

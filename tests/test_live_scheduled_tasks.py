@@ -2,14 +2,42 @@
 
 from datetime import UTC, datetime, timedelta
 import json
+from xml.sax.saxutils import escape
+
+import pytest
 
 from alpha.live import scheduled_tasks as st
 
 NOW = datetime(2026, 12, 10, 12, 0, tzinfo=UTC)
 
 
+def _contract_xml(wrapper_str):
+    spec_obj = next((spec_obj for spec_obj in st.TASK_TUPLE if spec_obj.wrapper_str == wrapper_str), st.TASK_TUPLE[0])
+    argument_str = f'-NoProfile -ExecutionPolicy Bypass -File "{st.REPO_ROOT_PATH / "scripts" / wrapper_str}"'
+    if spec_obj.name_str == "AlphaLiveOpsWatchdog":
+        argument_str += " -Mode live"
+        trigger_str = '<TimeTrigger><StartBoundary>2026-12-01T06:00:00</StartBoundary><Repetition><Interval>PT5M</Interval></Repetition></TimeTrigger>'
+        limit_str = "PT10M"
+    elif spec_obj.name_str == "AlphaIbkrPerformanceSync":
+        trigger_str = '<CalendarTrigger><StartBoundary>2026-12-01T06:15:00</StartBoundary><ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay></CalendarTrigger>'
+        limit_str = "PT10M"
+    else:
+        ruler_bool = spec_obj.name_str == "AlphaBacktestRuler"
+        time_str = '10:00' if ruler_bool else '06:30'
+        day_list = ['Saturday'] if ruler_bool else ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+        day_str = ''.join(f'<{day_str}/>' for day_str in day_list)
+        trigger_str = f'<CalendarTrigger><StartBoundary>2026-12-01T{time_str}:00</StartBoundary><ScheduleByWeek><WeeksInterval>1</WeeksInterval><DaysOfWeek>{day_str}</DaysOfWeek></ScheduleByWeek></CalendarTrigger>'
+        limit_str = "PT8H" if ruler_bool else "PT2H30M"
+    catchup_str = 'false' if spec_obj.name_str.startswith('AlphaBacktest') else 'true'
+    return (f'<Task xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"><Actions><Exec><Command>powershell.exe</Command>'
+            f'<Arguments>{escape(argument_str)}</Arguments><WorkingDirectory>{escape(str(st.REPO_ROOT_PATH))}</WorkingDirectory></Exec></Actions>'
+            f'<Triggers>{trigger_str}</Triggers><Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><ExecutionTimeLimit>{limit_str}</ExecutionTimeLimit>'
+            f'<StartWhenAvailable>{catchup_str}</StartWhenAvailable></Settings><Principals><Principal><LogonType>S4U</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals></Task>')
+
+
 def _task(wrapper, *, last=NOW - timedelta(minutes=3), result=0, state="Ready", next_run=NOW + timedelta(minutes=2)):
     return {"State": state, "Args": f'powershell.exe -NoProfile -File "C:\\repo\\scripts\\{wrapper}"',
+            "Xml": _contract_xml(wrapper),
             "LastRun": last.isoformat() if last else "", "Result": result, "NextRun": next_run.isoformat() if next_run else ""}
 
 
@@ -85,3 +113,52 @@ def test_a_turned_off_task_is_off_not_missing(tmp_path):
     from alpha.live.dashboard_v4.system_data import _scheduled_tasks_dict
     row = _scheduled_tasks_dict(tmp_path / st.RECEIPT_FILE_NAME_STR, NOW + timedelta(minutes=1))
     assert row["state_str"] == "warning" and row["now_str"].startswith("OFF")
+
+
+@pytest.mark.parametrize('old_str,new_str', [
+    ('-Mode live', '-Mode paper'), ('IgnoreNew', 'Parallel'), ('PT5M', 'PT24H'),
+    ('-Mode live', '-Mode "live'),
+    ('PT10M', 'PT1H'), ('S4U', 'InteractiveToken'),
+    ('<Command>powershell.exe', '<Command>C:\\retired\\powershell.exe'),
+    ('</WorkingDirectory>', '\\retired</WorkingDirectory>'),
+    ('</Actions>', '<Exec><Command>other.exe</Command></Exec></Actions>'),
+])
+def test_wrong_watchdog_contract_fails(old_str, new_str):
+    spec_obj = st.TASK_TUPLE[0]
+    task_dict = _task(spec_obj.wrapper_str)
+    task_dict['Xml'] = task_dict['Xml'].replace(old_str, new_str)
+    assert _states({spec_obj.name_str: task_dict})[spec_obj.name_str]['state_str'] == 'FAIL'
+
+
+@pytest.mark.parametrize('task_index_int,old_str,new_str', [
+    (1, '06:15', '09:30'), (2, '<Friday/>', '<Saturday/>'),
+    (2, '<WeeksInterval>1', '<WeeksInterval>2'), (3, '<Saturday/>', '<Monday/>'),
+    (2, '<StartWhenAvailable>false', '<StartWhenAvailable>true'),
+])
+def test_wrong_calendar_or_catchup_fails(task_index_int, old_str, new_str):
+    spec_obj = st.TASK_TUPLE[task_index_int]
+    task_dict = _task(spec_obj.wrapper_str)
+    task_dict['Xml'] = task_dict['Xml'].replace(old_str, new_str)
+    assert _states({spec_obj.name_str: task_dict})[spec_obj.name_str]['state_str'] == 'FAIL'
+
+
+def test_retired_release_and_missing_xml_fail():
+    spec_obj = st.TASK_TUPLE[0]
+    task_dict = _task(spec_obj.wrapper_str)
+    task_dict['Xml'] = task_dict['Xml'].replace(escape(str(st.REPO_ROOT_PATH)), 'C:\\retired')
+    assert _states({spec_obj.name_str: task_dict})[spec_obj.name_str]['state_str'] == 'FAIL'
+    task_dict.pop('Xml')
+    assert _states({spec_obj.name_str: task_dict})[spec_obj.name_str]['state_str'] == 'FAIL'
+
+
+def test_watchdog_next_run_tomorrow_is_not_every_five_minutes():
+    spec_obj = st.TASK_TUPLE[0]
+    assert _states({spec_obj.name_str: _task(spec_obj.wrapper_str, next_run=NOW + timedelta(days=1))})[spec_obj.name_str]['state_str'] == 'FAIL'
+
+
+@pytest.mark.parametrize('task_index_int,expected_str', [(0, 'PASS'), (1, 'FAIL'), (2, 'FAIL')])
+def test_utc_boundary_allowed_only_for_interval_watchdog(task_index_int, expected_str):
+    spec_obj = st.TASK_TUPLE[task_index_int]
+    task_dict = _task(spec_obj.wrapper_str)
+    task_dict['Xml'] = task_dict['Xml'].replace('</StartBoundary>', 'Z</StartBoundary>')
+    assert _states({spec_obj.name_str: task_dict})[spec_obj.name_str]['state_str'] == expected_str

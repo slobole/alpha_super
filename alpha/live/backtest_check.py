@@ -590,6 +590,7 @@ def check_pod_dict(target_obj, *, as_of_date_str: str, live_return_dict: dict, p
     first_dict, latest_dict = source_dict["first_vplan_dict"], source_dict["latest_vplan_dict"]
     session_str = latest_dict["session_date_str"] if latest_dict else None
     pod_dict["session_str"] = session_str
+    pod_dict["decision_plan_id_int"] = latest_dict["decision_plan_id_int"] if latest_dict else None
     previous_record_list = (previous_pod_dict or {}).get("record_list") or []
     module_str = str(release_obj.strategy_import_str).split(":")[0]
     reason_str = ""
@@ -713,7 +714,7 @@ def build_report_dict(target_list, *, as_of_ts: datetime, performance_db_path_st
     except Exception:
         month_end_bool = True  # unknown calendar: be safe and skip TAA references
     previous_by_pod_dict = {pod_dict.get("pod_id_str"): pod_dict for pod_dict in previous_dict.get("pod_list") or [] if isinstance(pod_dict, dict)}
-    pod_list, gate_fill_dict = [], {}
+    pod_list, gate_fill_dict, gate_unavailable_list = [], {}, []
     for target_obj in live_target_list:
         release_obj = target_obj.release_obj
         try:
@@ -723,6 +724,8 @@ def build_report_dict(target_list, *, as_of_ts: datetime, performance_db_path_st
                                       cache_dir_path=cache_dir_path, reference_bool=reference_bool,
                                       refresh_ruler_bool=refresh_ruler_bool, month_end_bool=month_end_bool)
         except Exception as error_obj:
+            if str(release_obj.strategy_import_str).startswith(MR_CAPSULE_IMPORT_PREFIX_STR):
+                gate_unavailable_list.append(release_obj.pod_id_str)
             pod_dict = {"pod_id_str": release_obj.pod_id_str, "account_route_str": release_obj.account_route_str,
                         "release_id_str": release_obj.release_id_str, "strategy_import_str": release_obj.strategy_import_str,
                         "reference_status_str": "failed", "reference_reason_str": f"{type(error_obj).__name__}: {error_obj}"[:400],
@@ -737,6 +740,13 @@ def build_report_dict(target_list, *, as_of_ts: datetime, performance_db_path_st
         pod_list.append(pod_dict)
     gate_dict = cost_gate_dict(gate_fill_dict, as_of_date_str=as_of_date_obj.isoformat()) if gate_fill_dict else None
     if gate_dict is not None:
+        # *** CRITICAL *** missing sources are not zero-cost/zero-fill observations.
+        # Judge the pooled gate only when every contributing pod was read.
+        if gate_unavailable_list:
+            gate_dict.update(status_str="incomplete", unavailable_pod_list=gate_unavailable_list,
+                             reason_str="Unreadable MR sources: " + ", ".join(gate_unavailable_list),
+                             average_bps_float=None, range_low_bps_float=None, range_high_bps_float=None,
+                             time_cap_date_str=None, completed_session_str=None)
         gate_dict.update(checked_at_utc_str=as_of_ts.astimezone(UTC).isoformat(), checked_as_of_date_str=as_of_date_obj.isoformat())
         gate_dict["pod_identity_list"] = [{"pod_id_str": target_obj.release_obj.pod_id_str,
                                           "account_route_str": target_obj.release_obj.account_route_str,

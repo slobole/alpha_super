@@ -39,7 +39,8 @@ param(
     [string]$EventLogPath = "",
     [string]$DashboardConfig = "",
     [switch]$Json,
-    [switch]$Unregister
+    [switch]$Unregister,
+    [switch]$Disabled
 )
 
 $ErrorActionPreference = "Stop"
@@ -115,7 +116,7 @@ $trigger_obj = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
 # ExecutionTimeLimit: kill a hung build (broker socket, locked SQLite); the
 # killed run never pings the dead-man switch, so the external watcher alerts.
 $settings_obj = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew `
-    -ExecutionTimeLimit (New-TimeSpan -Minutes 10) -StartWhenAvailable
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 10) -StartWhenAvailable -Disable:$Disabled
 
 # S4U: runs whether the user is logged on or not, without storing a password.
 # Never run as SYSTEM — wrong USERPROFILE means uv and config.env are missing.

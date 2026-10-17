@@ -60,6 +60,90 @@ def test_report_is_scoped_to_current_live_identities(tmp_path):
     assert loaded["stale_bool"] is False
 
 
+@pytest.mark.parametrize('status_str', ['skipped', 'not_run', 'incomplete'])
+def test_no_completed_decision_check_is_not_green(tmp_path, status_str):
+    pod_dict = _pod(status='not_checked')
+    pod_dict['reference_status_str'] = status_str
+    report_dict = btd.load_report_dict(_provider(tmp_path, _report([pod_dict])), as_of_ts=NOW)
+    row_dict = btd.system_row_dict(report_dict, as_of_ts=NOW)
+    assert row_dict['state_str'] == 'warning'
+    assert '0 of 1 pods checked' in row_dict['now_str']
+
+
+def test_replaced_release_and_partially_missing_pods_are_not_green(tmp_path):
+    for identity_tuple, expected_str in [((('pod_a', 'U1', 'r2'),), '0 of 1'),
+                                          ((('pod_a', 'U1', 'r1'), ('pod_b', 'U2', 'r2')), '1 of 2')]:
+        report_dict = btd.load_report_dict(_provider(tmp_path, _report([_pod()]), identities=identity_tuple), as_of_ts=NOW)
+        row_dict = btd.system_row_dict(report_dict, as_of_ts=NOW)
+        assert row_dict['state_str'] == 'warning'
+        assert expected_str in row_dict['now_str']
+
+
+def test_empty_report_is_not_green(tmp_path):
+    report_dict = btd.load_report_dict(_provider(tmp_path, _report([]), identities=()), as_of_ts=NOW)
+    assert btd.system_row_dict(report_dict, as_of_ts=NOW)['state_str'] == 'warning'
+
+
+def test_incomplete_cost_sources_survive_validation_and_show_the_reason(tmp_path):
+    gate_dict = {'status_str': 'incomplete', 'fill_count_int': 200, 'reason_str': 'Unreadable MR sources: pod_a',
+                 'average_bps_float': None, 'pod_row_list': [{'pod_id_str': 'pod_a'}]}
+    report_dict = btd.load_report_dict(_provider(tmp_path, _report([_pod()], gate=gate_dict)), as_of_ts=NOW)
+    assert report_dict is not None
+    view_dict = btd.gate_view_dict(report_dict)
+    assert view_dict['state_str'] == 'late'
+    assert view_dict['reason_str'] == gate_dict['reason_str']
+    assert view_dict['average_str'] == '—'
+    assert btd.system_row_dict(report_dict, as_of_ts=NOW)['state_str'] == 'warning'
+
+
+@pytest.mark.parametrize('session_str,release_str,decision_id_int,expected_tab_bool', [
+    ('2026-09-04', 'DEMO-release-1', 1, True), ('2026-09-08', 'DEMO-release-1', 1, False),
+    ('2026-09-04', 'other-release', 1, False), ('2026-09-04', 'DEMO-release-1', 2, False),
+    ('2026-09-04', 'DEMO-release-1', None, False),
+])
+def test_historical_backtest_tab_requires_exact_decision(monkeypatch, session_str, release_str, decision_id_int, expected_tab_bool):
+    from flask import template_rendered
+    from alpha.live.dashboard_v4 import backtest_check_demo
+    from alpha.live.dashboard_v4.demo import create_demo_app
+    original_fn = backtest_check_demo.build_demo_report_dict
+    def report_fn(*arg_tuple, **kwarg_dict):
+        report_dict = original_fn(*arg_tuple, **kwarg_dict)
+        report_dict['pod_list'][0]['decision_dict']['session_str'] = session_str
+        report_dict['pod_list'][0]['decision_plan_id_int'] = decision_id_int
+        report_dict['pod_list'][0]['release_id_str'] = release_str
+        return report_dict
+    monkeypatch.setattr(backtest_check_demo, 'build_demo_report_dict', report_fn)
+    app_obj = create_demo_app(demo_backtest_bool=True)
+    context_list = []
+    def capture_fn(sender_obj, template, context, **kwarg_dict):
+        if 'pod_page_dict' in context:
+            context_list.append(context['pod_page_dict'])
+    with template_rendered.connected_to(capture_fn, app_obj):
+        response_obj = app_obj.test_client().get('/pods/demo_1_0?cycle=vplan:1&tab=backtest')
+    assert response_obj.status_code == 200
+    context_dict = context_list[-1]
+    assert context_dict['historical_bool']
+    assert context_dict['selected_cycle_dict']['session_date_str'] == '2026-09-04'
+    assert bool(context_dict['backtest_dict']) is expected_tab_bool
+    assert any(tab_dict['key_str'] == 'backtest' for tab_dict in context_dict['tab_list']) is expected_tab_bool
+
+
+def test_incomplete_gate_reason_is_rendered(monkeypatch):
+    from alpha.live.dashboard_v4 import backtest_check_demo
+    from alpha.live.dashboard_v4.demo import create_demo_app
+    original_fn = backtest_check_demo.build_demo_report_dict
+    def report_fn(*arg_tuple, **kwarg_dict):
+        report_dict = original_fn(*arg_tuple, **kwarg_dict)
+        report_dict['cost_gate_dict'].update(status_str='incomplete', average_bps_float=None,
+                                             reason_str='Unreadable MR sources: missing_test_pod')
+        return report_dict
+    monkeypatch.setattr(backtest_check_demo, 'build_demo_report_dict', report_fn)
+    response_obj = create_demo_app(demo_backtest_bool=True).test_client().get('/performance?level=backtest')
+    assert response_obj.status_code == 200
+    assert 'Cost component incomplete' in response_obj.text
+    assert 'Unreadable MR sources: missing_test_pod' in response_obj.text
+
+
 @pytest.mark.parametrize("bad", [{"schema_version_str": "other"}, {"schema_version_str": btd.SCHEMA_VERSION_STR, "pod_list": "x",
                                                                     "generated_at_utc_str": NOW.isoformat()}])
 def test_invalid_report_is_ignored(tmp_path, bad):

@@ -31,15 +31,17 @@ $repo_root_path_str = Split-Path -Parent $script_dir_path_str
 Set-Location -LiteralPath $repo_root_path_str
 
 function Register-WeeklyTask {
-    param([string]$NameStr, [string]$WrapperStr, [string[]]$DayList, [string]$AtStr, [int]$LimitMinutesInt)
+    param([string]$NameStr, [string]$WrapperStr, [string[]]$DayList, [string]$AtStr, [int]$LimitMinutesInt, [switch]$Disabled)
     $wrapper_path_str = Join-Path $script_dir_path_str $WrapperStr
     if (-not (Test-Path -LiteralPath $wrapper_path_str)) { throw "Wrapper script not found: $wrapper_path_str" }
     $action_obj = New-ScheduledTaskAction -Execute "powershell.exe" `
         -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$wrapper_path_str`"" -WorkingDirectory $repo_root_path_str
     $trigger_obj = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $DayList -At $AtStr
-    # IgnoreNew: never two runs at once. The time limit keeps a slow run away from the open.
+    # Offset-free local wall time follows New York DST; the cmdlet may emit UTC otherwise.
+    $trigger_obj.StartBoundary = (Get-Date).Date.Add([TimeSpan]::Parse($AtStr)).ToString("s")
+    # The wrapper enforces the absolute NY deadline; do not catch up missed backtests.
     $settings_obj = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew `
-        -ExecutionTimeLimit (New-TimeSpan -Minutes $LimitMinutesInt) -StartWhenAvailable
+        -ExecutionTimeLimit (New-TimeSpan -Minutes $LimitMinutesInt) -Disable:$Disabled
     $principal_obj = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType S4U -RunLevel Limited
     Register-ScheduledTask -TaskName $NameStr -Action $action_obj -Trigger $trigger_obj `
         -Settings $settings_obj -Principal $principal_obj -Force | Out-Null
@@ -68,14 +70,18 @@ if (-not $CheckOnly) {
     $kept_off_list = @($all_task_list | Where-Object {
         $task_obj = Get-ScheduledTask -TaskName $_ -ErrorAction SilentlyContinue
         $null -ne $task_obj -and [string]$task_obj.State -eq "Disabled" })
-    & (Join-Path $script_dir_path_str "setup_live_ops_watchdog_task.ps1") -Mode live
-    & (Join-Path $script_dir_path_str "setup_ibkr_performance_task.ps1")
+    # Register disabled from the outset: a later failure must never enable an OFF task.
+    & (Join-Path $script_dir_path_str "setup_live_ops_watchdog_task.ps1") -Mode live `
+        -Disabled:($kept_off_list -contains "AlphaLiveOpsWatchdog")
+    & (Join-Path $script_dir_path_str "setup_ibkr_performance_task.ps1") `
+        -Disabled:($kept_off_list -contains "AlphaIbkrPerformanceSync")
     Register-WeeklyTask -NameStr "AlphaBacktestCheck" -WrapperStr "run_backtest_check.ps1" `
-        -DayList @("Monday", "Tuesday", "Wednesday", "Thursday", "Friday") -AtStr "06:30" -LimitMinutesInt 150
+        -DayList @("Monday", "Tuesday", "Wednesday", "Thursday", "Friday") -AtStr "06:30" -LimitMinutesInt 150 `
+        -Disabled:($kept_off_list -contains "AlphaBacktestCheck")
     Register-WeeklyTask -NameStr "AlphaBacktestRuler" -WrapperStr "run_backtest_ruler.ps1" `
-        -DayList @("Saturday") -AtStr "10:00" -LimitMinutesInt 480
+        -DayList @("Saturday") -AtStr "10:00" -LimitMinutesInt 480 `
+        -Disabled:($kept_off_list -contains "AlphaBacktestRuler")
     foreach ($name_str in $kept_off_list) {
-        Disable-ScheduledTask -TaskName $name_str | Out-Null
         Write-Host "[OFF] '$name_str' kept off (was turned off before this setup)."
     }
 }

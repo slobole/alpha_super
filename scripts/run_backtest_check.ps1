@@ -25,10 +25,10 @@ else {
 }
 
 if ($RulersOnly) {
-    & $uv_exe_path_str run python -m alpha.live.backtest_check --rulers-only
+    & $uv_exe_path_str run python -m alpha.live.scheduled_backtest --rulers-only
 }
 else {
-    & $uv_exe_path_str run python -m alpha.live.backtest_check
+    & $uv_exe_path_str run python -m alpha.live.scheduled_backtest
 }
 $check_exit_int = $LASTEXITCODE
 & $uv_exe_path_str run python -m alpha.live.scheduled_tasks check | Out-Null

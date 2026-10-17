@@ -354,6 +354,15 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         finalize_system_dict(overview_dict, workspace_dict)
         backtest_view_dict = backtest_check_data.pod_view_dict(
             backtest_check_data.load_report_dict(provider_obj, as_of_ts=clock_fn()), pod_id_str)
+        selected_cycle_dict = source_dict.get("selected_cycle_dict") or {}
+        if backtest_view_dict and not selected_cycle_dict.get("current_bool", selected_current_bool):
+            # *** CRITICAL *** saved-cycle evidence must identify the exact saved decision,
+            # not merely another release/decision executed on the same market date.
+            if (backtest_view_dict.get("decision_plan_id_int") is None
+                    or any(backtest_view_dict.get(field_str) != selected_cycle_dict.get(field_str)
+                           for field_str in ("release_id_str", "decision_plan_id_int"))
+                    or backtest_view_dict.get("session_str") != selected_cycle_dict.get("session_date_str")):
+                backtest_view_dict = None
         if backtest_view_dict and pod_finance_dict.get("chart_dict"):
             pod_finance_dict["chart_dict"] = backtest_check_data.add_backtest_series(
                 pod_finance_dict["chart_dict"], pod_finance_dict.get("return_path_list") or [], backtest_view_dict)

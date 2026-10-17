@@ -9,6 +9,19 @@ Scheduled by `scripts\setup_live_tasks.ps1` (one script for every Live Ops task;
 `AlphaBacktestCheck` Mon-Fri 06:30 ET (stopped at 09:00 if still running) and `AlphaBacktestRuler` Saturday 10:00 ET
 (`--rulers-only`: the long history backtests, away from trading hours).
 
+The scheduled wrappers run through `alpha.live.scheduled_backtest`: weekday checks may start only
+from 06:30 until 09:00 New York time and are terminated at 09:00; ruler runs may start only on
+Saturday from 10:00 until 18:00 and are terminated at 18:00. Missed backtests do not catch up.
+The supervisor terminates only its own diagnostic child process tree. A cutoff returns failure;
+an out-of-window invocation skips without starting a backtest. These guards apply to the scheduled
+wrappers; the explicit manual Python command below remains a manual diagnostic.
+
+Setup registers previously disabled tasks with disabled settings from the outset, including when
+a later registration fails. Calendar triggers use local, offset-free New York wall time so DST
+does not move the scheduled hour. `-CheckOnly` validates exported task XML: action/release path,
+working directory, watchdog mode, trigger, execution limit, overlap, missed-start and principal policies.
+Older UTC calendar triggers or obsolete paths fail this check and require re-setup after deployment.
+
 ```
 uv run python -m alpha.live.backtest_check --performance-db C:/alpha/live_ops/ibkr_performance.sqlite3
 ```
@@ -52,6 +65,12 @@ Output: `backtest_check_latest.json` next to the watchdog report (`ops_report_la
   evidence keeps its own check timestamp and as-of date, including migration of older reports' global dates.
 - Malformed saved decision books, JSON containers or nonfinite/non-numeric weights are not interpreted as empty
   valid decisions. Malformed prior reports are dropped before partial-run merges.
+- An unreadable contributing MR pod makes the pooled cost component `incomplete`, with the missing source
+  named and the aggregate mean/deadline verdict unavailable. It cannot pass on surviving sources alone.
+- Saved-cycle Backtest evidence requires the exact release, decision-plan ID and session. Legacy reports
+  without the decision ID remain readable for current views, but cannot prove a saved-cycle match.
+- System health warns when any currently enabled LIVE identity lacks a completed decision check, including
+  skipped checks, partial coverage, release replacement and zero checked pods.
 - A malformed report is dropped whole by the dashboard before Pod, Performance or System consumption. Cumulative
   returns of -100% or below are invalid for curve rebasing. Saved curves display both their start and end dates.
 - Reports only. It never blocks orders and sends no alerts. The red box quotes the stop rule; disabling a pod stays
@@ -101,3 +120,19 @@ Output: `backtest_check_latest.json` next to the watchdog report (`ops_report_la
 - Remaining evidence limits: local tests do not establish real-VPS data parity. Current snapshot/macro reconstruction,
   omitted dividends, close-weight tolerance, overlapping rare-loss windows and correlated partial fills remain
   diagnostic limitations. CORE5 remains explicitly unchecked; a cost-component pass is not full MR gate approval.
+
+## Scheduled-task and evidence follow-up verification (2026-10-17)
+
+- Fixed all six follow-up findings: absolute diagnostic deadlines, disabled-task preservation, observed task
+  contract validation, incomplete pooled MR sources, exact saved-decision matching and missing current-pod coverage.
+- Tier 3 review: three independent read-only reviewers covered failure modes, parity/quantitative correctness
+  and regression coverage; no material finding remained open after fixes.
+- Broad relevant regression: **2,808 passed**, including all V4 Python tests, checker/task/FRED/Flex tests,
+  watchdog tests and the runner, scheduler, reconciliation and release-manifest suites. The latest focused
+  scheduling/script run passed **53 tests**; these overlap the broad suite and are not an additional unique total.
+- Windows tests use real unregistered trigger objects and harmless diagnostic process trees; Scheduler
+  registration is stubbed. Five affected PowerShell scripts parsed successfully; scoped `git diff --check` passed.
+- Order timing, sizing, reference prices, live state schemas, existing log fields and released pod routes are
+  unchanged. New report fields are optional; older reports remain readable, with unproven historical matches omitted.
+- No push, deployment, real task registration or broker action was performed. Real-VPS Scheduler execution and
+  production data parity remain unverified. The operator setup has not been run on the server.

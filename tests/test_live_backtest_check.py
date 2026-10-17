@@ -186,6 +186,27 @@ def test_last_finished_session_is_before_the_run_date():
     assert bc.last_finished_session_str("2026-11-27") == "2026-11-25"  # after Thanksgiving
 
 
+@pytest.mark.parametrize('failed_pod_list', [['pod_b'], ['pod_a', 'pod_b']])
+def test_unreadable_mr_source_never_passes_the_pooled_gate(tmp_path, monkeypatch, failed_pod_list):
+    target_list = [_target(tmp_path / 'missing', pod_id_str, 'strategies.mr_capsule.test:X', pod_id_str)
+                   for pod_id_str in ('pod_a', 'pod_b')]
+    def check_fn(target_obj, **kwarg_dict):
+        pod_id_str = target_obj.release_obj.pod_id_str
+        if pod_id_str in failed_pod_list:
+            raise OSError('source unreadable')
+        return {'pod_id_str': pod_id_str, 'reference_status_str': 'ok', 'decision_dict': {'status_str': 'same'},
+                'fill_list': [_fill('AAA', 10, 100, 100, '2026-10-01')] * 200}
+    monkeypatch.setattr(bc, 'check_pod_dict', check_fn)
+    monkeypatch.setattr(bc, 'live_return_dict_by_account', lambda *arg_tuple: {})
+    report_dict = bc.build_report_dict(target_list, as_of_ts=datetime(2026, 10, 16, 12, tzinfo=UTC),
+                                     performance_db_path_str=None, previous_dict={}, cache_dir_path=tmp_path)
+    gate_dict = report_dict['cost_gate_dict']
+    assert gate_dict['status_str'] == 'incomplete'
+    assert gate_dict['unavailable_pod_list'] == failed_pod_list
+    assert gate_dict['average_bps_float'] is None
+    assert gate_dict['time_cap_date_str'] is None
+
+
 def test_ruler_failure_keeps_the_decision_and_curve(tmp_path, monkeypatch):
     import pandas as pd
     from alpha.live import reference_compare

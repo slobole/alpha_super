@@ -100,7 +100,7 @@ function New-ScheduledTaskAction { param($Execute, $Argument, $WorkingDirectory)
     [pscustomobject]@{Execute=$Execute; Argument=$Argument; WorkingDirectory=$WorkingDirectory}
 }
 function New-ScheduledTaskTrigger { param([switch]$Once, $At, $RepetitionInterval) [pscustomobject]@{} }
-function New-ScheduledTaskSettingsSet { param($MultipleInstances, $ExecutionTimeLimit, [switch]$StartWhenAvailable)
+function New-ScheduledTaskSettingsSet { param($MultipleInstances, $ExecutionTimeLimit, [switch]$StartWhenAvailable, [switch]$Disable)
     [pscustomobject]@{MultipleInstances=$MultipleInstances; ExecutionTimeLimitSeconds=$ExecutionTimeLimit.TotalSeconds}
 }
 function New-ScheduledTaskPrincipal { param($UserId, $LogonType, $RunLevel) [pscustomobject]@{} }
