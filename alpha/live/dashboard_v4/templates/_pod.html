@@ -11,7 +11,7 @@
 
 <div class="page-head pod-head"><div>
   <div class="row"><h1 data-selection-key="pod-name">{{ pod_page_dict.name_str }}</h1><span class="pill pill-{{ pill_class_dict.get(pod_page_dict.state_str, 'unk') }}" data-pod-pill>{{ mark(pod_page_dict.state_str) }}<span data-pill-label>{{ pod_page_dict.pill_str }}</span></span></div>
-  <div class="row muted pod-identity" data-selection-key="pod-identity"><span class="tag tag-live">LIVE</span><span>{{ pod_page_dict.cadence_str }}</span>{% if pod_page_dict.submit_mode_str %}<span>{{ pod_page_dict.submit_mode_str }}</span>{% endif %}<span class="mono">{{ pod_page_dict.pod_id_str }} · {{ pod_page_dict.account_str }}</span></div>
+  <div class="row muted pod-identity" data-selection-key="pod-identity"><span class="tag tag-live">LIVE</span><span>{{ pod_page_dict.cadence_str }}</span>{% if pod_page_dict.submit_mode_str %}<span>{{ pod_page_dict.submit_mode_str }}</span>{% endif %}<span class="mono">{{ pod_page_dict.pod_id_str }} · {{ pod_account_label(pod_page_dict.pod_id_str, pod_page_dict.account_str) }}</span></div>
   {% if not pod_page_dict.attention_dict %}<p class="verdict"><b data-verdict>{{ pod_page_dict.header_dict.verdict_str }}</b> <span data-verdict-detail>{{ pod_page_dict.header_dict.detail_str }}</span></p>{% endif %}
   {% if not pod_page_dict.attention_dict %}<p class="muted" data-selection-key="current-next">Next: <b data-pod-next>{{ pod_page_dict.header_dict.next_str }}{% if pod_page_dict.header_dict.next_time_str %} <span class="mono">{{ pod_page_dict.header_dict.next_time_str }}</span>{% endif %}</b>{% if pod_page_dict.header_dict.next_detail_str %} · <span data-next-detail>{{ pod_page_dict.header_dict.next_detail_str }}</span>{% endif %}</p>{% endif %}
 </div><div class="row pod-actions"><a class="btn btn-sm" href="{{ url_for('activity', pod=pod_page_dict.pod_id_str) }}">{{ icon('activity') }}Activity</a><a class="btn btn-sm" href="{{ url_for('console', pod=pod_page_dict.pod_id_str) }}">{{ icon('console') }}Console</a><a class="btn btn-sm" href="{{ url_for('tools', pod=pod_page_dict.pod_id_str) }}">{{ icon('tools') }}Tools</a>{% if pod_page_dict.orders_dict and pod_page_dict.orders_dict.enabled_bool %}<button class="btn btn-sm btn-p" type="button" data-order-open data-kind="new">New order…</button>{% endif %}</div></div>
@@ -20,7 +20,7 @@
 <section class="panel tkt-inline" id="order-{{ slot_str }}-{{ pod_page_dict.pod_id_str }}" hx-preserve="true" data-order-panel="{{ slot_str }}" hidden
   data-enabled="{{ 'true' if orders_dict.enabled_bool else 'false' }}" data-token="{{ orders_dict.token_str }}"
   data-check-url="{{ orders_dict.check_url_str }}" data-send-url="{{ orders_dict.send_url_str }}"
-  data-subtitle="{{ pod_page_dict.name_str }} · LIVE · {{ pod_page_dict.account_str }}"></section>
+  data-subtitle="{{ pod_page_dict.name_str }} · LIVE · {{ pod_account_label(pod_page_dict.pod_id_str, pod_page_dict.account_str) }}"></section>
 {%- endmacro %}
 {% if orders_dict %}{{ order_slot('new') }}{% endif %}
 

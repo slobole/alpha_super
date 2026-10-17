@@ -14,6 +14,7 @@
 .system-pods th:nth-child(2) { width: 23%; }
 .system-releases th:first-child { width: 24%; }
 .system-releases th:nth-child(4) { width: 30%; }
+.system-account-alias { display: block; overflow-wrap: normal; }
 .system-downloads { display: flex; flex-wrap: wrap; gap: 8px; }
 .system-priority-title { display: none; }
 .system-page tbody tr:last-child th { border-bottom: 0; }

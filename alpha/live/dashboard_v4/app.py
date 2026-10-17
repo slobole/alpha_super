@@ -10,6 +10,7 @@ import time
 
 from flask import Flask, Response, abort, jsonify, render_template, request, send_from_directory, url_for
 
+from alpha.live.dashboard_v4.account_alias import account_label_str, load_alias_by_pod_dict
 from alpha.live.dashboard_v4.data import LiveDataProvider, load_workspace_snapshot_tuple
 from alpha.live.dashboard_v4.overview import STATE_RANK_DICT, build_overview_dict
 from alpha.live.dashboard_v4.pod import TAB_TUPLE, build_pod_page_dict
@@ -57,6 +58,13 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
     clock_fn = now_fn or (lambda: datetime.now(UTC))
     database_path_str = performance_db_path_str or resolve_performance_db_path_str()
     flask_app_obj.config.update(read_only_bool=True, demo_bool=demo_bool)
+
+    def pod_account_label_str(pod_id_str, masked_account_str):
+        """IBKR alias from the saved Flex report, then the masked account."""
+        return account_label_str(load_alias_by_pod_dict(database_path_str).get(pod_id_str, ""), masked_account_str)
+
+    flask_app_obj.jinja_env.globals["pod_account_label"] = pod_account_label_str
+    flask_app_obj.jinja_env.globals["pod_account_alias"] = lambda pod_id_str: load_alias_by_pod_dict(database_path_str).get(pod_id_str, "")
 
     def tools_workspace_dict():
         if operations_workspace_fn is not None:
