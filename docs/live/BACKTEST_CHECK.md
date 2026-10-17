@@ -5,6 +5,10 @@ needs years of returns and stays in the monthly Scout review.
 
 ## What runs
 
+Scheduled by `scripts\setup_live_tasks.ps1` (one script for every Live Ops task; `-CheckOnly` = PASS / FAIL only):
+`AlphaBacktestCheck` Mon-Fri 06:30 ET (stopped at 09:00 if still running) and `AlphaBacktestRuler` Saturday 10:00 ET
+(`--rulers-only`: the long history backtests, away from trading hours).
+
 ```
 uv run python -m alpha.live.backtest_check --performance-db C:/alpha/live_ops/ibkr_performance.sqlite3
 ```

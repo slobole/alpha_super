@@ -748,6 +748,30 @@ def build_report_dict(target_list, *, as_of_ts: datetime, performance_db_path_st
             "cost_gate_dict": gate_dict}
 
 
+def build_rulers(target_list, *, cache_dir_path: Path) -> int:
+    """Weekend task: one long backtest per LIVE pod that lacks a current ruler. Never touches the report."""
+    today_obj = datetime.now(UTC).astimezone(MARKET_TIMEZONE_OBJ).date()
+    failed_int = 0
+    for target_obj in target_list:
+        release_obj = target_obj.release_obj
+        if release_obj.mode_str != "live" or not release_obj.enabled_bool:
+            continue
+        try:
+            source_dict = read_pod_source_dict(target_obj.db_path_str, release_obj.pod_id_str, today_obj.isoformat())
+            start_str = (source_dict["first_vplan_dict"] or {}).get("session_date_str")
+            if not start_str:
+                print(f"[SKIP] {release_obj.pod_id_str}: no executed plan yet")
+                continue
+            ruler_dict = load_or_build_ruler_dict(release_obj, cache_dir_path=cache_dir_path, deployment_start_str=start_str,
+                                                  refresh_bool=True, today_obj=today_obj)
+            print(f"[PASS] {release_obj.pod_id_str}: ruler {ruler_dict.get('built_date_str')} · {ruler_dict.get('session_count_int')} sessions")
+        except Exception as error_obj:
+            failed_int += 1
+            print(f"[FAIL] {release_obj.pod_id_str}: {type(error_obj).__name__}: {error_obj}"[:300])
+        gc.collect()
+    return 1 if failed_int else 0
+
+
 def main(argv=None) -> int:
     from alpha.live.dashboard import (DEFAULT_CONFIG_PATH_STR, DEFAULT_EVENT_LOG_PATH_STR, DEFAULT_RELEASES_ROOT_PATH_STR,
                                       DEFAULT_RESULTS_ROOT_PATH_STR, DashboardApp)
@@ -762,6 +786,8 @@ def main(argv=None) -> int:
     parser.add_argument("--no-reference", action="store_true", help="Skip backtest runs (cost gate only).")
     parser.add_argument("--refresh-ruler", action="store_true", help="Build missing or old rare-loss rulers (long backtests).")
     parser.add_argument("--skip-env-file", action="store_true", help="Do not load config.env (same switch as the dashboard).")
+    parser.add_argument("--rulers-only", action="store_true",
+                        help="Only build missing or old rare-loss rulers (long backtests, for the weekend task); the report is untouched.")
     args = parser.parse_args(argv)
     if not args.skip_env_file:
         # Same environment as the dashboard and the serves: Norgate profile / snapshot mode, Flex store path.
@@ -779,6 +805,8 @@ def main(argv=None) -> int:
         if not target_list:
             parser.error(f"No enabled release for pod {args.pod_id}.")
     report_path = Path(args.event_log_path).resolve().parent / REPORT_FILE_NAME_STR
+    if args.rulers_only:
+        return build_rulers(target_list, cache_dir_path=report_path.parent / CACHE_DIR_NAME_STR)
     previous_dict = _read_previous_dict(report_path)
     report_dict = build_report_dict(target_list, as_of_ts=datetime.now(UTC), performance_db_path_str=args.performance_db,
                                     previous_dict=previous_dict, cache_dir_path=report_path.parent / CACHE_DIR_NAME_STR,
