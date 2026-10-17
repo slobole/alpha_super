@@ -1,0 +1,31 @@
+{# Positions map: data from positions_map.py / positions_history.py; layout and interaction in static/positions.js. #}
+{% set map_dict = positions_page_dict.map_dict %}
+{% set side_dict = positions_page_dict.side_dict %}
+{% set month_map_bool = positions_page_dict.get('mode_str') == 'month' %}
+<section class="panel positions-map-panel" aria-label="Positions map" data-positions-map data-map-scope="{{ map_dict.get('mode_str', 'now') }}:{{ positions_page_dict.get('month_str') or positions_page_dict.get('month_dict', {}).get('month_str', '') }}:{{ positions_page_dict.get('pod_str', 'all') }}">
+  <div class="panel-h positions-map-head"><span class="panel-t">Map · {{ (positions_page_dict.month_dict.name_str ~ (' (to date)' if positions_page_dict.month_dict.get('to_date_bool') else '')) if month_map_bool else 'Now' }}</span>
+    {% if map_dict.available_bool %}<span class="positions-map-tools">
+      <span class="positions-map-k">Size</span><span class="seg positions-map-size" role="group" aria-label="Tile size"><button type="button" data-map-size="value" aria-pressed="true">Value</button><button type="button" data-map-size="exposure" aria-pressed="false">Exposure</button></span>
+      <span class="positions-map-scale" title="Colour scale, clipped at ±10%" aria-hidden="true"><span>−10%</span><i class="tm-n3"></i><i class="tm-n2"></i><i class="tm-n1"></i><i class="tm-0"></i><i class="tm-p1"></i><i class="tm-p2"></i><i class="tm-p3"></i><span>+10%</span></span>
+    </span>{% endif %}
+  </div>
+  {% if map_dict.available_bool %}
+  <div class="positions-map-body{{ ' has-side' if side_dict else '' }}">
+    <div class="positions-map-wrap" data-map-wrap>
+      {# tojson escapes quotes and angle brackets for a single-quoted attribute; HTMX swaps drop data <script> blocks. #}
+      <div class="positions-map-canvas" data-map-canvas data-map-json='{{ map_dict|tojson }}'></div>
+      <div class="positions-map-tip" data-map-tip role="status" hidden></div>
+      <div class="positions-map-foot"><span><span data-map-size-legend data-value-legend="{{ map_dict.size_legend_str }}" data-exposure-legend="{{ map_dict.exposure_legend_str }}">{{ map_dict.size_legend_str }}</span> · {{ map_dict.colour_legend_str }}{% if map_dict.get('hatch_legend_str') %} · <span class="positions-map-hatch" aria-hidden="true"></span>{{ map_dict.hatch_legend_str }}{% endif %}</span><span>{{ map_dict.asof_str }}</span></div>
+    </div>
+    {% if side_dict %}<aside class="positions-map-side" aria-label="Map summary">
+      <div class="positions-map-big"><b class="{{ side_dict.big_tone_str }}">{{ side_dict.big_str }}</b><span>{{ side_dict.big_detail_str }}</span></div>
+      {% if side_dict.pod_bar_list %}<div><h3>By pod</h3>{% for bar_dict in side_dict.pod_bar_list %}<div class="positions-map-bar{{ ' other' if bar_dict.get('other_bool') else '' }}"{% if bar_dict.get('title_str') %} title="{{ bar_dict.title_str }}"{% endif %}><span class="nm">{% if bar_dict.color_str %}<i class="dotk" style="background: {{ bar_dict.color_str }}" aria-hidden="true"></i>{% else %}<i class="dotk other" aria-hidden="true"></i>{% endif %}{{ bar_dict.name_str }}</span><span class="tr" aria-hidden="true"><i class="{{ bar_dict.tone_str }}" style="left: {{ bar_dict.left_percent_float }}%; width: {{ bar_dict.width_percent_float }}%"></i></span><span class="num {{ bar_dict.tone_str }}">{{ bar_dict.value_str }}</span></div>{% endfor %}</div>{% endif %}
+      {% for title_str, mover_list in (('Top contributors' if month_map_bool else 'Biggest winners', side_dict.best_list), ('Biggest detractors' if month_map_bool else 'Biggest losers', side_dict.worst_list)) if mover_list %}
+      <div><h3>{{ title_str }}</h3>{% for mover_dict in mover_list %}<button type="button" class="positions-map-mover" data-map-select="{{ mover_dict.key_str }}"><span><b>{{ mover_dict.symbol_str }}</b><small>{{ mover_dict.detail_str }}</small></span><span class="num {{ mover_dict.tone_str }}">{{ mover_dict.pnl_str }}</span></button>{% endfor %}</div>
+      {% endfor %}
+    </aside>{% endif %}
+  </div>
+  {% else %}
+  <div class="empty-state positions-map-empty">{{ map_dict.reason_str }}</div>
+  {% endif %}
+</section>

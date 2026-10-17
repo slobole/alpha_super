@@ -185,6 +185,50 @@ status becomes Unknown. No operation, submit, cancel, new route or schema
 migration is added by the page. Synthetic demos verify display contracts; real
 IBKR cost/P&L availability still requires a successful scheduled EOD capture.
 
+The Positions map (2026-10-17) draws only that same complete one-date
+valuation: tile size is the holding value (or gross exposure, value times an
+explicit leveraged/inverse ETF multiplier table in `positions_map.py`; every
+other symbol is 1x), colour is the saved open P&L since entry. Exposure is a
+display aid only and never feeds sizing. Table sorting runs in the browser and
+does not change any server order, filter or total.
+
+The month view (`/positions?month=YYYY-MM`) reads only finalized D+1 daily IBKR
+Flex statements. Month P&L and TWR are the Performance page's client report for
+the same dates and the same scope rule (dated client accounts when the saved
+scope is complete), so Pods that start or retire mid-month keep months
+reportable. Per-symbol rows need IBKR's "Mark-to-Market Performance Summary in
+Base" section, which no saved query carries yet. Adding it to the NAV query is
+not recommended: that import re-sends 35 days nightly, every dashboard re-reads
+all its saved imports per refresh, and imports above 256 KB miss the NAV parse
+cache. The planned source is a separate MTM-only query (the reader takes its
+query name; the sync change is pending owner approval). Its XML names
+(`MTMPerformanceSummaryInBase`/`MTMPerformanceSummaryUnderlying`, `accountId`,
+`assetCategory`, `currency`, `prevCloseQuantity`, `prevClosePrice`,
+`closeQuantity`, `closePrice`, `transactionMtm`, `priorOpenMtm`, optional
+`commissions`, `reportDate`, `multiplier`, `fxRateToBase`) follow IBKR naming but
+need acceptance against the first real export. For each day the source is the
+newest import of that query covering the day. Every day must prove itself:
+- each row's `priorOpenMtm` equals overnight quantity × close-price change, within
+  $0.02 + $0.0001 per share;
+- summed `priorOpenMtm + transactionMtm` equals that day's Change in NAV `mtm`
+  within $0.05, and row commissions equal NAV `commissions` when both exist;
+- gross closing position value stays within four times that day's NAV;
+- quantities carry over from each session's close to the next session's open.
+
+Only USD STK rows with unit multipliers are accepted. Rows without a conid are
+IBKR subtotals, proven harmless only by the reconciliation. Weekend/holiday NAV
+rows with zero MTM may lack the section. Any failed day, a corporate action that
+breaks the quantity carry-over, or two statements for one account-day withholds
+the whole month with its reason; no partial month is shown. Per-symbol P&L
+includes row commissions and excludes dividends and interest, which appear as
+"Other" = report P&L minus summed symbol P&L. "Return while held" is month P&L
+divided by the average daily capital in the name (the larger of the overnight
+and closing position value on each session held), not a TWR. Tile size is that
+capital averaged over all sessions of the month, so a three-day holding is small.
+Status is read at the Pod's last session in the range. Each import is parsed
+once, outside the read transaction, and cached by import id and checksum (eight
+imports).
+
 V4 charts display the existing cumulative return paths, not normalized NAV.
 Overview retains the configured client end-of-day flow convention and labels
 the return as calculated. Pod charts retain official account TWR. Capital

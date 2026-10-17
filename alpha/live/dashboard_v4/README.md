@@ -555,11 +555,61 @@ cycle never gets suggestions for the latest cycle. PowerShell quoting doubles
 ASCII and typographic single quotes. Copy tries the
 Clipboard API, then a selection copy, then shows the command to copy by hand.
 
+## Positions map, month view and sorting (2026-10-17)
+
+Owner request from the investor-page Holdings map (mockup
+`_mockups/CLAUDE_MOCKUPS/v4d/positions-map.html`).
+
+- **Map (Now).** Between the tiles and the table, one block per Pod and one tile
+  per holding, plus a cash tile (`positions_map.py`, `static/positions.js`). It is
+  drawn only from the complete one-date IBKR valuation the weights already use;
+  otherwise the panel says why. Size = value, or gross exposure (value × the
+  leveraged/inverse ETF multiplier table; TQQQ = 3x, others 1x; cash hidden).
+  Colour = open P&L since entry, clipped at ±10%. The side column shows open
+  P&L by Pod and the three best/worst holdings. Hover or focus shows the tile's
+  facts; click (or Enter) highlights its table row, and clicking a row or a side
+  entry highlights the tile. The Pod filter scopes the map like the table.
+- **Period switch.** `Now` plus up to 12 months with finalized NAV, newest first;
+  the open month is labelled "(to date)". A month (`/positions?month=YYYY-MM`)
+  reads saved daily IBKR reports only (`positions_history.py`); today's broker
+  positions, fills and activity are not read and the Changed/Off-target filters
+  are hidden. `month` with `view` is rejected (400); a month without finalized
+  NAV is 404.
+- **Month content.** Tiles: month P&L and TWR (the Performance client report for
+  the same dates), positions held and sold, best and worst. Map: every holding
+  of the month; size = capital averaged over all sessions of the month (time held
+  counts), colour = return while held, hatched = sold during the month. Table:
+  held dates and sessions, average value while held, average weight, P&L,
+  status (Open now / Sold <date> / Held to month end). By pod: held, sold,
+  average NAV, P&L and return. "Other" = report P&L minus summed position P&L
+  (interest, dividends, fees).
+- **Data needed for months.** Per-symbol rows need IBKR's "Mark-to-Market
+  Performance Summary in Base" section, which no saved query carries yet. Do not
+  add it to the NAV query: that would slow every dashboard as imports accumulate
+  (see `docs/operations/ibkr-flex-performance-setup.md`). The planned source is a
+  separate MTM-only query; `load_day_mtm_map_dict(..., mtm_query_name_str=...)`
+  already reads it, while the sync change to download it awaits owner approval.
+  Every day must prove itself (row quantity×price, NAV reconciliation, quantity
+  carry-over, gross ≤ 4× NAV) or the whole month is withheld with its reason.
+  Until the data exists, a month says so and shows no numbers. The XML names
+  still need acceptance against the first real export (`ASSUMPTIONS_AND_GAPS.md`).
+  Totals use the Performance page's scope rule, so mid-month Pod starts and
+  retirements keep months reportable.
+- **Sorting.** Click a column header of the Positions table or the month table:
+  text sorts A→Z first, numbers largest first, a second click flips; missing
+  values stay last and ties keep the server order. The sort, the selected tile
+  and the size choice survive the 15-second refresh; the size choice is kept for
+  the browser session. The default order is unchanged.
+- The demo (`--demo`) attaches synthetic daily MTM XML (`demo_history.py`) that
+  goes through the real parser and reconciles with the demo NAV.
+
 ## Verification
 
 ```powershell
 .venv\Scripts\python.exe -B -m pytest tests/test_dashboard_v4_cycle.py tests/test_dashboard_v4_evidence.py tests/test_dashboard_v4_finance.py tests/test_dashboard_v4_return_chart.py tests/test_dashboard_v4_routes.py tests/test_dashboard_v4_pod.py tests/test_dashboard_v4_pod_data.py tests/test_dashboard_v4_pod_finance.py tests/test_dashboard_v4_pod_integration.py tests/test_dashboard_v4_pod_review.py tests/test_dashboard_v4_pod_demo.py tests/test_dashboard_v4_next_operation.py tests/test_dashboard_v4_selection_markup.py tests/test_dashboard_local_workspace.py --capture=sys -p no:cacheprovider -q
 node --test tests/dashboard_v4_refresh.test.cjs
+node --test tests/dashboard_v4_positions.test.cjs
+.venv\Scripts\python.exe -B -m pytest tests/test_dashboard_v4_positions_history.py tests/test_dashboard_v4_positions_map.py tests/test_dashboard_v4_positions_routes.py -q -p no:cacheprovider
 uv run python -m pytest tests/test_dashboard_v4_system.py tests/test_dashboard_v4_system_data.py tests/test_dashboard_v4_system_routes.py -q
 ```
 

@@ -134,7 +134,7 @@ def enrich_positions_dict(result_dict, source_by_pod_dict, *, pod_str, as_of_ts)
         for pod_id_str in selected_pod_list)
     result_dict.update(values_available_bool=bool(valuation_dict), pnl_available_bool=False,
         changed_available_bool=activity_complete_bool, money_complete_bool=money_complete_bool,
-        values_asof_str="", values_note_str="")
+        values_asof_str="", values_note_str="", map_source_list=[], book_value_float=denominator_float)
     full_row_list, selected_row_list = [], []
     for symbol_str, holder_list in sorted(symbol_dict.items()):
         full_row_list.append({"symbol_str": symbol_str, "pod_list": holder_list, **_money_dict(holder_list, denominator_float)})
@@ -187,6 +187,21 @@ def enrich_positions_dict(result_dict, source_by_pod_dict, *, pod_str, as_of_ts)
     elif result_dict["pnl_available_bool"]:
         for tile_dict in result_dict["tile_list"][1:]:
             tile_dict.update(detail_str="P&L incomplete")
+    if money_complete_bool:
+        # Map source: the same complete, matched, one-date valuation as the
+        # weights above. One row per Pod holding; cost/P&L only as a verified pair.
+        for pod_row_dict in all_pod_list:
+            value_dict = valuation_dict[pod_row_dict["pod_id_str"]]
+            map_row_list = []
+            for item_dict in value_dict["position_list"]:
+                pnl_float = item_dict.get("unrealized_pnl_float")
+                map_row_list.append({"symbol_str": item_dict["symbol_str"], "shares_float": item_dict["shares_float"],
+                    "shares_str": _quantity_str(item_dict["shares_float"]), "value_float": item_dict["value_float"],
+                    "value_str": _money_str(item_dict["value_float"]), "pnl_float": pnl_float,
+                    "cost_float": abs(item_dict["shares_float"] * item_dict["average_cost_float"]) if pnl_float is not None else None,
+                    "pnl_str": _pnl_dict(pnl_float, 0)["pl_str"] if pnl_float is not None else "—"})
+            result_dict["map_source_list"].append({"pod_id_str": pod_row_dict["pod_id_str"],
+                "cash_float": value_dict["cash_float"], "row_list": map_row_list})
     for pod_row_dict in all_pod_list:
         pod_row_dict.update(invested_str="—", cash_str="—", weight_str="—")
         value_dict = valuation_dict.get(pod_row_dict["pod_id_str"])

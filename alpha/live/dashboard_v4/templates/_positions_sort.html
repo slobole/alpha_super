@@ -1,0 +1,2 @@
+{# A sortable column header. Sorting runs in the browser (static/positions.js); the server order is the default. #}
+{% macro sort_head(key_str, label_str, type_str='number', class_str='') %}<th scope="col"{% if class_str %} class="{{ class_str }}"{% endif %} aria-sort="none"><button type="button" class="sort-head" data-sort-key="{{ key_str }}" data-sort-type="{{ type_str }}">{{ label_str }}</button></th>{% endmacro %}

@@ -110,6 +110,16 @@ Check only four things:
 
 If any check fails, fix the Query before continuing.
 
+#### Not enabled yet: per-symbol P&L for the Positions month view
+
+Dashboard V4 can show any past month on its Positions page (what was held, when it was sold, what each holding made). It reads IBKR's **Mark-to-Market Performance Summary in Base** section. Until a source for that section is approved, months on that page say that the data is missing and show no numbers.
+
+**Do not add that section to this Query.** The NAV/TWR import would still parse (it reads only Account Information and Change in NAV), but every nightly import re-sends 35 days for every account. All dashboards re-read every saved import of this Query on each refresh, and imports above 256 KB are not cached, so every page would slow down as imports accumulate.
+
+The planned route is a separate MTM-only Flex query, saved under its own query name. The month reader already supports that (`mtm_query_name_str`). The nightly sync still needs a small change to download it, which requires the owner's approval.
+
+When a real export exists, confirm that each account's `FlexStatement` holds an `MTMPerformanceSummaryInBase` element with `MTMPerformanceSummaryUnderlying` rows carrying `accountId`, `assetCategory`, `currency`, `symbol`, `conid`, `prevCloseQuantity`, `prevClosePrice`, `closeQuantity`, `closePrice`, `transactionMtm` and `priorOpenMtm`. If IBKR names them differently, the month view stays unavailable and says why. It never guesses.
+
 !!! danger "Sensitive data"
     The downloaded XML and Shadow database contain account IDs, financial values, and raw Flex XML. Screenshots, status output, task logs, and backups may also be sensitive. Keep them restricted to authorized operators and redact them before sharing.
 
