@@ -521,8 +521,11 @@ def _scheduled_tasks_dict(path_obj, as_of_ts):
         row_list = [row_dict for row_dict in task_list + environment_list if isinstance(row_dict, dict)]
         failed_list = [str(row_dict.get("name_str"))[:60] for row_dict in row_list if row_dict.get("state_str") == "FAIL"]
         ok_task_int = sum(1 for row_dict in task_list if isinstance(row_dict, dict) and row_dict.get("state_str") == "PASS")
+        off_list = [str(row_dict.get("name_str"))[:60] for row_dict in task_list if isinstance(row_dict, dict) and row_dict.get("state_str") == "OFF"]
         if failed_list:
             state_str, now_str = "error", "FAIL · " + ", ".join(failed_list[:3]) + (f" +{len(failed_list) - 3}" if len(failed_list) > 3 else "")
+        elif off_list:
+            state_str, now_str = "warning", "OFF · " + ", ".join(off_list[:3]) + f" · {ok_task_int} of {len(task_list)} tasks on"
         elif as_of_ts - checked_ts > TASKS_RECEIPT_MAX_AGE:
             state_str, now_str = "warning", f"Last check over 4 days old · {ok_task_int} of {len(task_list)} tasks OK"
         else:

@@ -5,6 +5,9 @@ The task list lives in alpha/live/scheduled_tasks.py (TASK_TUPLE). Safe to run a
 Usage:
   .\scripts\setup_live_tasks.ps1              # register all, then check
   .\scripts\setup_live_tasks.ps1 -CheckOnly   # only check, change nothing
+  .\scripts\setup_live_tasks.ps1 -Disable AlphaBacktestCheck   # turn a task off (kept registered); 'All' for every task
+  .\scripts\setup_live_tasks.ps1 -Enable AlphaBacktestCheck    # turn it back on
+A turned-off task shows as OFF in the check and in System health (amber), never as missing.
 
 Tasks:
   AlphaLiveOpsWatchdog      every 5 min, LIVE only   (setup_live_ops_watchdog_task.ps1 -Mode live)
@@ -14,7 +17,13 @@ Tasks:
 #>
 
 [CmdletBinding()]
-param([switch]$CheckOnly)
+param(
+    [switch]$CheckOnly,
+    [ValidateSet("All", "AlphaLiveOpsWatchdog", "AlphaIbkrPerformanceSync", "AlphaBacktestCheck", "AlphaBacktestRuler")]
+    [string[]]$Disable = @(),
+    [ValidateSet("All", "AlphaLiveOpsWatchdog", "AlphaIbkrPerformanceSync", "AlphaBacktestCheck", "AlphaBacktestRuler")]
+    [string[]]$Enable = @()
+)
 
 $ErrorActionPreference = "Stop"
 $script_dir_path_str = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -37,17 +46,38 @@ function Register-WeeklyTask {
     Write-Host "[PASS] Registered '$NameStr' $($DayList -join ',') $AtStr ET (stops after $LimitMinutesInt min)."
 }
 
+$all_task_list = @("AlphaLiveOpsWatchdog", "AlphaIbkrPerformanceSync", "AlphaBacktestCheck", "AlphaBacktestRuler")
+if ($Disable.Count -or $Enable.Count) {
+    foreach ($name_str in $(if ($Disable -contains "All") { $all_task_list } else { $Disable })) {
+        Disable-ScheduledTask -TaskName $name_str | Out-Null
+        Write-Host "[OFF] '$name_str' turned off (still registered; -Enable $name_str turns it back on)."
+    }
+    foreach ($name_str in $(if ($Enable -contains "All") { $all_task_list } else { $Enable })) {
+        Enable-ScheduledTask -TaskName $name_str | Out-Null
+        Write-Host "[PASS] '$name_str' turned on."
+    }
+    $CheckOnly = $true   # a switch change never re-registers anything
+}
+
 if (-not $CheckOnly) {
     $time_zone_id_str = (Get-TimeZone).Id
     if ($time_zone_id_str -ne "Eastern Standard Time") {
         throw "VPS time zone must be 'Eastern Standard Time' (New York). Current: $time_zone_id_str"
     }
+    # Re-registering replaces a task and would switch it back on: keep turned-off tasks off.
+    $kept_off_list = @($all_task_list | Where-Object {
+        $task_obj = Get-ScheduledTask -TaskName $_ -ErrorAction SilentlyContinue
+        $null -ne $task_obj -and [string]$task_obj.State -eq "Disabled" })
     & (Join-Path $script_dir_path_str "setup_live_ops_watchdog_task.ps1") -Mode live
     & (Join-Path $script_dir_path_str "setup_ibkr_performance_task.ps1")
     Register-WeeklyTask -NameStr "AlphaBacktestCheck" -WrapperStr "run_backtest_check.ps1" `
         -DayList @("Monday", "Tuesday", "Wednesday", "Thursday", "Friday") -AtStr "06:30" -LimitMinutesInt 150
     Register-WeeklyTask -NameStr "AlphaBacktestRuler" -WrapperStr "run_backtest_ruler.ps1" `
         -DayList @("Saturday") -AtStr "10:00" -LimitMinutesInt 480
+    foreach ($name_str in $kept_off_list) {
+        Disable-ScheduledTask -TaskName $name_str | Out-Null
+        Write-Host "[OFF] '$name_str' kept off (was turned off before this setup)."
+    }
 }
 
 $uv_command_obj = Get-Command uv -ErrorAction SilentlyContinue

@@ -32,7 +32,6 @@ def test_healthy_tasks_pass_and_missing_ones_fail():
 
 def test_disabled_wrong_action_failed_and_late_runs_fail():
     spec = st.TASK_TUPLE[0]
-    assert _states({spec.name_str: _task(spec.wrapper_str, state="Disabled")})[spec.name_str]["state_str"] == "FAIL"
     assert _states({spec.name_str: _task("other.ps1")})[spec.name_str]["state_str"] == "FAIL"
     assert "code 1" in _states({spec.name_str: _task(spec.wrapper_str, result=1)})[spec.name_str]["detail_str"]
     late = _states({spec.name_str: _task(spec.wrapper_str, last=NOW - timedelta(hours=2))})[spec.name_str]
@@ -69,3 +68,20 @@ def test_receipt_is_written_and_read_by_system_health(tmp_path):
     (tmp_path / st.RECEIPT_FILE_NAME_STR).write_text(json.dumps(saved), encoding="utf-8")
     assert _scheduled_tasks_dict(tmp_path / st.RECEIPT_FILE_NAME_STR, NOW + timedelta(minutes=1))["state_str"] == "ok"
     assert _scheduled_tasks_dict(tmp_path / st.RECEIPT_FILE_NAME_STR, NOW + timedelta(days=5))["state_str"] == "warning"
+
+
+def test_a_turned_off_task_is_off_not_missing(tmp_path):
+    spec = st.TASK_TUPLE[2]
+    row = _states({spec.name_str: _task(spec.wrapper_str, state="Disabled")})[spec.name_str]
+    assert row["state_str"] == "OFF" and "-Enable" in row["detail_str"]
+    log_path = tmp_path / "live_events.jsonl"
+    log_path.write_text("", encoding="utf-8")
+    query = {s.name_str: _task(s.wrapper_str, state="Disabled" if s.name_str == spec.name_str else "Ready") for s in st.TASK_TUPLE}
+    receipt = st.run_check(event_log_path_str=str(log_path), performance_db_path_str=None, now_ts=NOW, query_fn=query.get)
+    assert all(r["state_str"] != "FAIL" for r in receipt["task_row_list"])
+    saved = json.loads((tmp_path / st.RECEIPT_FILE_NAME_STR).read_text(encoding="utf-8"))
+    saved["environment_row_list"] = [dict(r, state_str="PASS") for r in saved["environment_row_list"]]
+    (tmp_path / st.RECEIPT_FILE_NAME_STR).write_text(json.dumps(saved), encoding="utf-8")
+    from alpha.live.dashboard_v4.system_data import _scheduled_tasks_dict
+    row = _scheduled_tasks_dict(tmp_path / st.RECEIPT_FILE_NAME_STR, NOW + timedelta(minutes=1))
+    assert row["state_str"] == "warning" and row["now_str"].startswith("OFF")

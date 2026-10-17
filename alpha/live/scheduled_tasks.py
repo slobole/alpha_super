@@ -82,9 +82,12 @@ def check_task_list(spec_tuple=TASK_TUPLE, *, now_ts: datetime, query_fn=_query_
         if task_dict is None:
             result_list.append({"name_str": spec.name_str, "state_str": "FAIL", "detail_str": "Not registered - run scripts\\setup_live_tasks.ps1"})
             continue
-        problem_list, note_list = [], []
         if task_dict.get("State") == "Disabled":
-            problem_list.append("disabled")
+            # Turned off on purpose (setup_live_tasks.ps1 -Disable): shown, never counted as missing.
+            result_list.append({"name_str": spec.name_str, "state_str": "OFF",
+                                "detail_str": spec.schedule_str + " - turned off (setup_live_tasks.ps1 -Enable " + spec.name_str + ")"})
+            continue
+        problem_list, note_list = [], []
         if spec.wrapper_str not in str(task_dict.get("Args", "")):
             problem_list.append(f"does not run {spec.wrapper_str}")
         if not _parse_ts(task_dict.get("NextRun", "")):
@@ -194,7 +197,9 @@ def main(argv=None) -> int:
     receipt_dict = run_check(event_log_path_str=args.event_log_path, performance_db_path_str=args.performance_db)
     for row_dict in receipt_dict["task_row_list"] + receipt_dict["environment_row_list"]:
         print(f"[{row_dict['state_str']}] {row_dict['name_str']}: {row_dict['detail_str']}")
-    print(f"[{receipt_dict['verdict_str']}] Scheduled tasks: {receipt_dict['fail_count_int']} problem(s).")
+    off_list = [row_dict["name_str"] for row_dict in receipt_dict["task_row_list"] if row_dict["state_str"] == "OFF"]
+    print(f"[{receipt_dict['verdict_str']}] Scheduled tasks: {receipt_dict['fail_count_int']} problem(s)"
+          + (f", turned off: {', '.join(off_list)}." if off_list else "."))
     return 1 if receipt_dict["fail_count_int"] else 0
 
 
