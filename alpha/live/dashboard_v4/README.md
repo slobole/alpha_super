@@ -582,7 +582,14 @@ Owner request from the investor-page Holdings map (mockup
   held dates and sessions, average value while held, average weight, P&L,
   status (Open now / Sold <date> / Held to month end). By pod: held, sold,
   average NAV, P&L and return. "Other" = report P&L minus summed position P&L
-  (interest, dividends, fees).
+  (interest, dividends, fees). Monthly cash is unavailable and omitted: NAV minus
+  gross position capital is not a cash balance. Now still uses verified saved cash.
+  Position capital and Pod NAV use the same finalized month sessions (including
+  zero on dates outside the Pod's active interval):
+  `AvgCapital_i = sum(max(abs(Qprev_i,d * Pprev_i,d), abs(Qclose_i,d * Pclose_i,d))) / N_month_sessions`;
+  `AvgNAV_p = sum(active closing NAV_p,d) / N_month_sessions`;
+  `BookWeight_i = AvgCapital_i / sum(AvgNAV_p)`.
+  Value while held and return while held keep their existing held-session basis.
 - **Data needed for months.** Per-symbol rows need IBKR's "Mark-to-Market
   Performance Summary in Base" section, which no saved query carries yet. Do not
   add it to the NAV query: that would slow every dashboard as imports accumulate
@@ -594,12 +601,15 @@ Owner request from the investor-page Holdings map (mockup
   Until the data exists, a month says so and shows no numbers. The XML names
   still need acceptance against the first real export (`ASSUMPTIONS_AND_GAPS.md`).
   Totals use the Performance page's scope rule, so mid-month Pod starts and
-  retirements keep months reportable.
+  retirements keep months reportable. Every read retains its required parsed
+  imports even when the shared eight-import cache evicts entries.
 - **Sorting.** Click a column header of the Positions table or the month table:
   text sorts A→Z first, numbers largest first, a second click flips; missing
   values stay last and ties keep the server order. The sort, the selected tile
   and the size choice survive the 15-second refresh; the size choice is kept for
-  the browser session. The default order is unchanged.
+  the browser session. The default order is unchanged. Positions sorts refreshed
+  rows before the shared page script restores selected table text. Folded tiles
+  label their dollar total Value or Exposure according to the selected size mode.
 - The demo (`--demo`) attaches synthetic daily MTM XML (`demo_history.py`) that
   goes through the real parser and reconciles with the demo NAV.
 

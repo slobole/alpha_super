@@ -3,7 +3,7 @@
 from contextlib import closing
 from copy import deepcopy
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 import hashlib
 import sqlite3
@@ -212,6 +212,21 @@ def test_database_reader_takes_each_days_newest_import(tmp_path):
     assert result_dict[(ACCOUNT_STR, "2026-09-04")]["available_bool"] is True
 
 
+@pytest.mark.parametrize("import_count_int", [9, 21])
+def test_month_read_keeps_every_required_import_despite_cache_eviction(tmp_path, import_count_int):
+    import alpha.live.dashboard_v4.positions_history as history_module
+
+    import_list = [_import_tuple(day_int, f"2026-08-{day_int:02d}", [_row_dict("AAA", 1)])
+        for day_int in range(1, import_count_int + 1)]
+    nav_row_list = [_nav_rows(import_tuple[6], import_tuple[0])[0] for import_tuple in import_list]
+    database_str = _database_path_str(tmp_path, import_list)
+    history_module._cache_dict.clear()
+    for _ in range(2):  # Cold read, then a mixture of cache hits and misses.
+        result_dict = _load(database_str, nav_row_list)
+        assert all(day_dict["available_bool"] for day_dict in result_dict.values())
+        assert len(history_module._cache_dict) <= history_module.IMPORT_CACHE_LIMIT_INT
+
+
 @pytest.mark.parametrize("case_str", ["checksum", "range", "naive", "inverted", "missing", "future"])
 def test_database_reader_rejects_unprovable_sources(tmp_path, case_str):
     import_tuple = _import_tuple(7, "2026-09-08", [_row_dict("AAA", 1)])
@@ -361,6 +376,55 @@ def test_pods_starting_or_retiring_mid_month_keep_months_reportable(demo_tuple, 
             from_date_str=first_str, to_date_str=last_str)
         assert month_dict["available_bool"] is True, month_dict["reason_str"]
         assert month_dict["total_dict"]["pnl_str"].replace("−", "-") == f"{performance_dict['report_dict']['pnl_float']:+,.2f}".replace("+", "+$").replace("-", "-$")
+
+
+@pytest.mark.parametrize(("field_str", "date_str"), [("effective_from", "2026-08-28"), ("effective_to", "2026-08-04")])
+def test_partial_month_pod_uses_whole_month_for_book_weights_and_average_nav(demo_tuple, field_str, date_str):
+    workspace_dict, snapshot_obj, _ = demo_tuple
+    changed_dict = deepcopy(workspace_dict)
+    for account_list in (changed_dict["client_dict"]["accounts"], changed_dict["valuation_account_list"], changed_dict["operations_account_list"]):
+        for account_dict in account_list:
+            if account_dict["pod_id"] == "demo_1_3":
+                account_dict[field_str] = date_str
+    month_dict = _month_page(demo_tuple, "2026-08", workspace_dict=changed_dict)["month_dict"]
+    assert month_dict["available_bool"], month_dict["reason_str"]
+    map_dict = month_dict["map_dict"]
+    pod_dict = next(pod_dict for pod_dict in map_dict["pod_list"] if pod_dict["pod_id_str"] == "demo_1_3")
+    session_count_int = 21
+    nav_list = [float(row_obj.closing_nav_decimal) for row_obj in snapshot_obj.row_tuple
+        if row_obj.account_route_str == "DEMO_1_3" and "2026-08-01" <= row_obj.market_date_str <= "2026-08-31"
+        and (row_obj.market_date_str >= date_str if field_str == "effective_from" else row_obj.market_date_str <= date_str)
+        and date.fromisoformat(row_obj.market_date_str).weekday() < 5]
+    assert pod_dict["nav_float"] == pytest.approx(sum(nav_list) / session_count_int)
+    assert sum(item_dict["nav_float"] for item_dict in map_dict["pod_list"]) == pytest.approx(map_dict["book_value_float"])
+    for row_dict in month_dict["row_list"]:
+        if row_dict["pod_dict"]["pod_id_str"] != "demo_1_3":
+            continue
+        held_count_int = int(row_dict["session_str"].split()[0])
+        assert row_dict["session_str"].endswith("of 21 sessions")
+        expected_size_float = row_dict["sort_dict"]["value"] * held_count_int / session_count_int
+        assert row_dict["sort_dict"]["weight"] == pytest.approx(expected_size_float, abs=0.01)
+        assert row_dict["weight_percent_float"] == pytest.approx(expected_size_float / map_dict["book_value_float"] * 100, abs=0.0001)
+        tile_dict = next(item_dict for item_dict in pod_dict["item_list"] if item_dict["key_str"] == row_dict["key_str"])
+        assert tile_dict["value_float"] == pytest.approx(expected_size_float, abs=0.01)
+
+
+def test_month_cash_is_unknown_without_saved_cash_evidence_including_shorts(demo_tuple):
+    def short_day(nav_row_obj, original_fn, **kwargs_dict):
+        day_dict = original_fn(nav_row_obj, **kwargs_dict)
+        if day_dict["available_bool"]:
+            day_dict = deepcopy(day_dict)
+            for row_dict in day_dict["row_list"]:
+                row_dict["previous_quantity_float"] *= -1
+                row_dict["close_quantity_float"] *= -1
+        return day_dict
+
+    for getter_fn in (lambda nav_row_obj, original_fn, **kwargs_dict: original_fn(nav_row_obj, **kwargs_dict), short_day):
+        with _getter(demo_tuple[2], getter_fn):
+            month_dict = _month_page(demo_tuple, "2026-08")["month_dict"]
+        assert month_dict["available_bool"], month_dict["reason_str"]
+        assert all(pod_dict["cash_float"] is None and pod_dict["cash_str"] == "" for pod_dict in month_dict["map_dict"]["pod_list"])
+        assert "cash unavailable" in month_dict["map_dict"]["size_legend_str"]
 
 
 def test_pod_filter_scopes_map_and_rows_but_not_tiles_or_by_pod(demo_tuple):

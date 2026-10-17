@@ -139,7 +139,7 @@ function snapshot_obj(valid_ms = 120000, clock_timestamp_str = '2026-09-18T13:41
   return {shell_obj, selector_dict};
 }
 
-function environment_obj(valid_ms = 120000, initial_latency_ms = 0, clock_timestamp_str) {
+function environment_obj(valid_ms = 120000, initial_latency_ms = 0, clock_timestamp_str, positions_bool = false) {
   let wall_ms = 1000000;
   let current_obj = snapshot_obj(valid_ms, clock_timestamp_str);
   const handler_dict = {};
@@ -173,7 +173,8 @@ function environment_obj(valid_ms = 120000, initial_latency_ms = 0, clock_timest
   };
   const window_obj = {addEventListener: document_obj.addEventListener, setTimeout: () => 0};
   const clipboard_list = [];
-  vm.runInNewContext(source_str, {
+  let positions_api_obj;
+  const context_obj = {
     document: document_obj,
     window: window_obj,
     Date: {now: () => wall_ms, parse: Date.parse}, performance: {now: () => initial_latency_ms},
@@ -181,8 +182,18 @@ function environment_obj(valid_ms = 120000, initial_latency_ms = 0, clock_timest
     CustomEvent: class { constructor(type_str) { this.type = type_str; } },
     navigator: {clipboard: {writeText: (text_str) => { clipboard_list.push(text_str); return Promise.resolve(); }}},
     setInterval: (handler_fn) => { timer_fn = handler_fn; },
-  });
+    positions_test_hook: (api_obj) => { positions_api_obj = api_obj; },
+  };
+  if (positions_bool) {
+    // Exercise the scripts together in the order actually shipped to Positions.
+    const template_str = fs.readFileSync(path.join(__dirname, '../alpha/live/dashboard_v4/templates/base.html'), 'utf8');
+    const script_list = [...template_str.matchAll(/filename='(overview|positions)\.js'/g)].map((match_obj) => match_obj[1]);
+    assert.equal(script_list.length, 2);
+    for (const script_str of script_list) vm.runInNewContext(
+      fs.readFileSync(path.join(__dirname, '../alpha/live/dashboard_v4/static/' + script_str + '.js'), 'utf8'), context_obj);
+  } else vm.runInNewContext(source_str, context_obj);
   return {
+    get positions_api_obj() { return positions_api_obj; },
     get current_obj() { return current_obj; },
     advance: (elapsed_ms) => { wall_ms += elapsed_ms; },
     timer: () => timer_fn(),
@@ -205,6 +216,63 @@ function environment_obj(valid_ms = 120000, initial_latency_ms = 0, clock_timest
       current_obj = snapshot_obj(remaining_ms, next_clock_str);
     },
   };
+}
+
+for (const sorted_bool of [false, true]) {
+  test('Positions sorting finishes before restored text selection: sorted=' + sorted_bool, () => {
+    const env_obj = environment_obj(120000, 0, undefined, true);
+    let selected_obj;
+    function attach_table() {
+      const table_obj = element_obj();
+      table_obj.parentElement = env_obj.current_obj.shell_obj;
+      table_obj.setAttribute('data-selection-key', 'positions-table');
+      table_obj.setAttribute('data-sortable-table', 'positions-now');
+      const row_list = ['AAA', 'BBB'].map((symbol_str, index_int) => {
+        const row_obj = element_obj(symbol_str);
+        row_obj.parentElement = table_obj;
+        row_obj.setAttribute('data-sort-index', String(index_int));
+        row_obj.setAttribute('data-sort-value', String(index_int + 1));
+        row_obj.classList.toggle = () => {};
+        row_obj.childNodes = [{nodeType: 3, textContent: symbol_str, parentElement: row_obj}];
+        return row_obj;
+      });
+      table_obj.childNodes = row_list.slice();
+      Object.defineProperty(table_obj, 'textContent', {get: () => table_obj.childNodes.map((row_obj) => row_obj.textContent).join('')});
+      const body_obj = {
+        querySelectorAll: () => table_obj.childNodes.slice(),
+        appendChild(row_obj) {
+          // Native remove/reinsert collapses a Range rooted inside the moved row.
+          if (selected_obj && row_obj.contains(selected_obj.anchorNode)) {
+            selected_obj.isCollapsed = true;
+            selected_obj.anchorNode = selected_obj.focusNode = table_obj;
+            selected_obj.anchorOffset = selected_obj.focusOffset = 0;
+          }
+          table_obj.childNodes = table_obj.childNodes.filter((item_obj) => item_obj !== row_obj).concat([row_obj]);
+        },
+      };
+      table_obj.querySelector = (selector_str) => selector_str === 'tbody' ? body_obj : null;
+      table_obj.querySelectorAll = () => [];
+      env_obj.current_obj.selector_dict['[data-selection-key]'] = [table_obj];
+      env_obj.current_obj.selector_dict['[data-sortable-table]'] = [table_obj];
+      return {table_obj, row_list};
+    }
+    const initial_obj = attach_table();
+    if (sorted_bool) env_obj.positions_api_obj.sort_click({
+      closest: () => initial_obj.table_obj,
+      getAttribute: (key_str) => key_str === 'data-sort-key' ? 'value' : 'number',
+    });
+    selected_obj = selection_obj(initial_obj.row_list[1], 0, 3);
+    env_obj.select(selected_obj);
+    env_obj.fire('htmx:beforeSwap');
+    env_obj.replace();
+    const refreshed_obj = attach_table();
+    env_obj.fire('htmx:afterSwap');
+    assert.equal(selected_obj.isCollapsed, false);
+    assert.equal(selected_obj.anchorNode, refreshed_obj.row_list[1].childNodes[0]);
+    assert.equal(selected_obj.focusNode, refreshed_obj.row_list[1].childNodes[0]);
+    assert.deepEqual([selected_obj.anchorOffset, selected_obj.focusOffset], [0, 3]);
+    assert.deepEqual(refreshed_obj.table_obj.childNodes.map((row_obj) => row_obj.textContent), sorted_bool ? ['BBB', 'AAA'] : ['AAA', 'BBB']);
+  });
 }
 
 function performance_stamp_obj(env_obj, valid_ms) {

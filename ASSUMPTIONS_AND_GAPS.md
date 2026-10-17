@@ -225,9 +225,15 @@ includes row commissions and excludes dividends and interest, which appear as
 divided by the average daily capital in the name (the larger of the overnight
 and closing position value on each session held), not a TWR. Tile size is that
 capital averaged over all sessions of the month, so a three-day holding is small.
+The same finalized month-session denominator is used for position capital and
+each Pod's average NAV, counting inactive dates as zero. Book weight is average
+position capital divided by average book NAV; a Pod's mid-month start/retirement
+does not change that denominator. The month map has no verified cash source, so
+cash is unavailable and omitted, never inferred from NAV minus gross positions.
 Status is read at the Pod's last session in the range. Each import is parsed
 once, outside the read transaction, and cached by import id and checksum (eight
-imports).
+imports). A request pins all its required parsed imports independently of that
+bounded shared cache, so eviction cannot remove evidence from the current read.
 
 V4 charts display the existing cumulative return paths, not normalized NAV.
 Overview retains the configured client end-of-day flow convention and labels

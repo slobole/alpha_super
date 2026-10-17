@@ -89,6 +89,18 @@ test('block headers drop detail until they fit', () => {
   assert.match(api_obj.header_text_list(pod_obj, 'exposure', 30000, 1000)[0], /exp \$30,000 · 1\.67x NAV/);
 });
 
+test('folded leveraged holdings label gross exposure separately from value', () => {
+  const {api_obj} = load_api();
+  const pod_obj = {cash_float: null, item_list: Array.from({length: 15}, (_, index_int) => ({
+    key_str: 'S' + index_int, symbol_str: 'S' + index_int, value_float: 100, multiplier_float: 3, pnl_float: 0}))};
+  const value_obj = api_obj.block_item_list(pod_obj, 'value', 14).at(-1);
+  const exposure_obj = api_obj.block_item_list(pod_obj, 'exposure', 14).at(-1);
+  assert.deepEqual(plain(value_obj.tip_list[1]), ['Value', '$200']);
+  assert.deepEqual(plain(exposure_obj.tip_list[1]), ['Exposure', '$600']);
+  assert.equal(exposure_obj.value_float, 600, 'folded area retains the summed exposure');
+  assert.ok(!api_obj.block_item_list(pod_obj, 'value', 14).some((item_obj) => item_obj.cash_bool));
+});
+
 test('row comparison: numbers, natural text, missing values last, ties in server order', () => {
   const {api_obj} = load_api();
   const a = row({'data-sort-index': '0', 'data-sort-pnl': '5', 'data-sort-symbol': 'B10'});

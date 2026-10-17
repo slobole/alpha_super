@@ -283,7 +283,7 @@ def load_day_mtm_map_dict(database_path_str, nav_row_list, *, query_name_str, as
     if not database_path_str or not Path(database_path_str).is_file():
         return {key_tuple: _unavailable_dict("No saved IBKR performance database.") for key_tuple in result_dict}
     row_list = [row_obj for row_obj in nav_row_list if _scope_valid_bool(row_obj, query_name_str, as_of_ts)]
-    chosen_dict, raw_dict = {}, {}
+    chosen_dict, raw_dict, request_import_dict = {}, {}, {}
     try:
         database_path_obj = Path(database_path_str).resolve()
         with closing(sqlite3.connect(database_path_obj.as_uri() + "?mode=ro", uri=True, timeout=.2)) as connection_obj:
@@ -323,8 +323,13 @@ def load_day_mtm_map_dict(database_path_str, nav_row_list, *, query_name_str, as
                     continue
                 chosen_dict[(row_obj.account_route_str, row_obj.market_date_str)] = (row_obj, import_id_int, checksum_str)
             with _cache_lock:
+                # Pin this request's cache hits: another import/request may evict
+                # them before the days below are resolved. Parsed blocks are read-only.
+                request_import_dict = {(import_id_int, checksum_str): _cache_dict[(mtm_query_str, import_id_int, checksum_str)]
+                    for _, import_id_int, checksum_str in chosen_dict.values()
+                    if (mtm_query_str, import_id_int, checksum_str) in _cache_dict}
                 needed_set = {(import_id_int, checksum_str) for _, import_id_int, checksum_str in chosen_dict.values()
-                    if (mtm_query_str, import_id_int, checksum_str) not in _cache_dict}
+                    if (import_id_int, checksum_str) not in request_import_dict}
             for import_id_int, checksum_str in sorted(needed_set):
                 fetched_list = connection_obj.execute(
                     "SELECT CASE WHEN length(CAST(raw_xml_str AS BLOB))<=? THEN raw_xml_str END AS raw_xml_str "
@@ -342,14 +347,14 @@ def load_day_mtm_map_dict(database_path_str, nav_row_list, *, query_name_str, as
             parsed_dict = parse_import_dict(raw_xml_str, query_name_str=mtm_query_str)
         except (ElementTree.ParseError, ValueError, TypeError, KeyError, InvalidOperation, OverflowError):
             parsed_dict = None
+        request_import_dict[(import_id_int, checksum_str)] = parsed_dict
         with _cache_lock:
             _cache_dict[(mtm_query_str, import_id_int, checksum_str)] = parsed_dict
             _cache_dict.move_to_end((mtm_query_str, import_id_int, checksum_str))
             while len(_cache_dict) > IMPORT_CACHE_LIMIT_INT:
                 _cache_dict.popitem(last=False)
     for key_tuple, (row_obj, import_id_int, checksum_str) in chosen_dict.items():
-        with _cache_lock:
-            parsed_dict = _cache_dict.get((mtm_query_str, import_id_int, checksum_str), None)
+        parsed_dict = request_import_dict.get((import_id_int, checksum_str))
         if parsed_dict is None:
             continue
         result_dict[key_tuple] = day_mtm_dict(parsed_dict.get(key_tuple), row_obj)
@@ -567,9 +572,12 @@ def build_month_page_dict(workspace_dict, snapshot_obj, owned_list, identity_lis
     for account_dict, strategy_dict, date_list in pod_plan_list:
         aggregate_dict, symbol_pnl_by_date_dict = _symbol_aggregate_dict(day_map_dict, account_dict["account_route"], date_list, session_set)
         pod_session_list = [date_str for date_str in date_list if date_str in session_set]
-        session_count_int = len(pod_session_list)
+        # *** CRITICAL *** reporting boundary: every numerator uses the same
+        # finalized month sessions as the book denominator; inactive days are zero.
+        # AvgNAV_p = sum(active closing NAV_p,d) / N_month_sessions.
+        session_count_int = len(session_list)
         nav_list = [float(nav_by_key_dict[(account_dict["account_route"], date_str)].closing_nav_decimal) for date_str in pod_session_list]
-        average_nav_float = sum(nav_list) / len(nav_list) if nav_list else None
+        average_nav_float = sum(nav_list) / session_count_int if nav_list else None
         pod_pnl_float = strategy_dict["pnl_float"]
         symbol_pnl_float = sum(symbol_pnl_by_date_dict.values())
         identity_dict = identity_by_pod_dict[account_dict["pod_id"]]
@@ -580,6 +588,8 @@ def build_month_page_dict(workspace_dict, snapshot_obj, owned_list, identity_lis
             last_close_float = item_dict["close_by_date_dict"].get(last_session_str, 0.0)
             status_str = ("open" if result_dict["to_date_bool"] else "kept") if last_close_float != 0 else "sold"
             held_value_float = item_dict["exposure_sum_float"] / item_dict["session_int"] if item_dict["session_int"] else 0.0
+            # AvgCapital_i = sum(max(abs(Qprev*Pprev), abs(Qclose*Pclose))) / N_month_sessions.
+            # BookWeight_i = AvgCapital_i / AvgNAV_book (computed below).
             size_float = item_dict["exposure_sum_float"] / session_count_int if session_count_int else 0.0
             return_float = item_dict["pnl_float"] / held_value_float if held_value_float > 0 else None
             item_list.append({**item_dict, "pod_id_str": account_dict["pod_id"], "status_str": status_str,
@@ -631,10 +641,10 @@ def build_month_page_dict(workspace_dict, snapshot_obj, owned_list, identity_lis
                 + " · " + held_str(item_dict) + (" (sold)" if item_dict["status_str"] == "sold" else ""))
             map_item_list.append(map_item_dict_obj)
         map_item_all_list.extend(map_item_list)
-        invested_float = sum(item_dict["size_float"] for item_dict in pod_dict["item_list"])
         map_pod_list.append({"pod_id_str": identity_dict["pod_id_str"], "name_str": identity_dict["name_str"],
             "color_str": identity_dict["color_str"], "nav_float": nav_float, "nav_str": compact_money_str(nav_float) + " avg",
-            "cash_float": max(nav_float - invested_float, 0.0), "cash_str": compact_money_str(max(nav_float - invested_float, 0.0)),
+            # NAV minus gross capital is not cash (shorts, turnover and accruals).
+            "cash_float": None, "cash_str": "",
             "pnl_float": pod_dict["pnl_float"], "pnl_str": compact_money_str(pod_dict["pnl_float"], signed_bool=True),
             "return_str": signed_percent_str(pod_dict["twr_float"]) if pod_dict["twr_float"] is not None else "",
             "item_list": map_item_list})
@@ -644,7 +654,7 @@ def build_month_page_dict(workspace_dict, snapshot_obj, owned_list, identity_lis
         "reason_str": "" if held_any_bool else "Nothing was held in this view during the month.",
         "book_value_float": book_average_float, "pod_list": map_pod_list,
         "asof_str": f"IBKR daily reports · {len(session_list)} sessions",
-        "size_legend_str": f"Size = average weight in {month_short_str} (time held counts)",
+        "size_legend_str": f"Size = average weight in {month_short_str} (time held counts) · cash unavailable",
         "exposure_legend_str": f"Size = average gross exposure in {month_short_str} (value × leverage; TQQQ = 3x) · cash not shown",
         "colour_legend_str": f"Colour = return while held in {month_short_str}", "hatch_legend_str": "sold during the month"}
     if not finite_tree_bool(result_dict["map_dict"]):

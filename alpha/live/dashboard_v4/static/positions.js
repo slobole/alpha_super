@@ -111,7 +111,7 @@
       result_list = item_list.slice(0, limit_int - 1).concat([{key_str: '', more_bool: true, symbol_str: '+' + rest_list.length + ' more',
         value_float, multiplier_float: 1, pnl_float, return_float: null, pnl_str: pnl_known_bool ? compact_money_str(pnl_float, true) : '',
         return_str: '', status_str: 'more', status_note_str: '',
-        tip_list: [['Holdings', rest_list.length + ' smaller positions'], ['Value', compact_money_str(value_float)]]
+        tip_list: [['Holdings', rest_list.length + ' smaller positions'], [mode_str === 'exposure' ? 'Exposure' : 'Value', compact_money_str(value_float)]]
           .concat(pnl_known_bool ? [['P&L', compact_money_str(pnl_float, true)]] : [])
           .concat([['Symbols', rest_list.slice(0, 8).map((item_obj) => item_obj.symbol_str).join(', ') + (rest_list.length > 8 ? ', …' : '')]])}]);
     }
