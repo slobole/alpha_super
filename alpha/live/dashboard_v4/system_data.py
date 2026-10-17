@@ -503,6 +503,40 @@ def _flex_dict(path_str, target_list, as_of_ts):
     return result_dict
 
 
+TASKS_RECEIPT_FILE_NAME_STR = "scheduled_tasks_check.json"
+TASKS_RECEIPT_MAX_AGE = timedelta(days=4)
+
+
+def _scheduled_tasks_dict(path_obj, as_of_ts):
+    """Receipt of `python -m alpha.live.scheduled_tasks check` (setup_live_tasks.ps1 and the 06:30 task write it)."""
+    try:
+        receipt_dict = _read_json_dict(path_obj)
+        if receipt_dict.get("schema_version_str") != "scheduled_tasks_check.v1":
+            raise ValueError("Unknown receipt")
+        checked_ts = _timestamp_ts(receipt_dict.get("checked_at_utc_str"), as_of_ts)
+        task_list = receipt_dict.get("task_row_list")
+        environment_list = receipt_dict.get("environment_row_list")
+        if checked_ts is None or not isinstance(task_list, list) or not isinstance(environment_list, list):
+            raise ValueError("Invalid receipt")
+        row_list = [row_dict for row_dict in task_list + environment_list if isinstance(row_dict, dict)]
+        failed_list = [str(row_dict.get("name_str"))[:60] for row_dict in row_list if row_dict.get("state_str") == "FAIL"]
+        ok_task_int = sum(1 for row_dict in task_list if isinstance(row_dict, dict) and row_dict.get("state_str") == "PASS")
+        off_list = [str(row_dict.get("name_str"))[:60] for row_dict in task_list if isinstance(row_dict, dict) and row_dict.get("state_str") == "OFF"]
+        if failed_list:
+            state_str, now_str = "error", "FAIL · " + ", ".join(failed_list[:3]) + (f" +{len(failed_list) - 3}" if len(failed_list) > 3 else "")
+        elif off_list:
+            state_str, now_str = "warning", "OFF · " + ", ".join(off_list[:3]) + f" · {ok_task_int} of {len(task_list)} tasks on"
+        elif as_of_ts - checked_ts > TASKS_RECEIPT_MAX_AGE:
+            state_str, now_str = "warning", f"Last check over 4 days old · {ok_task_int} of {len(task_list)} tasks OK"
+        else:
+            state_str, now_str = "ok", f"PASS · {ok_task_int} of {len(task_list)} tasks OK"
+        return _row_dict(now_str, state_str=state_str, last_timestamp_str=checked_ts.isoformat(),
+            expected_str="Checked Mon-Fri 06:30 ET and by setup_live_tasks.ps1",
+            detail_str="Run scripts\setup_live_tasks.ps1 -CheckOnly for the full PASS / FAIL list.")
+    except (OSError, ValueError, TypeError, KeyError):
+        return _row_dict("Receipt unreadable", expected_str="Checked Mon-Fri 06:30 ET")
+
+
 def load_system_source_dict(provider_obj, workspace_dict, *, as_of_ts, performance_db_path_str=None):
     if as_of_ts.tzinfo is None or as_of_ts.utcoffset() is None:
         raise ValueError("System health requires a timezone-aware clock")
@@ -538,4 +572,7 @@ def load_system_source_dict(provider_obj, workspace_dict, *, as_of_ts, performan
     # The row exists only once the nightly backtest check has written its report.
     if report_file_exists_bool(provider_obj):
         result_dict["backtest_check_dict"] = system_row_dict(load_report_dict(provider_obj, as_of_ts=as_of_ts), as_of_ts=as_of_ts)
+    # The row exists once setup_live_tasks.ps1 (or the 06:30 task) has written its receipt.
+    if path_obj is not None and (path_obj.parent / TASKS_RECEIPT_FILE_NAME_STR).is_file():
+        result_dict["scheduled_tasks_dict"] = _scheduled_tasks_dict(path_obj.parent / TASKS_RECEIPT_FILE_NAME_STR, as_of_ts)
     return result_dict
