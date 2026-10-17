@@ -111,8 +111,10 @@ def build_demo_workspace_tuple(*, include_holdings_bool=False, include_daily_boo
         "financial_scope_complete_bool": True, "financial_error_str": "", "operations_error_str": "",
     }
     if include_holdings_bool:
+        from alpha.live.dashboard_v4.demo_history import attach_demo_history
         from alpha.live.dashboard_v4.demo_holdings import attach_demo_holdings
         attach_demo_holdings(provider_obj)
+        attach_demo_history(provider_obj, snapshot_dict[client_dict["client_id"]])
     return workspace_dict, snapshot_dict[client_dict["client_id"]], provider_obj
 
 

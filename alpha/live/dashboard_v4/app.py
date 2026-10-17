@@ -165,7 +165,7 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
     def context_dict(pod_id_str=None, *, positions_bool=False, money_bool=True):
         # Frame refreshes pass money_bool=False: money panels change about once a
         # day, stay in the page (hx-preserve) and refresh on their own cadence.
-        allowed_set = {"view", "pod"} if positions_bool else ({"period", "cycle", "tab"} if pod_id_str is not None else {"period"})
+        allowed_set = {"view", "pod", "month"} if positions_bool else ({"period", "cycle", "tab"} if pod_id_str is not None else {"period"})
         if set(request.args) - allowed_set or any(len(request.args.getlist(key_str)) > 1 for key_str in allowed_set):
             abort(400)
         period_str = request.args.get("period", "All")
@@ -179,6 +179,10 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             abort(400)
         view_str, selected_pod_str = request.args.get("view", "all"), request.args.get("pod", "all")
         if positions_bool and (view_str not in {"all", "changed", "off_target"} or not selected_pod_str or len(selected_pod_str) > 200):
+            abort(400)
+        month_str = request.args.get("month", "")
+        # A month is the saved-report view; it has no today-based view filters.
+        if positions_bool and "month" in request.args and (not re.fullmatch(r"20[0-9]{2}-(0[1-9]|1[0-2])", month_str) or "view" in request.args):
             abort(400)
         acquisition_ts = clock_fn()
         if workspace_snapshot_fn is None:
@@ -204,15 +208,30 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         )
         if positions_bool:
             positions_page_dict = build_positions_page_dict(workspace_dict, snapshot_obj, provider_obj,
-                as_of_ts=clock_fn(), view_str=view_str, pod_str=selected_pod_str)
+                as_of_ts=clock_fn(), view_str=view_str, pod_str=selected_pod_str,
+                month_str=month_str, performance_db_path_str=database_path_str)
             pod_option_list = positions_page_dict["pod_filter_list"]
             if selected_pod_str != "all" and not any(item_dict["pod_id_str"] == selected_pod_str for item_dict in pod_option_list):
                 abort(404)
+            if month_str and positions_page_dict.get("month_known_bool") is False:
+                abort(404)
+            # Link scope: a month keeps its month; Now keeps its view filter.
+            link_dict = {"month": month_str} if month_str else {"view": view_str}
+            positions_page_dict["period_list"] = [{"label_str": "Now", "selected_bool": not month_str,
+                "url_str": url_for("positions", pod=selected_pod_str)}] + [{
+                "label_str": option_dict["label_str"], "title_str": option_dict["name_str"],
+                "selected_bool": option_dict["month_str"] == month_str,
+                "url_str": url_for("positions", month=option_dict["month_str"], pod=selected_pod_str),
+            } for option_dict in positions_page_dict.get("month_option_list") or []]
             active_pod_set = {item_dict["pod_id_str"] for item_dict in overview_dict["pod_list"]}
+            # A month can list a retired Pod: link only Pods that still have a page.
+            for row_dict in positions_page_dict.get("month_dict", {}).get("row_list", []):
+                row_dict["pod_dict"]["url_str"] = (url_for("pod", pod_id_str=row_dict["pod_dict"]["pod_id_str"])
+                    if row_dict["pod_dict"]["pod_id_str"] in active_pod_set else "")
             count_available_bool = positions_page_dict["holdings_complete_bool"] or any(
                 item_dict["pod_id_str"] == selected_pod_str and item_dict["positions_available_bool"]
                 for item_dict in positions_page_dict["pod_row_list"])
-            for item_dict in positions_page_dict["pod_row_list"]:
+            for item_dict in positions_page_dict["pod_row_list"] + positions_page_dict.get("month_dict", {}).get("pod_row_list", []):
                 item_dict["url_str"] = url_for("pod", pod_id_str=item_dict["pod_id_str"]) if item_dict["pod_id_str"] in active_pod_set else ""
             for row_dict in positions_page_dict["row_list"]:
                 for item_dict in row_dict["pod_list"]:
@@ -229,9 +248,9 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
                     ("off_target", "Off target", "off_target_count_int", positions_page_dict["off_target_available_bool"], "Target comparison is not available yet."),
                 )],
                 pod_filter_list=[{"label_str": "All pods", "selected_bool": selected_pod_str == "all",
-                    "url_str": url_for("positions", view=view_str)}] + [{
+                    "url_str": url_for("positions", **link_dict)}] + [{
                     **item_dict, "label_str": item_dict["name_str"], "selected_bool": item_dict["pod_id_str"] == selected_pod_str,
-                    "url_str": url_for("positions", view=view_str, pod=item_dict["pod_id_str"]),
+                    "url_str": url_for("positions", **link_dict, pod=item_dict["pod_id_str"]),
                 } for item_dict in pod_option_list])
             render_ts = clock_fn()
             # Positions reads may be slow; never renew the header's source lifetime.
@@ -246,7 +265,7 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
                 for row_dict in positions_page_dict["row_list"]:
                     if row_dict["today_pending_bool"]:
                         row_dict["today_detail_str"] = "Unknown"
-            overview_dict.update(refresh_url_str=url_for("positions_refresh", view=view_str, pod=selected_pod_str),
+            overview_dict.update(refresh_url_str=url_for("positions_refresh", **link_dict, pod=selected_pod_str),
                 source_valid_ms_int=remaining_int,
                 clock_timestamp_str=render_ts.isoformat(),
                 clock_str=render_ts.astimezone(MARKET_TIMEZONE_OBJ).strftime("%H:%M:%S"),

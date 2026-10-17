@@ -1,14 +1,23 @@
+{% from '_positions_sort.html' import sort_head %}
 <div class="page-head positions-head"><div>
   <h1 class="h1i">{{ icon('positions') }}Positions</h1>
   <p class="verdict" data-selection-key="positions-verdict"><b data-verdict>{{ positions_page_dict.verdict_str }}</b>{% if positions_page_dict.verdict_detail_str %} <span data-verdict-detail>{{ positions_page_dict.verdict_detail_str }}</span>{% endif %}</p>
-</div><div class="positions-asof" data-selection-key="positions-asof">{{ icon('calendar') }}<span>{{ positions_page_dict.asof_str }}</span></div></div>
+</div><div class="positions-head-side">
+  {% if positions_page_dict.get('period_list', [])|length > 1 %}<nav class="positions-period" aria-label="Period"><span class="k">Period</span><span class="seg">{% for period_dict in positions_page_dict.period_list %}<a href="{{ period_dict.url_str }}" class="{{ 'on' if period_dict.selected_bool else '' }}"{% if period_dict.get('title_str') %} title="{{ period_dict.title_str }}"{% endif %}{% if period_dict.selected_bool %} aria-current="page"{% endif %}>{{ period_dict.label_str }}</a>{% endfor %}</span></nav>{% endif %}
+  <div class="positions-asof" data-selection-key="positions-asof">{{ icon('calendar') }}<span>{{ positions_page_dict.asof_str }}</span></div>
+</div></div>
 
+{% if positions_page_dict.get('mode_str') == 'month' %}
+{% include '_positions_month.html' %}
+{% else %}
 <section class="tiles positions-summary{{ ' has-pnl' if positions_page_dict.pnl_available_bool else '' }}" aria-label="Saved portfolio summary">{% for tile_dict in positions_page_dict.tile_list %}{% if loop.first or positions_page_dict.pnl_available_bool %}
   <div class="tile" data-selection-key="positions-tile:{{ tile_dict.label_str }}"><div class="l">{{ tile_dict.label_str }} · Portfolio</div><div class="v {{ tile_dict.tone_str }}">{{ tile_dict.value_str }}</div>
     {% if tile_dict.get('bar_percent_float') is not none %}<div class="mini" aria-hidden="true"><i style="width: {{ [[tile_dict.bar_percent_float|float, 0]|max, 100]|min }}%"></i></div>{% endif %}
     <div class="s">{{ tile_dict.detail_str }}{% if loop.first and not positions_page_dict.values_available_bool and positions_page_dict.financial_asof_str %}<br>{{ positions_page_dict.financial_asof_str }}{% endif %}</div>
   </div>{% endif %}{% endfor %}
 </section>
+
+{% include '_positions_map.html' %}
 
 <section class="panel" aria-label="Positions">
   <div class="panel-h positions-controls"><div class="positions-toolbar">
@@ -21,8 +30,8 @@
   </div></div>
   {% if positions_page_dict.values_available_bool %}<div class="positions-value-date muted">{{ icon('calendar') }} {{ positions_page_dict.values_asof_str }}{% if positions_page_dict.values_note_str %} · {{ positions_page_dict.values_note_str }}{% endif %}</div>{% endif %}
   {% if positions_page_dict.row_list %}
-  <table class="tbl dense positions-table" data-selection-key="positions-table"><thead><tr><th scope="col">Symbol</th><th scope="col">Pods</th><th scope="col" class="num">Shares</th>{% if positions_page_dict.values_available_bool %}<th scope="col" class="num">Value $</th><th scope="col" class="num">Weight</th>{% endif %}{% if positions_page_dict.pnl_available_bool %}<th scope="col" class="num">Open P&L</th>{% endif %}<th scope="col">Today</th></tr></thead><tbody>
-  {% for row_dict in positions_page_dict.row_list %}<tr data-position-row data-position-symbol="{{ row_dict.symbol_str }}">
+  <table class="tbl dense positions-table" data-selection-key="positions-table" data-sortable-table="positions-now"><thead><tr>{{ sort_head('symbol', 'Symbol', 'text') }}{{ sort_head('pods', 'Pods', 'text') }}{{ sort_head('shares', 'Shares', 'number', 'num') }}{% if positions_page_dict.values_available_bool %}{{ sort_head('value', 'Value $', 'number', 'num') }}{{ sort_head('weight', 'Weight', 'number', 'num') }}{% endif %}{% if positions_page_dict.pnl_available_bool %}{{ sort_head('pnl', 'Open P&L', 'number', 'num') }}{% endif %}{{ sort_head('today', 'Today', 'text') }}</tr></thead><tbody>
+  {% for row_dict in positions_page_dict.row_list %}<tr data-position-row data-position-symbol="{{ row_dict.symbol_str }}" data-sort-row data-sort-index="{{ loop.index0 }}" data-sort-symbol="{{ row_dict.symbol_str }}" data-sort-pods="{{ row_dict.pod_list|map(attribute='name_str')|join(', ') }}" data-sort-shares="{{ row_dict.pod_list|sum(attribute='share_float') }}" data-sort-value="{{ row_dict.value_float if row_dict.get('value_float') is not none else '' }}" data-sort-weight="{{ row_dict.weight_percent_float if row_dict.get('weight_percent_float') is not none else '' }}" data-sort-pnl="{{ row_dict.pnl_float if row_dict.get('pnl_float') is not none else '' }}" data-sort-today="{{ row_dict.today_str }}">
     <td data-column="Symbol"><span class="sym"><b>{{ row_dict.symbol_str }}</b>{% if row_dict.name_str %}<span>{{ row_dict.name_str }}</span>{% endif %}</span></td>
     <td data-column="Pods"><div class="position-pods">{% for pod_dict in row_dict.pod_list %}<a class="podchip" href="{{ pod_dict.url_str }}" title="{{ pod_dict.share_str }} shares · {{ pod_dict.position_asof_str }}"><i style="background: {{ pod_dict.color_str }}" aria-hidden="true"></i>{{ pod_dict.name_str }}{% if row_dict.pod_list|length > 1 %} · <span class="mono">{{ pod_dict.share_str }}</span>{% endif %}</a>{% endfor %}</div></td>
     <td data-column="Shares" class="num">{% if row_dict.offset_bool %}<span class="muted">Net </span>{% endif %}{{ row_dict.share_str }}</td>
@@ -42,3 +51,4 @@
   {% if positions_page_dict.total_dict %}{% set total_dict = positions_page_dict.total_dict %}<tr class="tot"><td data-column="Pod"><b>{{ total_dict.name_str }}</b></td><td data-column="Positions" class="num">{{ total_dict.count_str }}</td><td data-column="Invested $" class="num">{{ total_dict.invested_str }}</td><td data-column="Cash $" class="num">{{ total_dict.cash_str }}</td>{% if positions_page_dict.pnl_available_bool %}<td data-column="Open P&L" class="num {{ total_dict.pnl_tone_str }}">{{ total_dict.pnl_str }}</td>{% endif %}<td data-column="Book" class="num">{{ total_dict.weight_str }}</td></tr>{% endif %}
   </tbody></table>
 </section>
+{% endif %}

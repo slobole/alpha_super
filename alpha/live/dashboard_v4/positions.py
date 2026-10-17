@@ -11,6 +11,8 @@ from alpha.live.dashboard_v3.client_operations import active_account_list, build
 from alpha.live.dashboard_v3.client_presentation import portfolio_allocation_dict
 from alpha.live.dashboard_v4.finance import POD_COLOR_TUPLE, _money_str, _share_str
 from alpha.live.dashboard_v4.positions_enrichment import enrich_positions_dict
+from alpha.live.dashboard_v4.positions_history import build_month_page_dict, month_name_str, month_option_list
+from alpha.live.dashboard_v4.positions_map import build_now_map_dict, now_side_dict
 from alpha.live.dashboard_v4.positions_data import (
     IDENTITY_FIELD_TUPLE, load_positions_dict, observed_timestamp_ts, validated_position_map_dict,
 )
@@ -35,7 +37,9 @@ def _empty_page_dict():
         "empty_str": "Saved positions unavailable", "all_count_int": 0, "changed_count_int": 0,
         "off_target_count_int": 0, "changed_available_bool": False, "off_target_available_bool": False,
         "holdings_complete_bool": False, "source_fresh_bool": False, "missing_pod_list": [],
-        "financial_asof_str": "", "financial_basis_str": "", "financial_error_str": "", "financial_delayed_bool": True}
+        "financial_asof_str": "", "financial_basis_str": "", "financial_error_str": "", "financial_delayed_bool": True,
+        "mode_str": "now", "month_option_list": None, "map_dict": {"available_bool": False, "pod_list": [],
+            "reason_str": "Saved positions unavailable."}, "side_dict": {}}
 
 
 def _owned_accounts_tuple(workspace_dict, as_of_ts):
@@ -125,12 +129,43 @@ def _financial_dict(workspace_dict, snapshot_obj, provider_obj, client_dict, own
     return result_dict
 
 
+def _month_mode_dict(workspace_dict, snapshot_obj, provider_obj, owned_list, identity_list, option_list, *,
+                     month_str, pod_str, as_of_ts, performance_db_path_str):
+    """A past (or current, to-date) month from saved daily IBKR reports only.
+
+    No broker positions, fills or today's activity are read in this mode.
+    """
+    result_dict = {**_empty_page_dict(), "mode_str": "month", "month_option_list": option_list,
+        "pod_filter_list": [dict(identity_dict) for identity_dict in identity_list]}
+    if workspace_dict.get("financial_error_str") or snapshot_obj.unavailable_reason_str:
+        # Unreadable reports cannot prove which months exist: say so, never 404.
+        month_dict = {"available_bool": False, "reason_str": "Saved IBKR reports unavailable.", "name_str": month_name_str(month_str)}
+    elif month_str not in {option_dict["month_str"] for option_dict in option_list}:
+        result_dict.update(month_known_bool=False, verdict_str="Month unavailable", verdict_detail_str="", asof_str="")
+        return result_dict
+    else:
+        month_dict = build_month_page_dict(workspace_dict, snapshot_obj, owned_list, identity_list, provider_obj,
+            month_str=month_str, pod_str=pod_str, as_of_ts=as_of_ts, database_path_str=performance_db_path_str)
+    result_dict.update(month_known_bool=True, month_dict=month_dict, holdings_complete_bool=month_dict["available_bool"],
+        verdict_str=month_dict.get("verdict_str") or month_dict["name_str"] + " unavailable",
+        verdict_detail_str=month_dict.get("verdict_detail_str") or month_dict["reason_str"],
+        asof_str=month_dict.get("source_str") or "Daily IBKR reports",
+        map_dict=month_dict.get("map_dict") or {"available_bool": False, "pod_list": []},
+        side_dict=month_dict.get("side_dict") or {}, row_list=[], pod_row_list=[],
+        empty_str=month_dict["reason_str"] or "No positions held in this month")
+    if not month_dict["available_bool"]:
+        result_dict["map_dict"]["reason_str"] = month_dict["reason_str"]
+    return result_dict
+
+
 def build_positions_page_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts,
-                             view_str="all", pod_str="all", search_str=""):
+                             view_str="all", pod_str="all", search_str="", month_str="", performance_db_path_str=None):
     """Merge saved quantities, attributed broker values and verified daily fills.
 
     Filters affect the position rows only. The account tiles and By pod table
     retain the complete owned portfolio scope, including unavailable accounts.
+    With month_str ("YYYY-MM") the page shows that month from saved daily IBKR
+    reports instead (positions_history); today's sources are not read.
     """
     if view_str not in {"all", "changed", "off_target"} or as_of_ts.tzinfo is None or not isinstance(search_str, str):
         raise ValueError("Invalid Positions selection")
@@ -139,6 +174,21 @@ def build_positions_page_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
         client_dict, operation_list, owned_list = _owned_accounts_tuple(workspace_dict, as_of_ts)
         if pod_str != "all" and pod_str not in {account_dict["pod_id"] for account_dict in owned_list}:
             raise ValueError("Unknown Pod selection")
+    except (ClientReportingError, ValueError, TypeError, KeyError, AttributeError):
+        if month_str:
+            reason_str = "Saved account ownership could not be verified."
+            result_dict.update(mode_str="month", month_known_bool=True, verdict_str="Month unavailable", verdict_detail_str=reason_str,
+                month_dict={"available_bool": False, "reason_str": reason_str, "name_str": month_name_str(month_str)},
+                map_dict={"available_bool": False, "pod_list": [], "reason_str": reason_str})
+        return result_dict
+    identity_list = [{"name_str": account_dict["display_name"], "pod_id_str": account_dict["pod_id"],
+        "color_str": POD_COLOR_TUPLE[index_int % len(POD_COLOR_TUPLE)]} for index_int, account_dict in enumerate(owned_list)]
+    option_list = month_option_list(workspace_dict, snapshot_obj, owned_list, as_of_ts=as_of_ts)
+    if month_str:
+        return _month_mode_dict(workspace_dict, snapshot_obj, provider_obj, owned_list, identity_list, option_list,
+            month_str=month_str, pod_str=pod_str, as_of_ts=as_of_ts, performance_db_path_str=performance_db_path_str)
+    result_dict["month_option_list"] = option_list
+    try:
         if workspace_dict.get("operations_error_str"):
             raise ValueError("Operations source unavailable")
         summary_dict = workspace_dict.get("summary_dict", {})
@@ -225,6 +275,12 @@ def build_positions_page_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
         invested_str=_money_str(invested_float), cash_str=_money_str(financial_dict["cash_float"]),
         weight_str="100.0%" if financial_dict["complete_bool"] else "—")
     all_row_list = enrich_positions_dict(result_dict, source_by_pod_dict, pod_str=pod_str, as_of_ts=as_of_ts)
+    # The map draws only the complete one-date valuation the weights use.
+    result_dict["map_dict"] = build_now_map_dict(result_dict.pop("map_source_list", None) or [], identity_list, pod_str=pod_str,
+        book_value_float=result_dict.get("book_value_float"), asof_str=result_dict.get("values_asof_str", ""))
+    if not result_dict["map_dict"]["available_bool"] and result_dict.get("values_note_str"):
+        result_dict["map_dict"]["reason_str"] = "The map needs complete IBKR values. " + result_dict["values_note_str"]
+    result_dict["side_dict"] = now_side_dict(result_dict["map_dict"])
     closed_int = sum(not row_dict.get("open_bool", True) for row_dict in all_row_list)
     if complete_bool and pod_str == "all" and closed_int:
         # "All" also lists positions closed today; name both counts so they agree.

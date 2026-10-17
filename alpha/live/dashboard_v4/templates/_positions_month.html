@@ -1,0 +1,41 @@
+{# One month from saved daily IBKR reports (positions_history.py). Tiles and By pod: portfolio; map and table: Pod filter. #}
+{% from '_positions_sort.html' import sort_head %}
+{% set month_dict = positions_page_dict.month_dict %}
+{% if month_dict.available_bool %}
+<section class="tiles positions-summary has-pnl" aria-label="Month summary">{% for tile_dict in month_dict.tile_list %}
+  <div class="tile" data-selection-key="positions-month-tile:{{ loop.index }}"><div class="l">{{ tile_dict.label_str }}</div><div class="v {{ tile_dict.tone_str }}">{{ tile_dict.value_str }}</div><div class="s">{{ tile_dict.detail_str }}</div></div>{% endfor %}
+</section>
+{% endif %}
+
+{% include '_positions_map.html' %}
+
+{% if month_dict.available_bool %}
+<section class="panel" aria-label="Positions held in the month">
+  <div class="panel-h positions-controls"><div class="positions-toolbar">
+    <span class="panel-t">Held in {{ month_dict.name_str }}{{ ' (to date)' if month_dict.to_date_bool else '' }}</span>
+    <nav class="positions-pod-filters" aria-label="Filter by pod">{% for filter_dict in positions_page_dict.pod_filter_list %}<a class="podchip{{ ' on' if filter_dict.selected_bool else '' }}" href="{{ filter_dict.url_str }}"{% if filter_dict.selected_bool %} aria-current="page"{% endif %}>{% if filter_dict.get('color_str') %}<i style="background: {{ filter_dict.color_str }}" aria-hidden="true"></i>{% endif %}{{ filter_dict.label_str }}</a>{% endfor %}</nav>
+  </div><div class="positions-find" role="search">
+    <label for="positions-search">Find</label><input id="positions-search" data-positions-search type="search" name="q" value="" maxlength="80" placeholder="symbol…" aria-label="Find symbol" autocomplete="off">
+  </div></div>
+  {% if month_dict.row_list %}
+  <table class="tbl dense positions-table positions-month-table" data-selection-key="positions-month-table" data-sortable-table="positions-month"><thead><tr>{{ sort_head('symbol', 'Symbol', 'text') }}{{ sort_head('pod', 'Pod', 'text') }}{{ sort_head('held', 'Held', 'text') }}{{ sort_head('value', 'Avg value $', 'number', 'num') }}{{ sort_head('weight', 'Avg weight', 'number', 'num') }}{{ sort_head('pnl', 'P&L in ' ~ month_dict.short_str, 'number', 'num') }}{{ sort_head('status', 'Status', 'text') }}</tr></thead><tbody>
+  {% for row_dict in month_dict.row_list %}<tr data-position-row data-position-symbol="{{ row_dict.symbol_str }}" data-position-key="{{ row_dict.key_str }}" data-sort-row data-sort-index="{{ loop.index0 }}"{% for key_str, value_obj in row_dict.sort_dict.items() %} data-sort-{{ key_str }}="{{ value_obj }}"{% endfor %}>
+    <td data-column="Symbol"><span class="sym"><b>{{ row_dict.symbol_str }}</b>{% if row_dict.short_bool %}<span>Short</span>{% endif %}</span></td>
+    <td data-column="Pod">{% if row_dict.pod_dict.url_str %}<a class="podchip" href="{{ row_dict.pod_dict.url_str }}">{% else %}<span class="podchip">{% endif %}<i style="background: {{ row_dict.pod_dict.color_str }}" aria-hidden="true"></i>{{ row_dict.pod_dict.name_str }}{% if row_dict.pod_dict.url_str %}</a>{% else %}</span>{% endif %}</td>
+    <td data-column="Held">{{ row_dict.held_str }}<div class="position-sub">{{ row_dict.session_str }}</div></td>
+    <td data-column="Avg value $" class="num">{{ row_dict.value_str }}</td>
+    <td data-column="Avg weight" class="num"><div class="position-weight">{% if row_dict.weight_percent_float is not none %}<span class="position-weight-bar" aria-hidden="true"><i style="width: {{ [[row_dict.weight_percent_float|float, 0]|max, 100]|min }}%"></i></span>{% endif %}<span>{{ row_dict.weight_str }}</span></div></td>
+    <td data-column="P&L" class="num {{ row_dict.pnl_tone_str }}">{{ row_dict.pnl_str }}{% if row_dict.return_str %}<div class="position-sub">{{ row_dict.return_str }}</div>{% endif %}</td>
+    <td data-column="Status">{% if row_dict.status_tag_bool %}<span class="tag">{{ row_dict.status_str }}</span>{% else %}<span class="muted">{{ row_dict.status_str }}</span>{% endif %}</td>
+  </tr>{% endfor %}</tbody></table>
+  <div class="empty-state" data-position-search-empty hidden>No matching symbols.</div>
+  {% else %}<div class="empty-state">No positions held in this month.</div>{% endif %}
+</section>
+
+<section class="panel" aria-label="Month by pod"><div class="panel-h"><span class="panel-t">By pod · {{ month_dict.name_str }}</span><span class="muted">{{ month_dict.source_str }}</span></div>
+  <table class="tbl dense positions-table positions-by-pod" data-selection-key="positions-month-by-pod"><thead><tr><th scope="col">Pod</th><th scope="col" class="num">Held</th><th scope="col" class="num">Sold</th><th scope="col" class="num">Avg NAV $</th><th scope="col" class="num">P&L $</th><th scope="col" class="num">Return</th></tr></thead><tbody>
+  {% for row_dict in month_dict.pod_row_list %}<tr><td data-column="Pod"><i class="dotk" style="background: {{ row_dict.color_str }}" aria-hidden="true"></i>{% if row_dict.url_str %}<a class="sname" href="{{ row_dict.url_str }}">{{ row_dict.name_str }}</a>{% else %}<span class="sname">{{ row_dict.name_str }}</span>{% endif %}</td><td data-column="Held" class="num">{{ row_dict.held_str }}</td><td data-column="Sold" class="num">{{ row_dict.sold_str }}</td><td data-column="Avg NAV $" class="num">{{ row_dict.nav_str }}</td><td data-column="P&L $" class="num {{ row_dict.pnl_tone_str }}">{{ row_dict.pnl_str }}</td><td data-column="Return" class="num">{{ row_dict.twr_str }}</td></tr>{% endfor %}
+  {% set total_dict = month_dict.total_dict %}<tr class="tot"><td data-column="Pod"><b>{{ total_dict.name_str }}</b></td><td data-column="Held" class="num">{{ total_dict.held_str }}</td><td data-column="Sold" class="num">{{ total_dict.sold_str }}</td><td data-column="Avg NAV $" class="num">{{ total_dict.nav_str }}</td><td data-column="P&L $" class="num {{ total_dict.pnl_tone_str }}">{{ total_dict.pnl_str }}</td><td data-column="Return" class="num">{{ total_dict.twr_str }}</td></tr>
+  </tbody></table>
+</section>
+{% endif %}
