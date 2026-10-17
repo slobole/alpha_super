@@ -12,7 +12,7 @@ uv run python -m alpha.live.backtest_check --performance-db C:/alpha/live_ops/ib
 Once per session day, best at about 08:00 New York time: after the Flex import (07:10) has final returns for the
 previous session, and before the open. The run uses the New York date; on a non-session date TAA backtests are
 skipped to stay clear of the month-end DTB3 refresh. Scheduling it is an owner decision; nothing here registers
-a task. Options: `--pod-id POD` (one pod; the others keep their last result), `--no-reference` (MR cost gate only),
+a task. Options: `--pod-id POD` (one pod; the others keep their last result and original check dates), `--no-reference` (MR cost component only),
 `--refresh-ruler` (build missing or old rare-loss rulers: one long backtest per pod, cached for 35 days).
 
 Output: `backtest_check_latest.json` next to the watchdog report (`ops_report_latest.json`), plus a
@@ -22,26 +22,78 @@ Output: `backtest_check_latest.json` next to the watchdog report (`ops_report_la
 
 | Part | How | Shows in V4 |
 |---|---|---|
-| Decision check | The research backtest runs on the pod's own days (first target session and budget, up to the last finished session) through `run_auto_reference_strategy`. For the latest executed plan's session: full books compare target weights with the backtest's holdings at that close (±5 points, because close weights carry the day's move); entry/exit books compare entries and exits with the backtest's buys and sells. Symbols and weights only — never shares. | Pod page: Backtest tab, red box when it differs; Overview row |
-| Same-days curve | Live daily TWR (IBKR Flex) and the backtest's daily return on the same dates; gap = live relative to the backtest. | Pod Value chart: dashed second line + gap; Performance → Vs backtest |
-| Rare loss | Live 1 / 3 / 5 session loss below the backtest's 1-in-100 line for that length (ruler from a long backtest that ends before the pod went live). Cause: "strategy" when the backtest lost at least 70% as much on the same days, "ours" when it did not, "unknown" when the backtest has no data for those days. | Amber line on the Pod page (red when "ours"); Overview row only when "ours" |
-| MR cost gate | Stock fills of the MR capsule pods vs the official open, per side, worse = positive. BIL/SPMO parking fills and fills without an official open are not counted. Status: collecting (< 30 fills), on track, above, passed, failed, time cap (6 months). | Performance → Vs backtest; Overview row when above / failed / time cap (a pass shows on Performance only) |
+| Decision check | The reference starts with the first executed plan's session and budget and ends at the last finished exchange session. Full books require matching symbols and exposure directions; weights of matching symbols and total gross exposure each tolerate ±5 percentage points because reference weights are marked at that close. Small per-symbol differences cannot accumulate into an unchecked total-exposure difference. Entry/exit books check actions and equal-slot entry weights from the actual configured DV2, DV2-IND, HPI and MR reference objects (`1 / slots`, tolerance `0.000001` in decimal weight). Other entry-weight contracts remain unchecked. Exact decision-session coverage is required; older holdings never substitute. | Pod page: Backtest tab, red box when a current check differs; Overview row |
+| Same-days curve | Live daily TWR (IBKR Flex) and reference daily return, including the reference's first session from initial cash. Every finished exchange session from deployment must exist in both sources. Missing dates or invalid returns make the curve/gap unavailable, with the reason displayed; dates are never silently dropped. Non-session broker rows also require matching reference evidence. Up to 400 complete dated points are displayed. | Pod Value chart: dashed second line only when the whole selected period is covered; Performance → Vs backtest |
+| Rare loss | Live loss over 1 / 3 / 5 consecutive exchange sessions ending at the required last finished session, below the reference's 1-in-100 line. The historical ruler ends before deployment, uses the runner's declared historical start/config default, requires continuous session history and at least 250 windows per length, and expires after 35 days. Cause: "strategy" when the reference lost at least 70% as much, "ours" otherwise, "unknown" if same-window reference data is absent. Missing live sessions suppress that window. | Amber line on the Pod page (red when "ours"); Overview row only when "ours" |
+| MR cost component | Stock fills of the MR capsule pods vs the official open, per side, worse = positive. BIL/SPMO parking fills and fills without an official open are excluded from the average/count. The deadline starts at the first stock fill, including fills without an official open: 183 calendar days (approximately six months). The 200th qualifying fill must occur by that deadline. An early completed sample remains timely when reviewed later. The average uses all valid fills available through the as-of date. | Performance → Vs backtest; Overview row when above / failed / time cap. A pass means the cost component only; unexplained halts still need separate review. |
 
 ## Boundaries
 
 - Read-only toward live state: pod databases opened with SQLite `mode=ro`; the Flex store through
   `client_reporting` (read-only). No `LiveStateStore`, no release sync, no broker, no orders.
-- Backtests run one pod at a time. TAA-family backtests are skipped on the first and the last two sessions of a
-  month: the TAA loader may rewrite the shared DTB3 cache that the live month-end decision also reads.
+- Backtests run one pod at a time inside `isolated_fred_cache_context`: all FRED cache writes go under that
+  reference run's `macro_cache` directory, including historical ruler runs. The existing configured cache is
+  a read-only offline fallback. The series, macro mode, as-of boundary and strategy parameters do not change.
+  The context restores even after exceptions and does not redirect other threads' ordinary live calls.
+  TAA's first/last-two-session month-end skip is retained as a conservative scheduling guard, not as write isolation.
 - CORE5 has no automatic backtest yet (`core5_accounting_bridge_required`): it shows "Not checked" with that reason.
 - The backtest leaves dividends out (live reference contract `price_return_ledger_v1`) while the IBKR TWR includes
   them, so the gap drifts by roughly the dividend yield on income-heavy pods. Read the gap as a trend.
 - Path dependence: after a missed fill a slot pod (DV2-IND, MR) holds something the backtest does not, and later
   sessions can show "differs" until the paths meet again. The red box links to the evidence; the Plan vs actual tab
   says why.
-- A failed ruler build never discards the night's check; the pod just has no rare-loss line.
-- `--pod-id` never rewrites the MR gate (it pools both capsule pods); a full run does.
-- A malformed or hand-edited report is dropped whole by the dashboard, never half-rendered.
+- A failed ruler build, malformed cached ruler or failed rare-loss calculation never discards the night's
+  decision/curve. The pod has no rare-loss line and shows the ruler reason. Expired or absent rulers need `--refresh-ruler`.
+- `--pod-id` never rewrites the MR component (it pools both capsule pods); a full run does. Retained pod/component
+  evidence keeps its own check timestamp and as-of date, including migration of older reports' global dates.
+- Malformed saved decision books, JSON containers or nonfinite/non-numeric weights are not interpreted as empty
+  valid decisions. Malformed prior reports are dropped before partial-run merges.
+- A malformed report is dropped whole by the dashboard before Pod, Performance or System consumption. Cumulative
+  returns of -100% or below are invalid for curve rebasing. Saved curves display both their start and end dates.
 - Reports only. It never blocks orders and sends no alerts. The red box quotes the stop rule; disabling a pod stays
   the owner's call.
-- A report that is not from the latest session (checked from 10:00 ET on session days) is marked stale: alerts and rare-loss lines are hidden, the System row turns amber.
+- Evidence that is not from the latest session (checked from 10:00 ET on session days) is marked stale per pod and
+  per cost component: current-action alerts, including the Pod stop-rule box, and rare-loss lines are hidden. Historical
+  decision details remain dated and visible. System health warns about stale evidence and incomplete return coverage.
+
+## Calculations and timing
+
+- The morning run fixes `D` to the last XNYS session strictly before the New York run date. Plans for today's
+  upcoming open are excluded, even if already submitted. The underlying strategies still decide from Close_T
+  and execute under their existing next-session contracts; this checker changes no strategy or execution rule.
+- Reference first-day return: `r_1 = E_1 / C_0 - 1`, where `C_0` is the first executed plan's budget and `E_1` is
+  reference NAV after its first session. Later returns: `r_t = E_t / E_(t-1) - 1`, requiring NAV for the exact
+  preceding exchange session. A missing prior NAV never becomes a compressed multi-session "daily" return;
+  rare-loss attribution for the affected window is unknown. A missing deployment-first NAV is not rebased later.
+- Each complete displayed curve compounds independently: `I_0 = 1`, `I_t = I_(t-1) * (1 + r_t)`.
+  Relative gap: `I_live / I_reference - 1`; monthly gap divides each curve by its own prior-month closing index first.
+- Full-book gross exposure: `G = sum(abs(w_i))` across compared assets after excluding non-asset ledger keys.
+  Matching requires `abs(w_live_i - w_reference_i) <= 0.05` for every matching symbol and
+  `abs(G_live - G_reference) <= 0.05`; the total tolerance is not multiplied by the number of symbols.
+- A rare-window return is `product(1 + r_t) - 1` over consecutive exchange sessions. The historical line is the sorted
+  overlapping-window value at index `floor(0.01 * N)`. Only negative live returns and negative lines are considered.
+- Fill cost in bps: `10000 * side * (fill_price / official_open - 1)`, with `side = +1` for buys and `-1` for sells.
+  The displayed mean is the arithmetic fill-record mean; the 95% descriptive range is `mean ± 1.96 * sample_std / sqrt(N)`.
+  Partial fills remain fill records, not independent orders. This descriptive range is not proof of full gate qualification.
+- The current snapshot reconstruction still does not prove that historical/live inputs or macro vintages are identical.
+  Full-book close-weight tolerance can still disagree on an extreme market move; the red row is a diagnostic requiring review.
+
+## Safety-fix verification (2026-10-17)
+
+- Scope: diagnostic comparison, evidence validation/freshness, curve/ruler coverage and private FRED cache writes.
+  No strategy, engine, runner, scheduler, reconciliation, reference-price implementation or released config was changed.
+- Review tier: Tier 3, with a Tier 2 shared-data-loader surface. Read-only parity, failure-modes, coverage and
+  quantitative reviews found no remaining material defect in the inspected scope.
+- Final relevant Python suite: 3,511 tests and 39 subtests passed, with 38 numerical/deprecation warnings.
+  The focused checker/dashboard/FRED subset passed all 99 cases (included in the broader count), including
+  55 added regression cases. All 277 dashboard JavaScript interaction tests passed separately.
+  The broader suite includes V4, reference comparison, runner/scheduler/reconciliation/releases, client/Flex
+  reporting, FRED, and the affected TAA/MR/DV2-IND strategy and readiness tests. This is the relevant suite,
+  not a claim about every test in the repository. `git diff --check` passed.
+- Live-impact checks: next-open timing and sizing rules are unchanged; official-open fill-cost inputs are unchanged.
+  Live database schemas, state/config formats and existing dashboard logging fields are unchanged. Older reports
+  retain their original evidence dates, or are rejected if malformed. Windows cache-path, context restoration,
+  malformed-report and repeated partial-run cases are covered locally; no VPS deployment or broker action occurred.
+- Remaining evidence limits: local tests do not establish real-VPS data parity. Current snapshot/macro reconstruction,
+  omitted dividends, close-weight tolerance, overlapping rare-loss windows and correlated partial fills remain
+  diagnostic limitations. CORE5 remains explicitly unchecked; a cost-component pass is not full MR gate approval.

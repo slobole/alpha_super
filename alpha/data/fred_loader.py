@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from io import StringIO
 from pathlib import Path
@@ -18,6 +20,17 @@ LIVE_FRED_STALE_WARNING_BUSINESS_DAYS_INT = 3
 # threshold, not a live hard cap.
 MAX_LIVE_FRED_FRESHNESS_BUSINESS_DAYS_INT = LIVE_FRED_STALE_WARNING_BUSINESS_DAYS_INT
 SUPPORTED_FRED_MODE_TUPLE: tuple[str, ...] = ("backtest", "live")
+_ISOLATED_CACHE_ROOT_CONTEXT = ContextVar("fred_isolated_cache_root", default=None)
+
+
+@contextmanager
+def isolated_fred_cache_context(cache_root_path: Path):
+    """Redirect this diagnostic's cache writes; normal/live callers keep their existing path."""
+    cache_token_obj = _ISOLATED_CACHE_ROOT_CONTEXT.set(Path(cache_root_path))
+    try:
+        yield
+    finally:
+        _ISOLATED_CACHE_ROOT_CONTEXT.reset(cache_token_obj)
 
 
 @dataclass(frozen=True)
@@ -130,7 +143,10 @@ def load_daily_fred_series_snapshot(
     normalized_as_of_ts = _normalize_as_of_timestamp_ts(as_of_ts)
     as_of_date_ts = pd.Timestamp(normalized_as_of_ts.date())
     download_attempt_timestamp_ts = datetime.now(tz=UTC)
-    cache_csv_path = Path(cache_csv_path_str)
+    source_cache_path = Path(cache_csv_path_str)
+    isolated_root_path = _ISOLATED_CACHE_ROOT_CONTEXT.get()
+    cache_csv_path = (isolated_root_path / (quote_plus(series_id_str, safe="") + ".csv")
+                      if isolated_root_path is not None else source_cache_path)
 
     try:
         csv_url_str = build_fred_csv_url(series_id_str)
@@ -146,7 +162,10 @@ def load_daily_fred_series_snapshot(
             download_status_str = "download_success_cache_write_failed"
         used_cache_bool = False
     except (HTTPError, URLError, TimeoutError, OSError, UnicodeDecodeError, ValueError, pd.errors.ParserError) as download_exception_obj:
-        if not cache_csv_path.exists():
+        # *** CRITICAL*** diagnostic isolation changes only the write destination, never the
+        # series, as-of boundary or macro rule. The existing live cache is a read-only fallback.
+        fallback_cache_path = source_cache_path if source_cache_path.exists() else cache_csv_path
+        if not fallback_cache_path.exists():
             raise FredSeriesUnavailableError(
                 message_str=(
                     f"Failed to load FRED series '{series_id_str}'. "
@@ -157,7 +176,7 @@ def load_daily_fred_series_snapshot(
             ) from download_exception_obj
 
         try:
-            series_df = _load_csv_df_from_path(cache_csv_path)
+            series_df = _load_csv_df_from_path(fallback_cache_path)
             raw_value_ser = _extract_value_ser(series_df, series_id_str)
         except (OSError, ValueError, pd.errors.ParserError) as cache_exception_obj:
             raise FredSeriesUnavailableError(

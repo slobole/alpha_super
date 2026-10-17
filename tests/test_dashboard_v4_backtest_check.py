@@ -54,7 +54,7 @@ def test_no_report_means_no_view(tmp_path):
 
 
 def test_report_is_scoped_to_current_live_identities(tmp_path):
-    report = _report([_pod(), _pod(pod_id="pod_old", account="U9", release="r9"), _pod(release="r_other")])
+    report = _report([_pod(), _pod(pod_id="pod_old", account="U9", release="r9"), _pod(pod_id="pod_other", release="r_other")])
     loaded = btd.load_report_dict(_provider(tmp_path, report), as_of_ts=NOW)
     assert [pod["pod_id_str"] for pod in loaded["pod_list"]] == ["pod_a"]
     assert loaded["stale_bool"] is False
@@ -86,6 +86,7 @@ def test_stale_report_hides_alerts_and_rare_loss(tmp_path):
     assert report["stale_bool"]
     assert btd.attention_list(report, {"pod_a": "A"}) == []
     assert btd.pod_view_dict(report, "pod_a")["rare_dict"] is None
+    assert btd.pod_view_dict(report, "pod_a")["status_str"] == "not_checked"
 
 
 def test_views_and_attention_rows(tmp_path):
@@ -182,3 +183,132 @@ def test_gate_pass_and_unknown_cause_add_no_overview_row(tmp_path):
     report = btd.load_report_dict(_provider(tmp_path, _report([_pod(rare=unknown)], gate=gate)), as_of_ts=NOW)
     assert btd.attention_list(report, {"pod_a": "A"}) == []
     assert btd.pod_view_dict(report, "pod_a")["rare_dict"]["state_str"] == "late"
+
+
+@pytest.mark.parametrize("malformed_field_str,malformed_value_obj", [
+    ("decision_dict", ["malformed"]),
+    ("curve_dict", {"point_list": [{"date_str": "2026-12-09", "live_float": 0.0, "backtest_float": -1.0}]}),
+    ("curve_dict", {"point_list": "bad"}),
+])
+def test_malformed_reports_are_rejected_before_system_or_chart_use(tmp_path, malformed_field_str, malformed_value_obj):
+    pod_dict = _pod()
+    pod_dict[malformed_field_str] = malformed_value_obj
+    report_dict = btd.load_report_dict(_provider(tmp_path, _report([pod_dict])), as_of_ts=NOW)
+    assert report_dict is None
+    assert btd.system_row_dict(report_dict, as_of_ts=NOW)["state_str"] == "unknown"
+
+
+def test_chart_rebase_handles_invalid_baseline_even_for_a_direct_caller():
+    view_dict = {"point_list": [{"date_str": "2026-12-08", "live_float": 0.0, "backtest_float": -1.0},
+                               {"date_str": "2026-12-09", "live_float": 0.0, "backtest_float": 0.0}]}
+    chart_dict = {"available_bool": True}
+    assert btd.add_backtest_series(chart_dict, [{"market_date_str": "2026-12-09", "cumulative_return_float": 0.0}],
+                                  view_dict) == chart_dict
+
+
+def test_chart_does_not_overlay_an_incomplete_selected_period():
+    view_dict = {"point_list": [{"date_str": "2026-12-09", "live_float": 0.0, "backtest_float": 0.0},
+                               {"date_str": "2026-12-10", "live_float": 0.0, "backtest_float": 0.0}]}
+    chart_dict = {"available_bool": True}
+    path_list = [{"market_date_str": "2026-12-08", "cumulative_return_float": -0.2},
+                 {"market_date_str": "2026-12-09", "cumulative_return_float": 0.0}]
+    assert btd.add_backtest_series(chart_dict, path_list, view_dict) == chart_dict
+
+
+def test_single_pod_run_preserves_old_pod_and_cost_evidence_dates(tmp_path, monkeypatch):
+    from alpha.live import backtest_check as bc, dashboard
+
+    old_ts = NOW - timedelta(days=4)
+    rare_dict = {"window_int": 3, "live_float": -0.06, "backtest_float": 0.0, "line_float": -0.05,
+                 "worst_float": -0.2, "cause_str": "ours"}
+    old_gate_dict = {"status_str": "failed", "fill_count_int": 200, "pod_row_list": [{"pod_id_str": "pod_b"}]}
+    previous_dict = _report([_pod(), _pod("pod_b", "U2", status="differs", rare=rare_dict)], generated=old_ts, gate=old_gate_dict)
+    previous_dict["as_of_date_str"] = old_ts.date().isoformat()
+    provider_obj = _provider(tmp_path, previous_dict, identities=(("pod_a", "U1", "r1"), ("pod_b", "U2", "r1")))
+    monkeypatch.setattr(dashboard, "DashboardApp", lambda **kwargs: provider_obj)
+    monkeypatch.setattr(bc, "datetime", SimpleNamespace(now=lambda timezone_obj: NOW))
+    fresh_dict = dict(_report([_pod()], generated=NOW), as_of_date_str=NOW.date().isoformat())
+    monkeypatch.setattr(bc, "build_report_dict", lambda *args, **kwargs: fresh_dict)
+    assert bc.main(["--pod-id", "pod_a", "--event-log-path", provider_obj.event_log_path_str,
+                    "--performance-db", str(tmp_path / "absent"), "--skip-env-file"]) == 0
+    report_dict = btd.load_report_dict(provider_obj, as_of_ts=NOW)
+    assert not report_dict["stale_bool"]
+    stale_view_dict = btd.pod_view_dict(report_dict, "pod_b")
+    assert stale_view_dict["status_str"] == "not_checked"
+    assert stale_view_dict["rare_dict"] is None
+    assert "12-06" in stale_view_dict["detail_str"]
+    assert btd.gate_view_dict(report_dict)["stale_bool"]
+    assert btd.attention_list(report_dict, {"pod_a": "A", "pod_b": "B"}) == []
+    assert btd.system_row_dict(report_dict, as_of_ts=NOW)["state_str"] == "warning"
+
+
+def test_stale_report_never_renders_the_red_stop_rule_box(monkeypatch):
+    from alpha.live.dashboard_v4.demo import create_demo_app
+    from flask import render_template
+
+    old_ts = NOW - timedelta(days=4)
+    provider_obj = SimpleNamespace(get_backtest_check_report_dict=lambda **kwargs: _report([_pod(status="differs")], generated=old_ts))
+    report_dict = btd.load_report_dict(provider_obj, as_of_ts=NOW)
+    view_dict = btd.pod_view_dict(report_dict, "pod_a")
+    app_obj = create_demo_app()
+    with app_obj.test_request_context():
+        rendered_str = render_template("_backtest_alerts.html", pod_page_dict={"backtest_dict": view_dict})
+    assert "data-backtest-issue" not in rendered_str
+
+
+def test_cost_pass_is_explicitly_a_component_and_coverage_is_visible(tmp_path):
+    gate_dict = {"status_str": "passed", "fill_count_int": 200, "cost_bps_list": [], "pod_row_list": [{"pod_id_str": "pod_a"}]}
+    pod_dict = _pod()
+    pod_dict["coverage_reason_str"] = "Incomplete same-days coverage: 1 live / 0 reference dates missing."
+    report_dict = btd.load_report_dict(_provider(tmp_path, _report([pod_dict], gate=gate_dict)), as_of_ts=NOW)
+    gate_view_dict = btd.gate_view_dict(report_dict)
+    assert gate_view_dict["label_str"] == "Cost component passed"
+    assert "not full gate approval" in gate_view_dict["halt_str"]
+    assert "Incomplete" in btd.performance_view_dict(report_dict, {})["pod_row_list"][0]["now_str"]
+
+
+@pytest.mark.parametrize("field_str,value_obj", [
+    ("pod_id_str", []), ("account_route_str", {}), ("release_id_str", None),
+    ("record_list", [{"session_str": "2026-12-09", "status_str": []}]),
+    ("record_list", [{"session_str": "bad", "status_str": "same"}]),
+    ("reference_status_str", []), ("decision_dict", {"status_str": []}),
+])
+def test_corrupt_scalar_fields_are_dropped_for_both_reader_and_nightly_cache(tmp_path, field_str, value_obj):
+    from alpha.live import backtest_check as bc
+    pod_dict = _pod()
+    pod_dict[field_str] = value_obj
+    provider_obj = _provider(tmp_path, _report([pod_dict]))
+    assert btd.load_report_dict(provider_obj, as_of_ts=NOW) is None
+    assert bc._read_previous_dict(tmp_path / btd.REPORT_FILE_NAME_STR) == {}
+
+
+def test_duplicate_pod_identities_are_not_ambiguous_evidence(tmp_path):
+    from alpha.live import backtest_check as bc
+    provider_obj = _provider(tmp_path, _report([_pod(), _pod(release="other")]))
+    assert btd.load_report_dict(provider_obj, as_of_ts=NOW) is None
+    assert bc._read_previous_dict(tmp_path / btd.REPORT_FILE_NAME_STR) == {}
+
+
+def test_cost_evidence_is_not_reused_for_a_changed_account_or_release(tmp_path):
+    gate_dict = {"status_str": "passed", "fill_count_int": 200, "pod_row_list": [{"pod_id_str": "pod_a"}],
+                 "pod_identity_list": [{"pod_id_str": "pod_a", "account_route_str": "OLD_ACCOUNT", "release_id_str": "r1"}]}
+    report_dict = btd.load_report_dict(_provider(tmp_path, _report([_pod()], gate=gate_dict)), as_of_ts=NOW)
+    assert report_dict is not None
+    assert report_dict["cost_gate_dict"] is None
+
+
+def test_malformed_cost_rows_are_also_dropped_before_prior_cache_merge(tmp_path):
+    from alpha.live import backtest_check as bc
+    gate_dict = {"status_str": "failed", "fill_count_int": 200, "pod_row_list": ["bad"]}
+    provider_obj = _provider(tmp_path, _report([_pod()], gate=gate_dict))
+    assert btd.load_report_dict(provider_obj, as_of_ts=NOW) is None
+    assert bc._read_previous_dict(tmp_path / btd.REPORT_FILE_NAME_STR) == {}
+
+
+def test_overflowing_prior_numbers_do_not_prevent_a_fresh_nightly_report(tmp_path):
+    from alpha.live import backtest_check as bc
+    pod_dict = _pod()
+    pod_dict["curve_dict"]["point_list"][0]["live_float"] = 10 ** 400
+    provider_obj = _provider(tmp_path, _report([pod_dict]))
+    assert bc._read_previous_dict(tmp_path / btd.REPORT_FILE_NAME_STR) == {}
+    assert btd.load_report_dict(provider_obj, as_of_ts=NOW) is None

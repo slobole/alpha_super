@@ -64,6 +64,7 @@ def test_entry_book_compares_entries_and_exits_and_skips_parking():
                 "entry_target_weight_map_dict": {"XLE": 0.10, "KRE": 0.10}, "exit_asset_list": ["XLK"]}
     result = bc.compare_decision_dict(decision, reference_weight_map_dict={},
                                       reference_trade_map_dict={"XLU": 12.0, "KRE": 9.0, "XLK": -6.0, "BIL": 40.0},
+                                      reference_entry_weight_map_dict={"XLU": 0.10, "KRE": 0.10},
                                       skip_set=frozenset({"BIL"}))
     assert result["differ_count_int"] == 2
     by_asset = {row["asset_str"]: row for row in result["row_list"]}
@@ -197,16 +198,276 @@ def test_ruler_failure_keeps_the_decision_and_curve(tmp_path, monkeypatch):
         calls.append((start_str, end_str))
         if start_str is None:
             raise MemoryError("ruler run")
+        session_list = bc.session_date_list(start_str, end_str)
         return {"transaction_map_dict": {}, "realized_weight_history_df": pd.DataFrame({"TLT": [1.0]}, index=["2026-12-01"]),
-                "equity_by_date_dict": {"2026-12-01": 100.0, "2026-12-02": 101.0, "2026-12-03": 100.5}}
+                "equity_by_date_dict": {session_str: capital_float for session_str in session_list}}
 
     monkeypatch.setattr(bc, "run_reference_maps_dict", fake_run)
     target = _target(db_path, "pod_a", "strategies.ndx.strategy_ndx:Z", "U1")
-    pod = bc.check_pod_dict(target, as_of_date_str="2026-12-04", live_return_dict={"2026-12-02": 0.01, "2026-12-03": -0.005},
+    pod = bc.check_pod_dict(target, as_of_date_str="2026-12-04",
+                            live_return_dict={session_str: 0.0 for session_str in bc.session_date_list("2026-11-02", "2026-12-03")},
                             previous_pod_dict=None, cache_dir_path=tmp_path / "cache", reference_bool=True,
                             refresh_ruler_bool=True, month_end_bool=False)
     assert pod["reference_status_str"] == "ok"
     assert pod["decision_dict"]["status_str"] == "same"
-    assert len(pod["curve_dict"]["point_list"]) == 2
+    assert len(pod["curve_dict"]["point_list"]) == len(bc.session_date_list("2026-11-02", "2026-12-03"))
     assert pod["ruler_reason_str"].startswith("Ruler unavailable")
     assert calls[0] == ("2026-11-02", "2026-12-03")  # the backtest runs to the last finished session, not the plan date
+
+
+def test_different_low_exposure_symbol_books_never_match():
+    decision_dict = {"decision_book_type_str": "full_target_weight_book",
+                     "full_target_weight_map_dict": {f"LIVE{symbol_int}": 0.025 for symbol_int in range(10)}}
+    comparison_dict = bc.compare_decision_dict(decision_dict,
+        reference_weight_map_dict={f"REF{symbol_int}": 0.025 for symbol_int in range(10)}, reference_trade_map_dict={})
+    assert comparison_dict["status_str"] == "differs"
+    assert comparison_dict["differ_count_int"] == 20
+
+
+@pytest.mark.parametrize("exposure_sign_int", [1, -1])
+def test_per_symbol_tolerance_cannot_hide_doubled_total_exposure(exposure_sign_int):
+    decision_dict = {"decision_book_type_str": "full_target_weight_book",
+                     "full_target_weight_map_dict": {f"AAA{symbol_int}": exposure_sign_int * 0.05 for symbol_int in range(10)}}
+    comparison_dict = bc.compare_decision_dict(decision_dict,
+        reference_weight_map_dict={f"AAA{symbol_int}": exposure_sign_int * 0.025 for symbol_int in range(10)},
+        reference_trade_map_dict={})
+    assert comparison_dict["status_str"] == "differs"
+    assert comparison_dict["differ_count_int"] == 1
+    assert comparison_dict["row_list"][0] == {"asset_str": "Total exposure", "live_str": "50.0%",
+                                             "backtest_str": "25.0%", "same_bool": False}
+
+
+@pytest.mark.parametrize("live_weight_float,reference_weight_float,expected_str", [(0.1, 0.1, "same"), (0.9, 0.1, "differs")])
+def test_incremental_entry_checks_the_intended_weight(live_weight_float, reference_weight_float, expected_str):
+    comparison_dict = bc.compare_decision_dict(
+        {"decision_book_type_str": "incremental_entry_exit_book", "entry_target_weight_map_dict": {"AAA": live_weight_float}},
+        reference_weight_map_dict={"AAA": 0.075}, reference_trade_map_dict={"AAA": 20},
+        reference_entry_weight_map_dict={"AAA": reference_weight_float})
+    assert comparison_dict["status_str"] == expected_str
+
+
+def test_unknown_entry_weight_does_not_approve_a_decision():
+    comparison_dict = bc.compare_decision_dict(
+        {"decision_book_type_str": "incremental_entry_exit_book", "entry_target_weight_map_dict": {"AAA": 0.1}},
+        reference_weight_map_dict={"AAA": 0.1}, reference_trade_map_dict={"AAA": 20})
+    assert comparison_dict["status_str"] == "not_checked"
+    assert comparison_dict["row_list"][0]["same_bool"] is None
+
+
+def test_cost_component_deadline_uses_when_the_sample_completed():
+    first_fill_dict = _fill("AAA", 10, 100, 100, "2026-01-02")
+    late_gate_dict = bc.cost_gate_dict({"pod_a": [first_fill_dict] * 199 + [_fill("AAA", 10, 100, 100, "2026-08-01")]},
+                                     as_of_date_str="2026-08-01")
+    assert late_gate_dict["status_str"] == "time_cap"
+    early_gate_dict = bc.cost_gate_dict({"pod_a": [first_fill_dict] * 199 + [_fill("AAA", 10, 100, 100, "2026-06-01")]},
+                                      as_of_date_str="2026-08-01")
+    assert early_gate_dict["status_str"] == "passed"
+    assert early_gate_dict["scope_str"] == "cost_component_only"
+
+
+def test_missing_official_open_does_not_move_the_deadline():
+    gate_dict = bc.cost_gate_dict({"pod_a": [_fill("AAA", 10, 100, None, "2026-01-02"),
+                                            _fill("AAA", 10, 100, 100, "2026-06-01")]}, as_of_date_str="2026-08-01")
+    assert gate_dict["time_cap_date_str"] == "2026-07-04"
+    assert gate_dict["status_str"] == "time_cap"
+
+
+def test_first_session_return_includes_the_initial_cash_baseline():
+    return_dict = bc.daily_returns_from_equity({"2026-10-12": 900.0, "2026-10-13": 990.0}, initial_capital_float=1000)
+    assert return_dict == pytest.approx({"2026-10-12": -0.1, "2026-10-13": 0.1})
+
+
+@pytest.mark.parametrize("missing_side_str", ["live", "reference"])
+def test_incomplete_coverage_never_displays_a_partial_gap(missing_side_str):
+    live_dict = {"2026-10-12": 0.0, "2026-10-13": -0.2, "2026-10-14": 0.0}
+    reference_dict = {session_str: 0.0 for session_str in live_dict}
+    (live_dict if missing_side_str == "live" else reference_dict).pop("2026-10-13")
+    curve_dict = bc.curve_dict(live_dict, reference_dict)
+    assert curve_dict["coverage_status_str"] == "incomplete"
+    assert curve_dict["gap_float"] is None
+    assert curve_dict["point_list"] == []
+
+
+def test_rare_windows_are_consecutive_and_end_on_the_required_session():
+    ruler_dict = {"3": {"one_in_100_float": -0.05, "worst_float": -0.2}}
+    sparse_return_dict = {"2026-10-12": 0.0, "2026-10-14": -0.03, "2026-10-16": -0.03}
+    assert bc.rare_loss_dict(sparse_return_dict, sparse_return_dict, ruler_dict) is None
+    daily_ruler_dict = {"1": {"one_in_100_float": -0.02, "worst_float": -0.2}}
+    assert bc.rare_loss_dict({"2026-10-14": -0.03}, {"2026-10-14": -0.03}, daily_ruler_dict,
+                             expected_end_str="2026-10-16") is None
+
+
+def test_historical_run_resolves_the_declared_start_and_entry_slot_weight(tmp_path, monkeypatch):
+    import pandas as pd
+    from alpha.live import reference_compare
+    from strategies.mr_capsule.dv2_vix_gated import DV2VixGatedStrategy
+
+    strategy_obj = DV2VixGatedStrategy(name="reference", benchmarks=[], capital_base=1000)
+    strategy_obj.max_positions = 5
+    captured_dict = {}
+    def run_reference_fn(**kwargs):
+        captured_dict.update(kwargs)
+        return strategy_obj
+    monkeypatch.setattr(reference_compare, "run_auto_reference_strategy", run_reference_fn)
+    monkeypatch.setattr(reference_compare, "build_reference_maps_dict", lambda strategy_obj: {
+        "reference_strategy_obj": strategy_obj, "transaction_map_dict": {("2026-10-12", "AAA"): {"quantity_float": 5}},
+        "equity_by_date_dict": {"2026-10-12": 1000}, "realized_weight_history_df": pd.DataFrame()})
+    release_obj = _target(tmp_path / "absent", "pod_a", "strategies.mr_capsule.strategy_mr_dv2_vix_gated_bil:X", "U1").release_obj
+    maps_dict = bc.run_reference_maps_dict(release_obj, start_str=None, end_str="2026-10-12", capital_float=1000,
+                                           output_dir_path=tmp_path / "reference")
+    assert captured_dict["deployment_start_date_str"] == "2004-01-01"
+    assert maps_dict["entry_weight_by_date_dict"] == {("2026-10-12", "AAA"): 0.2}
+
+
+def test_malformed_ruler_never_discards_the_valid_nightly_check(tmp_path, monkeypatch):
+    import pandas as pd
+    from alpha.live import reference_compare
+
+    db_path = _pod_db(tmp_path)
+    session_list = bc.session_date_list("2026-11-02", "2026-12-03")
+    monkeypatch.setattr(reference_compare, "inspect_auto_reference_support_dict", lambda release_obj: {"supported_bool": True})
+    monkeypatch.setattr(bc, "run_reference_maps_dict", lambda *args, **kwargs: {
+        "transaction_map_dict": {}, "realized_weight_history_df": pd.DataFrame({"TLT": [1.0]}, index=["2026-12-01"]),
+        "equity_by_date_dict": {session_str: 25000 for session_str in session_list}})
+    monkeypatch.setattr(bc, "load_or_build_ruler_dict", lambda *args, **kwargs: {
+        "window_dict": {"1": {"one_in_100_float": "bad", "worst_float": -0.2}}})
+    report_dict = bc.build_report_dict([_target(db_path, "pod_a", "strategies.ndx.strategy_ndx:X", "U1")],
+        as_of_ts=datetime(2026, 12, 4, 13, tzinfo=UTC), performance_db_path_str=None, previous_dict={}, cache_dir_path=tmp_path)
+    pod_dict = report_dict["pod_list"][0]
+    assert pod_dict["reference_status_str"] == "ok"
+    assert pod_dict["decision_dict"]["status_str"] == "same"
+    assert pod_dict["ruler_reason_str"].startswith("Ruler unavailable")
+
+
+def test_missing_exact_decision_session_does_not_use_previous_holdings(tmp_path, monkeypatch):
+    import pandas as pd
+    from alpha.live import reference_compare
+
+    monkeypatch.setattr(reference_compare, "inspect_auto_reference_support_dict", lambda release_obj: {"supported_bool": True})
+    monkeypatch.setattr(bc, "run_reference_maps_dict", lambda *args, **kwargs: {
+        "transaction_map_dict": {}, "realized_weight_history_df": pd.DataFrame({"TLT": [1.0]}, index=["2026-11-30"]),
+        "equity_by_date_dict": {"2026-11-30": 25000}})
+    pod_dict = bc.check_pod_dict(_target(_pod_db(tmp_path), "pod_a", "strategies.ndx.strategy_ndx:X", "U1"),
+        as_of_date_str="2026-12-04", live_return_dict={}, previous_pod_dict=None, cache_dir_path=tmp_path,
+        reference_bool=True, refresh_ruler_bool=False, month_end_bool=False)
+    assert pod_dict["decision_dict"]["status_str"] == "not_checked"
+    assert pod_dict["reference_status_str"] == "incomplete"
+
+
+@pytest.mark.parametrize("saved_json_str", ["broken", "[]", '{"QQQ":NaN}', '{"QQQ":true}', '{"QQQ":"0.1"}'])
+def test_malformed_saved_decisions_are_not_coerced_to_empty_books(tmp_path, saved_json_str):
+    db_path = _pod_db(tmp_path)
+    with sqlite3.connect(db_path) as connection_obj:
+        connection_obj.execute("UPDATE decision_plan SET full_target_weight_json_str=? WHERE decision_plan_id_int=2", (saved_json_str,))
+    with pytest.raises(ValueError):
+        bc.read_pod_source_dict(str(db_path), "pod_a", "2026-12-10")
+
+
+def test_unknown_saved_book_type_is_not_treated_as_incremental(tmp_path):
+    db_path = _pod_db(tmp_path)
+    with sqlite3.connect(db_path) as connection_obj:
+        connection_obj.execute("UPDATE decision_plan SET decision_book_type_str='unknown' WHERE decision_plan_id_int=2")
+    with pytest.raises(ValueError):
+        bc.read_pod_source_dict(str(db_path), "pod_a", "2026-12-10")
+
+
+def test_first_budget_and_start_ignore_an_earlier_unexecuted_plan(tmp_path):
+    db_path = _pod_db(tmp_path)
+    with sqlite3.connect(db_path) as connection_obj:
+        connection_obj.execute("INSERT INTO vplan VALUES (1, 'pod_a', 1, '2026-10-01T13:30:00+00:00', 999, 'blocked')")
+    source_dict = bc.read_pod_source_dict(str(db_path), "pod_a", "2026-12-10")
+    assert source_dict["first_vplan_dict"]["vplan_id_int"] == 10
+    assert source_dict["first_vplan_dict"]["pod_budget_float"] == 25000
+
+
+def test_opposite_exposure_directions_never_match_inside_weight_tolerance():
+    comparison_dict = bc.compare_decision_dict(
+        {"decision_book_type_str": "full_target_weight_book", "full_target_weight_map_dict": {"AAA": 0.02}},
+        reference_weight_map_dict={"AAA": -0.02}, reference_trade_map_dict={})
+    assert comparison_dict["status_str"] == "differs"
+
+
+def test_malformed_previous_report_is_dropped_before_partial_merge(tmp_path):
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps({"schema_version_str": bc.SCHEMA_VERSION_STR, "pod_list": [1]}), encoding="utf-8")
+    assert bc._read_previous_dict(report_path) == {}
+
+
+@pytest.mark.parametrize("fail_run_bool", [False, True])
+def test_reference_wrapper_isolates_fred_writes_even_when_the_run_fails(tmp_path, monkeypatch, fail_run_bool):
+    import pandas as pd
+    from alpha.data import fred_loader
+    from alpha.live import reference_compare
+    from strategies.dv2.strategy_mr_dv2 import DVO2Strategy
+
+    source_path = tmp_path / "live" / "DTB3.csv"
+    source_path.parent.mkdir()
+    original_bytes = b"DATE,DTB3\n2026-10-12,4.0\n"
+    source_path.write_bytes(original_bytes)
+    download_bytes = b"DATE,DTB3\n2026-10-12,5.0\n"
+    from contextlib import contextmanager
+    @contextmanager
+    def response_fn(*args, **kwargs):
+        yield SimpleNamespace(read=lambda: download_bytes)
+    monkeypatch.setattr(fred_loader, "urlopen", response_fn)
+    def run_reference_fn(**kwargs):
+        fred_loader.load_daily_fred_series_snapshot("DTB3", str(source_path), datetime(2026, 10, 12, tzinfo=UTC), "backtest")
+        if fail_run_bool:
+            raise RuntimeError("reference failed")
+        return DVO2Strategy(name="reference", benchmarks=[])
+    monkeypatch.setattr(reference_compare, "run_auto_reference_strategy", run_reference_fn)
+    monkeypatch.setattr(reference_compare, "build_reference_maps_dict", lambda strategy_obj: {
+        "transaction_map_dict": {}, "realized_weight_history_df": pd.DataFrame(), "equity_by_date_dict": {}})
+    release_obj = _target(tmp_path / "absent", "pod_a", "strategies.taa_df.strategy_taa_df:X", "U1").release_obj
+    run_kwarg_dict = dict(start_str="2026-10-12", end_str="2026-10-12", capital_float=1000, output_dir_path=tmp_path / "reference")
+    if fail_run_bool:
+        with pytest.raises(RuntimeError):
+            bc.run_reference_maps_dict(release_obj, **run_kwarg_dict)
+    else:
+        bc.run_reference_maps_dict(release_obj, **run_kwarg_dict)
+    assert source_path.read_bytes() == original_bytes
+    assert (tmp_path / "reference" / "macro_cache" / "DTB3.csv").read_text(encoding="utf-8") == download_bytes.decode("utf-8")
+    fred_loader.load_daily_fred_series_snapshot("DTB3", str(source_path), datetime(2026, 10, 12, tzinfo=UTC), "live")
+    assert source_path.read_text(encoding="utf-8") == download_bytes.decode("utf-8")  # ordinary live write restored
+
+
+def test_taa_historical_start_retains_its_config_default(tmp_path, monkeypatch):
+    from alpha.live import reference_compare
+    from strategies.taa_df import strategy_taa_df
+    from strategies.dv2.strategy_mr_dv2 import DVO2Strategy
+    captured_dict = {}
+    def run_variant_fn(**kwargs):
+        captured_dict.update(kwargs)
+        return DVO2Strategy(name="reference", benchmarks=[], capital_base=kwargs["capital_base_float"])
+    monkeypatch.setattr(strategy_taa_df, "run_defense_first_variant", run_variant_fn)
+    release_obj = _target(tmp_path / "absent", "pod_a", "strategies.taa_df.strategy_taa_df:X", "U1").release_obj
+    bc.run_reference_maps_dict(release_obj, start_str=None, end_str="2026-10-12", capital_float=1000, output_dir_path=tmp_path / "reference")
+    assert captured_dict["backtest_start_date_str"] is None
+    assert captured_dict["config"].start_date_str == strategy_taa_df.DEFAULT_CONFIG.start_date_str
+
+
+@pytest.mark.parametrize("window_int", [1, 3, 5])
+def test_missing_prior_nav_never_attributes_a_multi_session_loss_as_daily(window_int):
+    session_list = bc.session_date_list("2026-10-12", "2026-10-30")
+    window_date_list = session_list[2:2 + window_int]
+    equity_dict = {session_list[0]: 1000.0, **{session_str: 900.0 for session_str in window_date_list}}
+    reference_return_dict = bc.daily_returns_from_equity(equity_dict, initial_capital_float=1000.0)
+    assert window_date_list[0] not in reference_return_dict  # prior Oct 13 NAV is missing
+    live_return_dict = {session_str: -0.1 if session_str == window_date_list[0] else 0.0 for session_str in window_date_list}
+    rare_dict = bc.rare_loss_dict(live_return_dict, reference_return_dict,
+        {str(window_int): {"one_in_100_float": -0.05, "worst_float": -0.2}}, expected_end_str=window_date_list[-1])
+    assert rare_dict is not None
+    assert rare_dict["cause_str"] == "unknown"
+    assert rare_dict["backtest_float"] is None
+
+
+def test_nontrading_days_do_not_break_consecutive_session_nav_returns():
+    return_dict = bc.daily_returns_from_equity({"2026-10-09": 1000.0, "2026-10-12": 900.0})
+    assert return_dict == pytest.approx({"2026-10-12": -0.1})
+
+
+def test_missing_initial_session_is_not_rebased_into_a_later_daily_return():
+    return_dict = bc.daily_returns_from_equity({"2026-10-14": 900.0, "2026-10-15": 900.0},
+                                               initial_capital_float=1000, initial_session_str="2026-10-12")
+    assert "2026-10-14" not in return_dict
+    assert return_dict["2026-10-15"] == 0.0

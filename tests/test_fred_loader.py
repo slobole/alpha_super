@@ -9,6 +9,7 @@ import pandas as pd
 
 from alpha.data.fred_loader import (
     FredSeriesUnavailableError,
+    isolated_fred_cache_context,
     load_daily_fred_series_snapshot,
 )
 
@@ -231,6 +232,65 @@ class FredLoaderTests(unittest.TestCase):
         self.assertFalse(snapshot_obj.used_cache_bool)
         self.assertEqual(snapshot_obj.latest_observation_date_ts, pd.Timestamp("2024-02-02"))
         self.assertEqual(snapshot_obj.freshness_business_days_int, 4)
+
+
+def test_diagnostic_cache_write_is_private_and_preserves_macro_boundary(tmp_path, monkeypatch):
+    from alpha.data import fred_loader
+    original_path = tmp_path / "live" / "DTB3.csv"
+    original_path.parent.mkdir()
+    original_bytes = b"DATE,DTB3\n2024-02-01,4.50\n"
+    original_path.write_bytes(original_bytes)
+    download_str = "DATE,DTB3\n2024-02-01,5.00\n2024-02-02,5.10\n"
+    monkeypatch.setattr(fred_loader, "urlopen", lambda *args, **kwargs: _FakeUrlopenResponse(download_str))
+    with isolated_fred_cache_context(tmp_path / "diagnostic"):
+        snapshot_obj = load_daily_fred_series_snapshot("DTB3", str(original_path), datetime(2024, 2, 1, tzinfo=UTC), "backtest")
+    assert original_path.read_bytes() == original_bytes
+    assert (tmp_path / "diagnostic" / "DTB3.csv").read_text(encoding="utf-8") == download_str
+    assert list(snapshot_obj.value_ser) == [5.0]  # future observation still excluded
+    assert snapshot_obj.latest_observation_date_ts == pd.Timestamp("2024-02-01")
+
+
+def test_private_context_uses_the_existing_cache_read_only_when_offline(tmp_path, monkeypatch):
+    from alpha.data import fred_loader
+    original_path = tmp_path / "DTB3.csv"
+    original_bytes = b"DATE,DTB3\n2024-02-01,5.20\n"
+    original_path.write_bytes(original_bytes)
+    def offline_fn(*args, **kwargs):
+        raise URLError("offline")
+    monkeypatch.setattr(fred_loader, "urlopen", offline_fn)
+    with isolated_fred_cache_context(tmp_path / "diagnostic"):
+        snapshot_obj = load_daily_fred_series_snapshot("DTB3", str(original_path), datetime(2024, 2, 1, tzinfo=UTC), "backtest")
+    assert snapshot_obj.used_cache_bool
+    assert list(snapshot_obj.value_ser) == [5.2]
+    assert original_path.read_bytes() == original_bytes
+    assert not (tmp_path / "diagnostic").exists()
+
+
+def test_cache_context_restores_normal_live_behavior_after_exception(tmp_path, monkeypatch):
+    from alpha.data import fred_loader
+    download_str = "DATE,DTB3\n2024-02-01,5.00\n"
+    monkeypatch.setattr(fred_loader, "urlopen", lambda *args, **kwargs: _FakeUrlopenResponse(download_str))
+    try:
+        with isolated_fred_cache_context(tmp_path / "diagnostic"):
+            raise RuntimeError("failed reference")
+    except RuntimeError:
+        pass
+    original_path = tmp_path / "live" / "DTB3.csv"
+    load_daily_fred_series_snapshot("DTB3", str(original_path), datetime(2024, 2, 1, tzinfo=UTC), "live")
+    assert original_path.read_text(encoding="utf-8") == download_str
+    assert not (tmp_path / "diagnostic").exists()
+
+
+def test_isolation_does_not_change_another_threads_live_cache(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from alpha.data import fred_loader
+    download_str = "DATE,DTB3\n2024-02-01,5.00\n"
+    monkeypatch.setattr(fred_loader, "urlopen", lambda *args, **kwargs: _FakeUrlopenResponse(download_str))
+    original_path = tmp_path / "live" / "DTB3.csv"
+    with isolated_fred_cache_context(tmp_path / "diagnostic"), ThreadPoolExecutor(max_workers=1) as executor_obj:
+        executor_obj.submit(load_daily_fred_series_snapshot, "DTB3", str(original_path), datetime(2024, 2, 1, tzinfo=UTC), "live").result()
+    assert original_path.read_text(encoding="utf-8") == download_str
+    assert not (tmp_path / "diagnostic").exists()
 
 
 if __name__ == "__main__":

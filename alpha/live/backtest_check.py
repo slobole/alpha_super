@@ -24,9 +24,8 @@ Boundaries (keep them):
   the Flex store through `client_reporting` (mode=ro). No LiveStateStore is built,
   no release is synced, no broker connection is opened, nothing is submitted.
 - It writes only its own report and its own cache folder.
-- Backtests run sequentially, one pod at a time. TAA-family references are skipped
-  in the month-end window, because the TAA data loader may rewrite the shared DTB3
-  cache that the live month-end decision also reads.
+- Backtests run sequentially, one pod at a time, with private FRED cache writes.
+  Existing macro caches may be read as fallbacks; they are never rewritten here.
 - Nothing here blocks orders or sends alerts.
 """
 
@@ -37,6 +36,8 @@ from contextlib import closing
 from datetime import UTC, date, datetime, timedelta
 import gc
 import hashlib
+import importlib
+import inspect
 import json
 import math
 import os
@@ -62,7 +63,8 @@ TAA_IMPORT_PREFIX_STR = "strategies.taa_df."
 
 # The backtest's holdings table carries a cash line; it is not a decision symbol.
 NON_ASSET_KEY_SET = frozenset({"Cash", "cash", "CASH"})
-WEIGHT_MIN_FLOAT = 0.005
+WEIGHT_MIN_FLOAT = 1e-12
+ENTRY_WEIGHT_TOLERANCE_FLOAT = 1e-6
 # Full books compare targets with the backtest's weights at that session's close, which carry the day's move
 # (a -9% day on a 50% sleeve moves it ~3 points). Only a clear difference counts.
 WEIGHT_TOLERANCE_FLOAT = 0.05
@@ -96,19 +98,17 @@ def session_date_str(timestamp_str: str) -> str | None:
 
 
 def _json_dict(text_str) -> dict:
-    try:
-        value_obj = json.loads(text_str or "{}")
-    except (TypeError, ValueError):
-        return {}
-    return value_obj if isinstance(value_obj, dict) else {}
+    value_obj = json.loads(text_str)
+    if not isinstance(value_obj, dict):
+        raise ValueError("Saved decision field must be a JSON object.")
+    return value_obj
 
 
 def _json_list(text_str) -> list:
-    try:
-        value_obj = json.loads(text_str or "[]")
-    except (TypeError, ValueError):
-        return []
-    return value_obj if isinstance(value_obj, list) else []
+    value_obj = json.loads(text_str)
+    if not isinstance(value_obj, list) or any(not isinstance(asset_str, str) or not asset_str for asset_str in value_obj):
+        raise ValueError("Saved exits must be a JSON list of symbols.")
+    return value_obj
 
 
 def _connect_ro(db_path_str: str) -> sqlite3.Connection:
@@ -139,9 +139,15 @@ def read_pod_source_dict(db_path_str: str, pod_id_str: str, as_of_date_str: str)
                 "exit_asset_json_str, snapshot_metadata_json_str FROM decision_plan WHERE decision_plan_id_int = ?",
                 (latest_dict["decision_plan_id_int"],)).fetchone()
             if row is not None:
-                decision_dict = {"decision_book_type_str": row[0], "entry_target_weight_map_dict": _json_dict(row[1]),
-                                 "full_target_weight_map_dict": _json_dict(row[2]), "exit_asset_list": _json_list(row[3]),
-                                 "snapshot_metadata_dict": _json_dict(row[4])}
+                if row[0] not in {"full_target_weight_book", "incremental_entry_exit_book"}:
+                    raise ValueError("Unknown saved decision book type.")
+                decision_dict = {"decision_book_type_str": row[0],
+                                 "entry_target_weight_map_dict": _json_dict(row[1]) if row[0] == "incremental_entry_exit_book" else {},
+                                 "full_target_weight_map_dict": _json_dict(row[2]) if row[0] == "full_target_weight_book" else {},
+                                 "exit_asset_list": _json_list(row[3]) if row[0] == "incremental_entry_exit_book" else [],
+                                 "snapshot_metadata_dict": _json_dict(row[4] or "{}")}
+                _clean_weight_map(decision_dict["entry_target_weight_map_dict"])
+                _clean_weight_map(decision_dict["full_target_weight_map_dict"])
         fill_list = [
             {"vplan_id_int": row[0], "asset_str": row[1], "fill_amount_float": _finite_float(row[2]),
              "fill_price_float": _finite_float(row[3]), "official_open_price_float": _finite_float(row[4]),
@@ -155,7 +161,7 @@ def read_pod_source_dict(db_path_str: str, pod_id_str: str, as_of_date_str: str)
         for fill_dict in fill_list:
             fill_dict["session_date_str"] = session_date_str(fill_dict["session_date_str"])
         connection_obj.rollback()
-    return {"first_vplan_dict": vplan_list[0] if vplan_list else None, "latest_vplan_dict": latest_dict,
+    return {"first_vplan_dict": executed_list[0] if executed_list else None, "latest_vplan_dict": latest_dict,
             "decision_dict": decision_dict, "fill_list": fill_list}
 
 
@@ -172,13 +178,17 @@ def fill_cost_bps(fill_dict) -> float | None:
 
 def cost_gate_dict(fill_list_by_pod_dict: dict[str, list[dict]], *, as_of_date_str: str) -> dict:
     stock_list, parking_int, missing_open_int = [], 0, 0
-    pod_row_list = []
+    pod_row_list, stock_session_list = [], []
     for pod_id_str, fill_list in sorted(fill_list_by_pod_dict.items()):
         pod_cost_list, pod_buy_list, pod_sell_list = [], [], []
         for fill_dict in fill_list:
+            session_str = fill_dict.get("session_date_str")
+            if not session_str or session_str > as_of_date_str:
+                continue
             if fill_dict["asset_str"] in PARKING_ASSET_SET:
                 parking_int += 1
                 continue
+            stock_session_list.append(session_str)
             cost_float = fill_cost_bps(fill_dict)
             if cost_float is None:
                 missing_open_int += 1
@@ -197,13 +207,15 @@ def cost_gate_dict(fill_list_by_pod_dict: dict[str, list[dict]], *, as_of_date_s
     cost_list = [item["cost_bps_float"] for item in stock_list]
     avg_float = statistics.mean(cost_list) if cost_list else None
     half_float = 1.96 * statistics.stdev(cost_list) / math.sqrt(count_int) if count_int >= 2 else None
-    session_list = sorted({item["session_date_str"] for item in stock_list if item["session_date_str"]})
+    session_list = sorted(set(stock_session_list))
     first_str = session_list[0] if session_list else None
     cap_str = (date.fromisoformat(first_str) + timedelta(days=GATE_TIME_CAP_DAYS_INT)).isoformat() if first_str else None
-    if count_int >= GATE_FILL_TARGET_INT:
-        status_str = "passed" if avg_float is not None and avg_float <= GATE_BPS_FLOAT else "failed"
-    elif cap_str is not None and as_of_date_str > cap_str:
+    completed_str = sorted(item["session_date_str"] for item in stock_list)[GATE_FILL_TARGET_INT - 1] if count_int >= GATE_FILL_TARGET_INT else None
+    if cap_str is not None and ((completed_str is not None and completed_str > cap_str)
+                                or (completed_str is None and as_of_date_str > cap_str)):
         status_str = "time_cap"
+    elif count_int >= GATE_FILL_TARGET_INT:
+        status_str = "passed" if avg_float is not None and avg_float <= GATE_BPS_FLOAT else "failed"
     elif count_int < GATE_MIN_FILLS_FOR_AVERAGE_INT:
         status_str = "collecting"
     else:
@@ -217,8 +229,9 @@ def cost_gate_dict(fill_list_by_pod_dict: dict[str, list[dict]], *, as_of_date_s
         "sell_bps_float": statistics.mean([i["cost_bps_float"] for i in stock_list if i["side_str"] == "SELL"]) if any(i["side_str"] == "SELL" for i in stock_list) else None,
         "parking_fill_count_int": parking_int, "missing_open_count_int": missing_open_int,
         "first_fill_session_str": first_str, "time_cap_date_str": cap_str,
+        "completed_session_str": completed_str, "scope_str": "cost_component_only",
         "pod_row_list": pod_row_list, "cost_bps_list": [round(value_float, 4) for value_float in cost_list],
-        "halt_tracking_str": "Unexplained halts are not counted here yet; check Activity.",
+        "halt_tracking_str": "Cost component only. Unexplained halts require a separate review; this is not full gate approval.",
     }
 
 
@@ -226,6 +239,9 @@ def cost_gate_dict(fill_list_by_pod_dict: dict[str, list[dict]], *, as_of_date_s
 def _clean_weight_map(weight_map_dict, *, skip_set=frozenset()) -> dict[str, float]:
     result_dict = {}
     for asset_str, weight_obj in (weight_map_dict or {}).items():
+        if (not isinstance(asset_str, str) or not asset_str or isinstance(weight_obj, bool)
+                or not isinstance(weight_obj, (int, float)) or not math.isfinite(weight_obj)):
+            raise ValueError("Decision weights require symbols and finite numeric values.")
         weight_float = _finite_float(weight_obj)
         if (weight_float is not None and abs(weight_float) >= WEIGHT_MIN_FLOAT and str(asset_str) not in skip_set
                 and str(asset_str) not in NON_ASSET_KEY_SET):
@@ -234,14 +250,17 @@ def _clean_weight_map(weight_map_dict, *, skip_set=frozenset()) -> dict[str, flo
 
 
 def compare_decision_dict(decision_dict: dict, *, reference_weight_map_dict: dict, reference_trade_map_dict: dict,
-                          skip_set=frozenset()) -> dict:
+                          reference_entry_weight_map_dict: dict | None = None, skip_set=frozenset()) -> dict:
     """Compare the live decision with the backtest for one session. Symbols and weights only, never shares.
 
     Full books: live full target weights vs the backtest's holdings weights after the session
-    (tolerance WEIGHT_TOLERANCE_FLOAT: realised weights carry whole-share rounding and the day's move).
+    (per-symbol and total gross-exposure tolerance WEIGHT_TOLERANCE_FLOAT:
+    realised weights carry whole-share rounding and the day's move).
     Entry / exit books: the live entries and exits vs the backtest's buys and sells that session.
     """
     row_list = []
+    if decision_dict.get("decision_book_type_str") not in {"full_target_weight_book", "incremental_entry_exit_book"}:
+        return {"status_str": "not_checked", "reason_str": "Unknown decision book type.", "row_list": []}
     if decision_dict.get("decision_book_type_str") == "full_target_weight_book":
         live_dict = _clean_weight_map(decision_dict.get("full_target_weight_map_dict"), skip_set=skip_set)
         test_dict = _clean_weight_map(reference_weight_map_dict, skip_set=skip_set)
@@ -249,40 +268,91 @@ def compare_decision_dict(decision_dict: dict, *, reference_weight_map_dict: dic
             live_float, test_float = live_dict.get(asset_str, 0.0), test_dict.get(asset_str, 0.0)
             row_list.append({"asset_str": asset_str, "live_str": f"{live_float * 100:.1f}%" if live_float else "—",
                              "backtest_str": f"{test_float * 100:.1f}%" if test_float else "—",
-                             "same_bool": abs(live_float - test_float) <= WEIGHT_TOLERANCE_FLOAT})
-        basis_str = "Target weights vs the backtest's holdings after the session (±5 points)."
+                             "same_bool": (asset_str in live_dict and asset_str in test_dict
+                                           and live_float * test_float > 0
+                                           and abs(live_float - test_float) <= WEIGHT_TOLERANCE_FLOAT)})
+        live_exposure_float = sum(abs(weight_float) for weight_float in live_dict.values())
+        test_exposure_float = sum(abs(weight_float) for weight_float in test_dict.values())
+        if abs(live_exposure_float - test_exposure_float) > WEIGHT_TOLERANCE_FLOAT:
+            row_list.append({"asset_str": "Total exposure", "live_str": f"{live_exposure_float * 100:.1f}%",
+                             "backtest_str": f"{test_exposure_float * 100:.1f}%", "same_bool": False})
+        basis_str = "Target weights vs the backtest's holdings after the session (±5 points per symbol and total exposure)."
     else:
         entry_dict = _clean_weight_map(decision_dict.get("entry_target_weight_map_dict"), skip_set=skip_set)
         exit_set = {str(asset_str) for asset_str in decision_dict.get("exit_asset_list") or [] if str(asset_str) not in skip_set}
         skip_set = frozenset(skip_set) | NON_ASSET_KEY_SET
         buy_set = {asset_str for asset_str, quantity_float in reference_trade_map_dict.items() if quantity_float > 0 and asset_str not in skip_set}
         sell_set = {asset_str for asset_str, quantity_float in reference_trade_map_dict.items() if quantity_float < 0 and asset_str not in skip_set}
+        reference_entry_dict = _clean_weight_map(reference_entry_weight_map_dict, skip_set=skip_set)
         for asset_str in sorted(set(entry_dict) | exit_set | buy_set | sell_set):
             live_str = f"BUY · {entry_dict[asset_str] * 100:.1f}%" if asset_str in entry_dict else "SELL" if asset_str in exit_set else "—"
-            test_str = "BUY" if asset_str in buy_set else "SELL" if asset_str in sell_set else "—"
+            test_str = (f"BUY · {reference_entry_dict[asset_str] * 100:.1f}%" if asset_str in buy_set and asset_str in reference_entry_dict
+                        else "BUY · weight unavailable" if asset_str in buy_set else "SELL" if asset_str in sell_set else "—")
+            same_bool = live_str.split(" ")[0] == test_str.split(" ")[0]
+            if same_bool and asset_str in buy_set:
+                same_bool = (abs(entry_dict[asset_str] - reference_entry_dict[asset_str]) <= ENTRY_WEIGHT_TOLERANCE_FLOAT
+                             if asset_str in reference_entry_dict else None)
             row_list.append({"asset_str": asset_str, "live_str": live_str, "backtest_str": test_str,
-                             "same_bool": live_str.split(" ")[0] == test_str})
-        basis_str = "Entries and exits vs the backtest's buys and sells that session."
-    differ_int = sum(1 for row_dict in row_list if not row_dict["same_bool"])
-    row_list.sort(key=lambda row_dict: (row_dict["same_bool"], row_dict["asset_str"]))
-    return {"status_str": "differs" if differ_int else "same", "differ_count_int": differ_int,
+                             "same_bool": same_bool})
+        basis_str = "Entries, exits and equal-slot entry weights (tolerance 0.0001 percentage points)."
+    differ_int = sum(1 for row_dict in row_list if row_dict["same_bool"] is False)
+    unknown_bool = any(row_dict["same_bool"] is None for row_dict in row_list)
+    row_list.sort(key=lambda row_dict: (row_dict["same_bool"] is True, row_dict["asset_str"]))
+    return {"status_str": "differs" if differ_int else "not_checked" if unknown_bool else "same", "differ_count_int": differ_int,
+            "reason_str": "Reference entry weights are unavailable." if unknown_bool else "",
             "row_count_int": len(row_list), "row_list": row_list, "basis_str": basis_str}
 
 
 # ---------------------------------------------------------------------------------------------- returns, gap, rare loss
-def daily_returns_from_equity(equity_by_date_dict: dict[str, float]) -> dict[str, float]:
+def session_date_list(start_str: str, end_str: str) -> list[str]:
+    import exchange_calendars as xcals
+
+    calendar_obj = xcals.get_calendar("XNYS", start=(date.fromisoformat(start_str) - timedelta(days=7)).isoformat(),
+                                      end=(date.fromisoformat(end_str) + timedelta(days=7)).isoformat())
+    return [session_ts.date().isoformat() for session_ts in calendar_obj.sessions_in_range(start_str, end_str)]
+
+
+def daily_returns_from_equity(equity_by_date_dict: dict[str, float], *, initial_capital_float: float | None = None,
+                              initial_session_str: str | None = None) -> dict[str, float]:
     date_list = sorted(equity_by_date_dict)
     result_dict = {}
+    expected_date_list = session_date_list(date_list[0], date_list[-1]) if date_list else []
+    previous_session_dict = dict(zip(expected_date_list[1:], expected_date_list[:-1]))
+    if date_list and initial_capital_float is not None and (initial_session_str is None or date_list[0] == initial_session_str):
+        first_float = _finite_float(equity_by_date_dict[date_list[0]])
+        initial_cash_float = _finite_float(initial_capital_float)
+        if first_float is None or first_float <= 0 or initial_cash_float is None or initial_cash_float <= 0:
+            raise ValueError("Reference NAV and initial capital must be positive and finite.")
+        # *** CRITICAL*** first-session Open->Close P&L and costs are measured from the
+        # actual initial cash, not from the already marked first Close. r_1 = E_1 / C_0 - 1.
+        result_dict[date_list[0]] = first_float / initial_cash_float - 1.0
     for previous_str, date_str in zip(date_list, date_list[1:]):
+        # *** CRITICAL*** E_(t-1) must be the exact previous exchange-session NAV.
+        # Compressing missing rows would label multi-session P&L as one day's loss
+        # and could falsely attribute a live rare loss to the strategy.
+        if previous_session_dict.get(date_str) != previous_str:
+            continue
         previous_float, value_float = _finite_float(equity_by_date_dict[previous_str]), _finite_float(equity_by_date_dict[date_str])
-        if previous_float and value_float is not None and previous_float > 0:
+        if previous_float and value_float is not None and previous_float > 0 and value_float > 0:
             result_dict[date_str] = value_float / previous_float - 1.0
     return result_dict
 
 
-def curve_dict(live_return_dict: dict[str, float], reference_return_dict: dict[str, float]) -> dict:
-    """Cumulative live and backtest returns on the dates both have, and the gap (live relative to backtest)."""
-    date_list = sorted(set(live_return_dict) & set(reference_return_dict))[-CURVE_LIMIT_INT:]
+def curve_dict(live_return_dict: dict[str, float], reference_return_dict: dict[str, float], *, expected_date_list: list[str] | None = None) -> dict:
+    """Complete matching dates only: I_t=I_(t-1)*(1+r_t); gap=I_live/I_reference-1."""
+    date_set = set(live_return_dict) | set(reference_return_dict) | set(expected_date_list or [])
+    if date_set:
+        date_set.update(session_date_list(min(date_set), max(date_set)))
+    missing_live_list = sorted(date_set - set(live_return_dict))
+    missing_reference_list = sorted(date_set - set(reference_return_dict))
+    invalid_bool = any(_finite_float(value_float) is None or value_float <= -1
+                       for value_float in list(live_return_dict.values()) + list(reference_return_dict.values()))
+    if missing_live_list or missing_reference_list or invalid_bool:
+        return {"point_list": [], "gap_float": None, "gap_month_float": None, "start_str": None,
+                "coverage_status_str": "incomplete", "coverage_reason_str":
+                f"Incomplete same-days coverage: {len(missing_live_list)} live / {len(missing_reference_list)} reference dates missing."
+                + (" Invalid returns." if invalid_bool else "")}
+    date_list = sorted(date_set)[-CURVE_LIMIT_INT:]
     live_float = test_float = 1.0
     point_list = []
     for date_str in date_list:
@@ -290,12 +360,13 @@ def curve_dict(live_return_dict: dict[str, float], reference_return_dict: dict[s
         test_float *= 1.0 + reference_return_dict[date_str]
         point_list.append({"date_str": date_str, "live_float": live_float - 1.0, "backtest_float": test_float - 1.0})
     if not point_list:
-        return {"point_list": [], "gap_float": None, "gap_month_float": None, "start_str": None}
+        return {"point_list": [], "gap_float": None, "gap_month_float": None, "start_str": None,
+                "coverage_status_str": "incomplete", "coverage_reason_str": "No matching return history."}
     month_str = date_list[-1][:7]
     before_list = [point for point in point_list if point["date_str"][:7] < month_str]
     base_live, base_test = (before_list[-1]["live_float"], before_list[-1]["backtest_float"]) if before_list else (0.0, 0.0)
     last_dict = point_list[-1]
-    return {"point_list": point_list, "start_str": date_list[0],
+    return {"point_list": point_list, "start_str": date_list[0], "coverage_status_str": "complete", "coverage_reason_str": "",
             "gap_float": (1 + last_dict["live_float"]) / (1 + last_dict["backtest_float"]) - 1.0,
             "gap_month_float": ((1 + last_dict["live_float"]) / (1 + base_live)) / ((1 + last_dict["backtest_float"]) / (1 + base_test)) - 1.0}
 
@@ -327,9 +398,15 @@ def build_ruler_dict(return_list: list[float]) -> dict:
     return result_dict
 
 
-def rare_loss_dict(live_return_dict: dict[str, float], reference_return_dict: dict[str, float], ruler_dict: dict) -> dict | None:
+def rare_loss_dict(live_return_dict: dict[str, float], reference_return_dict: dict[str, float], ruler_dict: dict,
+                   *, expected_end_str: str | None = None) -> dict | None:
     """The most severe current window below the ruler's 1-in-100 line, or None on a normal day."""
-    date_list = sorted(live_return_dict)
+    if not live_return_dict:
+        return None
+    end_str = expected_end_str or max(live_return_dict)
+    # *** CRITICAL*** windows mean consecutive exchange sessions through the required
+    # finished session, never the last N available rows across missing days.
+    date_list = session_date_list(min(live_return_dict), end_str)
     found_dict = None
     for window_int in RARE_WINDOW_TUPLE:
         line_dict = ruler_dict.get(str(window_int))
@@ -409,14 +486,39 @@ def month_end_window_bool(as_of_date_obj: date) -> bool:
     return as_of_date_obj in set(month_list[-2:]) | set(month_list[:1])
 
 
-def run_reference_maps_dict(release_obj, *, start_str: str, end_str: str, capital_float: float, output_dir_path: Path) -> dict:
+def run_reference_maps_dict(release_obj, *, start_str: str | None, end_str: str, capital_float: float, output_dir_path: Path) -> dict:
     from alpha.live.reference_compare import build_reference_maps_dict, run_auto_reference_strategy
+    from alpha.data.fred_loader import isolated_fred_cache_context
 
     output_dir_path.mkdir(parents=True, exist_ok=True)
-    strategy_obj = run_auto_reference_strategy(release_obj=release_obj, deployment_start_date_str=start_str,
-                                               reference_end_date_str=end_str, deployment_initial_cash_float=capital_float,
-                                               output_dir_path_obj=output_dir_path)
+    if start_str is None:
+        strategy_module_obj = importlib.import_module(str(release_obj.strategy_import_str).split(":")[0])
+        start_parameter_obj = inspect.signature(strategy_module_obj.run_variant).parameters["backtest_start_date_str"]
+        if start_parameter_obj.default is inspect.Parameter.empty:
+            raise ValueError("Historical reference runner has no declared start date.")
+        start_str = start_parameter_obj.default
+    with isolated_fred_cache_context(output_dir_path / "macro_cache"):
+        strategy_obj = run_auto_reference_strategy(release_obj=release_obj, deployment_start_date_str=start_str,
+                                                   reference_end_date_str=end_str, deployment_initial_cash_float=capital_float,
+                                                   output_dir_path_obj=output_dir_path)
     maps_dict = build_reference_maps_dict(strategy_obj)
+    # These exact classes use entry_value = prior_close_NAV / configured_slots.
+    # *** CRITICAL*** this is the frozen entry-intent weight, not a weight marked
+    # at today's Close or a quantity reconstructed from adjusted fill prices.
+    slot_attribute_dict = {
+        "strategies.dv2.strategy_mr_dv2:DVO2Strategy": "max_positions",
+        "strategies.dv2.strategy_mr_dv2_industry_etf:DVO2IndustryEtfStrategy": "max_positions",
+        "strategies.hpi.stateful_long:HPIStatefulLongStrategy": "max_positions_int",
+        "strategies.mr_capsule.dv2_vix_gated:DV2VixGatedStrategy": "max_positions",
+        "strategies.mr_capsule.hpi_vote_vix_gated:HPIVoteVixGatedStrategy": "max_positions_int",
+    }
+    strategy_type_str = f"{type(strategy_obj).__module__}:{type(strategy_obj).__name__}"
+    slot_attribute_str = slot_attribute_dict.get(strategy_type_str)
+    slot_count_int = getattr(strategy_obj, slot_attribute_str, None) if slot_attribute_str else None
+    maps_dict["entry_weight_by_date_dict"] = {
+        key_tuple: 1.0 / slot_count_int for key_tuple, trade_dict in maps_dict["transaction_map_dict"].items()
+        if trade_dict["quantity_float"] > 0
+    } if isinstance(slot_count_int, int) and slot_count_int > 0 else {}
     maps_dict.pop("reference_strategy_obj", None)
     del strategy_obj
     return maps_dict
@@ -435,7 +537,10 @@ def load_or_build_ruler_dict(release_obj, *, cache_dir_path: Path, deployment_st
         try:
             cached_dict = json.loads(cache_path.read_text(encoding="utf-8"))
             built_obj = date.fromisoformat(cached_dict["built_date_str"])
-            if not refresh_bool or (today_obj - built_obj).days < RULER_MAX_AGE_DAYS_INT:
+            history_end_obj = date.fromisoformat(cached_dict["history_end_str"])
+            if (0 <= (today_obj - built_obj).days < RULER_MAX_AGE_DAYS_INT
+                    and valid_ruler_bool(cached_dict.get("window_dict"))
+                    and deployment_start_str is not None and history_end_obj < date.fromisoformat(deployment_start_str)):
                 return cached_dict
         except (OSError, ValueError, KeyError, TypeError):
             pass
@@ -444,11 +549,30 @@ def load_or_build_ruler_dict(release_obj, *, cache_dir_path: Path, deployment_st
     end_str = (date.fromisoformat(deployment_start_str) - timedelta(days=1)).isoformat() if deployment_start_str else today_obj.isoformat()
     maps_dict = run_reference_maps_dict(release_obj, start_str=None, end_str=end_str, capital_float=1_000_000.0,
                                         output_dir_path=cache_dir_path / "ruler_runs" / release_obj.pod_id_str)
-    return_list = [value_float for _, value_float in sorted(daily_returns_from_equity(maps_dict["equity_by_date_dict"]).items())]
+    return_dict = daily_returns_from_equity(maps_dict["equity_by_date_dict"], initial_capital_float=1_000_000.0)
+    if set(return_dict) != set(session_date_list(min(return_dict), max(return_dict))):
+        raise ValueError("Historical ruler has missing exchange sessions.")
+    return_list = [value_float for _, value_float in sorted(return_dict.items())]
     ruler_dict = {"built_date_str": today_obj.isoformat(), "history_end_str": end_str, "session_count_int": len(return_list),
                   "window_dict": build_ruler_dict(return_list)}
     _atomic_write_json(cache_path, ruler_dict)
     return ruler_dict
+
+
+def valid_ruler_bool(window_dict) -> bool:
+    if not isinstance(window_dict, dict):
+        return False
+    for window_str, line_dict in window_dict.items():
+        if window_str not in {"1", "3", "5"} or not isinstance(line_dict, dict):
+            return False
+        line_float = _finite_float(line_dict.get("one_in_100_float"))
+        worst_float = _finite_float(line_dict.get("worst_float"))
+        if (line_float is None or worst_float is None or not isinstance(line_dict.get("one_in_100_float"), (int, float))
+                or not isinstance(line_dict.get("worst_float"), (int, float))
+                or isinstance(line_dict.get("one_in_100_float"), bool) or isinstance(line_dict.get("worst_float"), bool)
+                or not -1 < worst_float <= line_float):
+            return False
+    return True
 
 
 # ---------------------------------------------------------------------------------------------- one pod
@@ -460,7 +584,8 @@ def check_pod_dict(target_obj, *, as_of_date_str: str, live_return_dict: dict, p
                 "release_id_str": release_obj.release_id_str, "strategy_import_str": release_obj.strategy_import_str,
                 "decision_dict": {"status_str": "not_checked", "reason_str": ""}, "curve_dict": {"point_list": []},
                 "rare_loss_dict": None, "reference_status_str": "not_run", "reference_reason_str": ""}
-    source_dict = read_pod_source_dict(target_obj.db_path_str, release_obj.pod_id_str, as_of_date_str)
+    end_str = last_finished_session_str(as_of_date_str)
+    source_dict = read_pod_source_dict(target_obj.db_path_str, release_obj.pod_id_str, end_str)
     pod_dict["fill_list"] = source_dict["fill_list"]
     first_dict, latest_dict = source_dict["first_vplan_dict"], source_dict["latest_vplan_dict"]
     session_str = latest_dict["session_date_str"] if latest_dict else None
@@ -473,7 +598,7 @@ def check_pod_dict(target_obj, *, as_of_date_str: str, live_return_dict: dict, p
     elif not reference_bool:
         reason_str = "Backtest not run (--no-reference)."
     elif module_str.startswith(TAA_IMPORT_PREFIX_STR) and month_end_bool:
-        reason_str = "Skipped in the month-end window (shared DTB3 cache)."
+        reason_str = "Skipped in the month-end window (conservative scheduling guard)."
     else:
         from alpha.live.reference_compare import inspect_auto_reference_support_dict
 
@@ -490,10 +615,13 @@ def check_pod_dict(target_obj, *, as_of_date_str: str, live_return_dict: dict, p
         return pod_dict
     # *** CRITICAL*** the curve and the rare-loss check need the backtest up to the last finished session,
     # not only to the latest plan (a monthly pod plans once a month).
-    end_str = max(session_str, last_finished_session_str(as_of_date_str))
+    start_str = first_dict["session_date_str"]
+    initial_capital_float = first_dict["pod_budget_float"]
+    if initial_capital_float is None or initial_capital_float <= 0:
+        raise ValueError("First executed plan has no valid initial budget.")
     try:
         maps_dict = run_reference_maps_dict(release_obj, start_str=first_dict["session_date_str"], end_str=end_str,
-                                            capital_float=first_dict["pod_budget_float"] or 100_000.0,
+                                            capital_float=initial_capital_float,
                                             output_dir_path=cache_dir_path / "reference_runs" / release_obj.pod_id_str)
     except Exception as error_obj:  # one pod's failure is reported and never hides the others
         pod_dict.update(reference_status_str="failed", reference_reason_str=f"{type(error_obj).__name__}: {error_obj}"[:400])
@@ -505,27 +633,47 @@ def check_pod_dict(target_obj, *, as_of_date_str: str, live_return_dict: dict, p
     skip_set = PARKING_ASSET_SET if module_str.startswith(MR_CAPSULE_IMPORT_PREFIX_STR) else frozenset()
     trade_map_dict = {asset_str: float(value_dict["quantity_float"]) for (date_str, asset_str), value_dict
                       in maps_dict["transaction_map_dict"].items() if date_str == session_str}
-    decision_dict = compare_decision_dict(source_dict["decision_dict"],
-                                          reference_weight_map_dict=get_reference_realized_weight_map_dict(maps_dict, session_str),
-                                          reference_trade_map_dict=trade_map_dict, skip_set=skip_set)
+    weight_history_df = maps_dict["realized_weight_history_df"]
+    if (session_str not in maps_dict["equity_by_date_dict"]
+            or (source_dict["decision_dict"]["decision_book_type_str"] == "full_target_weight_book"
+                and session_str not in weight_history_df.index)):
+        decision_dict = {"status_str": "not_checked", "reason_str": "Reference has no exact decision-session coverage."}
+    else:
+        entry_weight_map_dict = {asset_str: value_float for (date_str, asset_str), value_float
+                                 in maps_dict.get("entry_weight_by_date_dict", {}).items() if date_str == session_str}
+        decision_dict = compare_decision_dict(source_dict["decision_dict"],
+                                              reference_weight_map_dict=get_reference_realized_weight_map_dict(maps_dict, session_str),
+                                              reference_trade_map_dict=trade_map_dict,
+                                              reference_entry_weight_map_dict=entry_weight_map_dict, skip_set=skip_set)
     metadata_dict = source_dict["decision_dict"]["snapshot_metadata_dict"]
     decision_dict.update(session_str=session_str, data_snapshot_str=str(metadata_dict.get("norgate_snapshot_date_str") or ""),
                          data_hash_str=str(metadata_dict.get("norgate_manifest_hash_str") or "")[:12])
     pod_dict["decision_dict"] = decision_dict
     pod_dict["record_list"] = merge_record_list(previous_record_list, session_str, decision_dict["status_str"])
-    reference_return_dict = daily_returns_from_equity(maps_dict["equity_by_date_dict"])
-    start_str = first_dict["session_date_str"]
-    live_window_dict = {date_str: value_float for date_str, value_float in live_return_dict.items() if date_str >= start_str}
-    pod_dict["curve_dict"] = curve_dict(live_window_dict, reference_return_dict)
+    reference_return_dict = daily_returns_from_equity(maps_dict["equity_by_date_dict"], initial_capital_float=initial_capital_float,
+                                                      initial_session_str=start_str)
+    expected_date_list = session_date_list(start_str, end_str)
+    live_window_dict = {date_str: value_float for date_str, value_float in live_return_dict.items() if start_str <= date_str <= end_str}
+    pod_dict["curve_dict"] = curve_dict(live_window_dict, reference_return_dict, expected_date_list=expected_date_list)
+    pod_dict["coverage_reason_str"] = pod_dict["curve_dict"].get("coverage_reason_str", "")
     try:
         ruler_dict = load_or_build_ruler_dict(release_obj, cache_dir_path=cache_dir_path, deployment_start_str=start_str,
                                               refresh_bool=refresh_ruler_bool, today_obj=date.fromisoformat(as_of_date_str))
+        window_dict = ruler_dict.get("window_dict") or {}
+        if not valid_ruler_bool(window_dict):
+            raise ValueError("Malformed historical ruler.")
+        pod_dict["ruler_dict"] = window_dict
+        if not window_dict:
+            pod_dict["ruler_reason_str"] = "No usable historical ruler; build or refresh it with --refresh-ruler."
+        pod_dict["rare_loss_dict"] = rare_loss_dict(live_window_dict, reference_return_dict, window_dict, expected_end_str=end_str)
     except Exception as error_obj:
-        ruler_dict = {}
+        pod_dict["ruler_dict"] = {}
+        pod_dict["rare_loss_dict"] = None
         pod_dict["ruler_reason_str"] = f"Ruler unavailable: {type(error_obj).__name__}"[:200]
-    pod_dict["ruler_dict"] = ruler_dict.get("window_dict") or {}
-    pod_dict["rare_loss_dict"] = rare_loss_dict(live_window_dict, reference_return_dict, pod_dict["ruler_dict"])
-    pod_dict.update(reference_status_str="ok", reference_seconds_float=round(time.monotonic() - started_float, 1))
+    reference_complete_bool = set(expected_date_list).issubset(reference_return_dict)
+    pod_dict.update(reference_status_str="ok" if reference_complete_bool else "incomplete",
+                    reference_reason_str="" if reference_complete_bool else "Reference is missing finished sessions.",
+                    reference_seconds_float=round(time.monotonic() - started_float, 1))
     del maps_dict
     gc.collect()
     return pod_dict
@@ -541,9 +689,11 @@ def _atomic_write_json(path_obj: Path, payload_dict: dict) -> None:
 
 def _read_previous_dict(report_path: Path) -> dict:
     try:
+        from alpha.live.dashboard_v4.backtest_check_data import _valid_report_bool
+
         payload_dict = json.loads(report_path.read_text(encoding="utf-8"))
-        return payload_dict if payload_dict.get("schema_version_str") == SCHEMA_VERSION_STR else {}
-    except (OSError, ValueError, AttributeError):
+        return payload_dict if _valid_report_bool(payload_dict) else {}
+    except Exception:  # optional cache: no malformed prior value may prevent a fresh check
         return {}
 
 
@@ -582,12 +732,20 @@ def build_report_dict(target_list, *, as_of_ts: datetime, performance_db_path_st
                         "traceback_str": traceback.format_exc(limit=3)}
         if str(release_obj.strategy_import_str).startswith(MR_CAPSULE_IMPORT_PREFIX_STR):
             gate_fill_dict[release_obj.pod_id_str] = pod_dict.get("fill_list") or []
+        pod_dict.update(checked_at_utc_str=as_of_ts.astimezone(UTC).isoformat(), checked_as_of_date_str=as_of_date_obj.isoformat())
         pod_dict.pop("fill_list", None)
         pod_list.append(pod_dict)
-    return {"schema_version_str": SCHEMA_VERSION_STR, "generated_at_utc_str": datetime.now(UTC).isoformat(),
+    gate_dict = cost_gate_dict(gate_fill_dict, as_of_date_str=as_of_date_obj.isoformat()) if gate_fill_dict else None
+    if gate_dict is not None:
+        gate_dict.update(checked_at_utc_str=as_of_ts.astimezone(UTC).isoformat(), checked_as_of_date_str=as_of_date_obj.isoformat())
+        gate_dict["pod_identity_list"] = [{"pod_id_str": target_obj.release_obj.pod_id_str,
+                                          "account_route_str": target_obj.release_obj.account_route_str,
+                                          "release_id_str": target_obj.release_obj.release_id_str}
+                                         for target_obj in live_target_list if target_obj.release_obj.pod_id_str in gate_fill_dict]
+    return {"schema_version_str": SCHEMA_VERSION_STR, "generated_at_utc_str": as_of_ts.astimezone(UTC).isoformat(),
             "as_of_date_str": as_of_date_obj.isoformat(), "flex_reason_str": flex_reason_str,
             "month_end_window_bool": month_end_bool, "pod_list": pod_list,
-            "cost_gate_dict": cost_gate_dict(gate_fill_dict, as_of_date_str=as_of_date_obj.isoformat()) if gate_fill_dict else None}
+            "cost_gate_dict": gate_dict}
 
 
 def main(argv=None) -> int:
@@ -626,10 +784,23 @@ def main(argv=None) -> int:
                                     previous_dict=previous_dict, cache_dir_path=report_path.parent / CACHE_DIR_NAME_STR,
                                     reference_bool=not args.no_reference, refresh_ruler_bool=args.refresh_ruler)
     if args.pod_id and previous_dict.get("pod_list"):
-        kept_list = [pod_dict for pod_dict in previous_dict["pod_list"] if pod_dict.get("pod_id_str") != args.pod_id]
+        # Add provenance to legacy reports before merging; never stamp retained evidence
+        # with the single pod's new check time.
+        kept_list = [{"checked_at_utc_str": previous_dict.get("generated_at_utc_str"),
+                      "checked_as_of_date_str": previous_dict.get("as_of_date_str"), **pod_dict}
+                     for pod_dict in previous_dict["pod_list"] if pod_dict.get("pod_id_str") != args.pod_id]
         report_dict["pod_list"] = sorted(kept_list + report_dict["pod_list"], key=lambda pod_dict: str(pod_dict.get("pod_id_str")))
         # The MR gate pools both capsule pods: a one-pod run keeps the last full-run gate.
-        report_dict["cost_gate_dict"] = previous_dict.get("cost_gate_dict")
+        previous_gate_dict = previous_dict.get("cost_gate_dict")
+        report_dict["cost_gate_dict"] = ({"checked_at_utc_str": previous_dict.get("generated_at_utc_str"),
+                                          "checked_as_of_date_str": previous_dict.get("as_of_date_str"),
+                                          "pod_identity_list": [{field_str: pod_dict.get(field_str) for field_str in
+                                                                 ("pod_id_str", "account_route_str", "release_id_str")}
+                                                                for pod_dict in previous_dict["pod_list"]
+                                                                if pod_dict["pod_id_str"] in {row_dict["pod_id_str"]
+                                                                    for row_dict in previous_gate_dict.get("pod_row_list", [])}],
+                                          **previous_gate_dict}
+                                         if isinstance(previous_gate_dict, dict) else None)
     _atomic_write_json(report_path, report_dict)
     for pod_dict in report_dict["pod_list"]:
         print(f"{pod_dict['pod_id_str']}: {pod_dict['decision_dict']['status_str']} · reference {pod_dict['reference_status_str']}"

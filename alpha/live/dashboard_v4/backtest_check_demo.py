@@ -23,7 +23,7 @@ def build_demo_report_dict(workspace_dict, snapshot_obj, *, as_of_ts):
     for row_obj in sorted(snapshot_obj.row_tuple, key=lambda item_obj: item_obj.market_date_str):
         row_list_by_account.setdefault(row_obj.account_route_str, []).append(row_obj)
     for index_int, row_dict in enumerate(workspace_dict["summary_dict"]["pod_row_dict_list"]):
-        account_str = row_dict.get("account_route_str")
+        account_str = row_dict.get("account_route_str") or "DEMO_" + row_dict["pod_id_str"]
         point_list = _curve_point_list(row_list_by_account.get(account_str, [])[-120:], 0.00008 + 0.00004 * index_int, 11 + index_int)
         session_str = point_list[-1]["date_str"] if point_list else as_of_ts.date().isoformat()
         record_list = [{"session_str": point_dict["date_str"], "status_str": "same"} for point_dict in point_list[-29:]]
@@ -45,7 +45,7 @@ def build_demo_report_dict(workspace_dict, snapshot_obj, *, as_of_ts):
                                           for asset_str, weight_str in (("QQQ", "40.0%"), ("TLT", "35.0%"), ("GLD", "25.0%"))]}
         gap_float = ((1 + point_list[-1]["live_float"]) / (1 + point_list[-1]["backtest_float"]) - 1) if point_list else None
         pod_list.append({
-            "pod_id_str": row_dict["pod_id_str"], "account_route_str": account_str, "release_id_str": row_dict.get("release_id_str"),
+            "pod_id_str": row_dict["pod_id_str"], "account_route_str": account_str, "release_id_str": row_dict.get("release_id_str") or "demo",
             "session_str": session_str, "decision_dict": decision_dict, "record_list": record_list,
             "reference_status_str": "ok", "reference_reason_str": "",
             "curve_dict": {"point_list": point_list, "start_str": point_list[0]["date_str"] if point_list else None,
