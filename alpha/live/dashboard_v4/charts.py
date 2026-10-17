@@ -158,7 +158,8 @@ def _drawing_dict(series_list, date_list, *, unit_str, bars_bool=False, pods_boo
     result_dict["gutter_int"] = max(40, 7 * max(len(tick_dict["label_str"]) for tick_dict in result_dict["tick_list"]) + 5)
     for source_dict in series_list:
         series_dict = {"name_str": source_dict.get("name_str", ""), "color_str": source_dict.get("color_str", ""),
-            "segment_list": [], "point_list": []}
+            "segment_list": [], "point_list": [], "area_bool": source_dict.get("area_bool", True),
+            "dash_bool": source_dict.get("dash_bool", False)}
         for segment_list in source_dict["segment_list"]:
             point_list = []
             for point_dict in segment_list:

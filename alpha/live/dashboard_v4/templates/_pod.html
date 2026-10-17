@@ -43,7 +43,7 @@
 </section>{% elif orders_dict and orders_dict.status_str == 'unknown' %}<p class="muted" data-missing-unknown>Missing trades could not be checked.</p>{% endif %}
 {% if orders_dict %}{{ order_slot('complete') }}{% endif %}
 
-<section class="panel" aria-label="Selected cycle">
+{% if pod_page_dict.backtest_dict %}{% include '_backtest_alerts.html' %}{% endif %}<section class="panel" aria-label="Selected cycle">
   <div class="cyc-head"><span class="panel-t">{{ 'Saved cycle' if pod_page_dict.historical_bool else 'Cycle' }}</span><nav class="picker" aria-label="Cycle history">
     {% if pod_page_dict.previous_cycle_dict %}<a href="{{ pod_page_dict.previous_cycle_dict.url_str }}" aria-label="Previous cycle">‹ {{ pod_page_dict.previous_cycle_dict.session_date_str }}</a>{% else %}<span aria-disabled="true">‹ Previous</span>{% endif %}
     <span class="on">{{ pod_page_dict.cycle_label_str }}</span>
@@ -57,8 +57,8 @@
       {% if step_dict.actual_time_str %}<span class="act">{% if step_dict.time_kind_str %}{{ step_dict.time_kind_str }} {% endif %}{{ step_dict.actual_time_str }}{% if step_dict.delta_str %}<span class="dl">{{ step_dict.delta_str }}</span>{% endif %}</span>
       {% elif step_dict.planned_time_str %}<span class="pln">{{ 'planned' if step_dict.state_str == 'Done' else 'due' }} {{ step_dict.planned_time_str }}</span>{% else %}<span class="pln">—</span>{% endif %}
     </a>{% endfor %}</div>
-  <nav id="evidence" class="tabs" aria-label="Cycle evidence">{% for tab_dict in pod_page_dict.tab_list %}<a class="{{ 'on' if tab_dict.key_str == pod_page_dict.tab_str else '' }}" href="{{ tab_dict.url_str }}#evidence"{% if tab_dict.key_str == pod_page_dict.tab_str %} aria-current="page"{% endif %}>{{ tab_dict.label_str }}{% if tab_dict.count_int is not none %}<span class="cnt">{{ tab_dict.count_int }}</span>{% endif %}</a>{% endfor %}</nav>
-  {% if pod_page_dict.tab_str == 'plan' %}{% include '_position_changes.html' %}{% else %}{{ evidence_table(pod_page_dict.table_dict, 'evidence:' + pod_page_dict.tab_str) }}{% endif %}
+  <nav id="evidence" class="tabs" aria-label="Cycle evidence">{% for tab_dict in pod_page_dict.tab_list %}<a class="{{ 'on' if tab_dict.key_str == pod_page_dict.tab_str else '' }}" href="{{ tab_dict.url_str }}#evidence"{% if tab_dict.key_str == pod_page_dict.tab_str %} aria-current="page"{% endif %}>{{ tab_dict.label_str }}{% if tab_dict.count_int is not none %}<span class="cnt{{ ' bad' if tab_dict.bad_bool else '' }}">{{ tab_dict.count_int }}</span>{% endif %}</a>{% endfor %}</nav>
+  {% if pod_page_dict.tab_str == 'plan' %}{% include '_position_changes.html' %}{% elif pod_page_dict.tab_str == 'backtest' and pod_page_dict.backtest_dict %}{% include '_backtest_tab.html' %}{% else %}{{ evidence_table(pod_page_dict.table_dict, 'evidence:' + pod_page_dict.tab_str) }}{% endif %}
   {% if pod_page_dict.history_truncated_bool %}<p class="evidence-note">Showing the latest 60 saved cycles.</p>{% endif %}
 </section>
 

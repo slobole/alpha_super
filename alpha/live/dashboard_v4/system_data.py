@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 import yaml
 
 from alpha.live.dashboard_v3.operator_tools import strategy_display_name_str
+from alpha.live.dashboard_v4.backtest_check_data import load_report_dict, report_file_exists_bool, system_row_dict
 from alpha.live.dashboard_v4.console_data import open_shared_read_obj
 from alpha.live.dashboard_v4.scheduler_status import LATE_AFTER_SECONDS_INT
 from alpha.live.ibkr_performance import _shadow_freshness_tuple
@@ -534,4 +535,7 @@ def load_system_source_dict(provider_obj, workspace_dict, *, as_of_ts, performan
     daily_alerts_dict = build_daily_alerts_dict(path_obj, target_list, receipt_dict, as_of_ts)
     if daily_alerts_dict is not None:
         result_dict["daily_alerts_dict"] = daily_alerts_dict
+    # The row exists only once the nightly backtest check has written its report.
+    if report_file_exists_bool(provider_obj):
+        result_dict["backtest_check_dict"] = system_row_dict(load_report_dict(provider_obj, as_of_ts=as_of_ts), as_of_ts=as_of_ts)
     return result_dict

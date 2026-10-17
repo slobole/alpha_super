@@ -16,7 +16,7 @@ data-date-label="{{ day_dict.date_label_str }}" data-pnl="{{ day_dict.pnl_str }}
           {% for bar_dict in drawing_dict.bar_list %}<path class="pnl-bar {{ 'gain' if bar_dict.positive_bool else 'loss' }}" data-daily-paint="{{ bar_dict.market_date_str }}" d="{{ bar_dict.path_str }}"><title>{{ bar_dict.market_date_str }} · {{ bar_dict.label_str }}</title></path>{% endfor %}
         {% else %}
           {% for series_dict in drawing_dict.series_list %}
-            {% for segment_dict in series_dict.segment_list %}{% if not drawing_dict.pods_bool %}<polygon class="area" points="{{ segment_dict.area_str }}"></polygon>{% endif %}<polyline class="line"{% if series_dict.color_str %} style="stroke: {{ series_dict.color_str }}"{% endif %} points="{{ segment_dict.point_str }}"></polyline>{% endfor %}
+            {% for segment_dict in series_dict.segment_list %}{% if not drawing_dict.pods_bool and series_dict.get('area_bool', true) %}<polygon class="area" points="{{ segment_dict.area_str }}"></polygon>{% endif %}<polyline class="line{{ ' dash' if series_dict.get('dash_bool') else '' }}"{% if series_dict.color_str %} style="stroke: {{ series_dict.color_str }}"{% endif %} points="{{ segment_dict.point_str }}"></polyline>{% endfor %}
             {% if not history_bool %}{% for point_dict in series_dict.point_list %}<circle class="chart-hit" cx="{{ point_dict.x_float }}" cy="{{ point_dict.y_float }}" r="7"><title>{{ series_dict.name_str }} {{ point_dict.market_date_str }} · {{ point_dict.label_str }}</title></circle>{% endfor %}{% endif %}
           {% endfor %}
         {% endif %}
