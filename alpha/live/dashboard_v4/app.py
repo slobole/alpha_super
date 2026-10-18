@@ -149,8 +149,7 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
 
     def current_review_key_set(pod_id_str):
         report_dict = backtest_check_data.load_report_dict(provider_obj, as_of_ts=clock_fn())
-        return {item_dict["review_key_str"] for item_dict in backtest_check_data.attention_list(report_dict, {pod_id_str: pod_id_str})
-            if item_dict.get("review_key_str")}
+        return backtest_check_data.review_key_set(report_dict, pod_id_str)
 
     register_review_route(flask_app_obj, review_store_obj, current_review_key_set, now_fn=clock_fn)
     # Console reads are bounded per request; these caps bound concurrency too.
@@ -380,6 +379,14 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             pod_id_str=pod_id_str, as_of_ts=clock_fn(), tab_str=tab_str,
             backtest_table_dict=backtest_view_dict["table_dict"] if backtest_view_dict else None)
         pod_page_dict["backtest_dict"] = backtest_view_dict
+        if backtest_view_dict:
+            # Reviewed boxes leave the page; the Backtest tab keeps every detail.
+            reviewed_set = review_store_obj.reviewed_key_set()
+            backtest_view_dict.update(review_url_str=url_for("backtest_reviewed", pod_id_str=pod_id_str),
+                review_token_str=review_store_obj.action_token_str,
+                issue_reviewed_bool=bool(backtest_view_dict.get("review_key_str")) and backtest_view_dict["review_key_str"] in reviewed_set)
+            if backtest_view_dict.get("rare_dict"):
+                backtest_view_dict["rare_dict"]["reviewed_bool"] = backtest_view_dict["rare_dict"].get("review_key_str") in reviewed_set
         pod_page_dict["orders_dict"] = build_orders_dict(pod_id_str, workspace_dict,
             overview_dict["source_fresh_bool"] and not pod_page_dict.get("historical_bool"))
         if pod_page_dict["attention_dict"] and not pod_page_dict["historical_bool"]:

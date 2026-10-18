@@ -84,3 +84,38 @@ def test_reviewed_requires_the_token_and_a_current_difference():
     assert client_obj.post(button_dict["url_str"], json={"confirmed_bool": True, "key_str": button_dict["key_str"]},
         headers={"Origin": "http://evil.example", "X-Alpha-Action-Token": button_dict["token_str"]}).status_code == 403
     assert "Decision differs from the backtest." in client_obj.get("/").get_data(as_text=True)
+
+
+def _pod_buttons(html_str):
+    return [{"url_str": url_str, "key_str": key_str, "token_str": token_str} for url_str, key_str, token_str in
+            re.findall(r'data-review-url="([^"]+)" data-review-key="([^"]+)" data-token="([^"]+)"', html_str)]
+
+
+def test_pod_page_difference_box_shares_the_overview_mark():
+    client_obj = _demo_client()
+    pod_str = client_obj.get("/pods/demo_1_0").get_data(as_text=True)
+    assert "data-backtest-issue" in pod_str
+    button_list = _pod_buttons(pod_str)
+    assert any(not button_dict["key_str"].startswith("rare|") for button_dict in button_list)
+    difference_dict = next(button_dict for button_dict in button_list if not button_dict["key_str"].startswith("rare|"))
+    assert _post(client_obj, difference_dict).status_code == 200
+    assert "data-backtest-issue" not in client_obj.get("/pods/demo_1_0").get_data(as_text=True)
+    assert "Decision differs from the backtest." not in client_obj.get("/").get_data(as_text=True)
+    # The details stay in the Backtest tab.
+    assert "data-backtest-tab" in client_obj.get("/pods/demo_1_0?tab=backtest").get_data(as_text=True)
+
+
+def test_rare_loss_box_hides_for_its_window_only():
+    client_obj = _demo_client()
+    pod_str = client_obj.get("/pods/demo_1_1").get_data(as_text=True)
+    assert "data-backtest-rare" in pod_str
+    rare_dict = next(button_dict for button_dict in _pod_buttons(pod_str) if button_dict["key_str"].startswith("rare|demo_1_1|"))
+    assert _post(client_obj, rare_dict).status_code == 200
+    assert "data-backtest-rare" not in client_obj.get("/pods/demo_1_1").get_data(as_text=True)
+    assert _post(client_obj, rare_dict, key_str="rare|demo_1_1|3|2000-01-03").status_code == 409
+
+
+def test_rare_key_names_the_window():
+    view_dict = btd.rare_view_dict({"window_int": 3, "live_float": -0.06, "line_float": -0.05, "backtest_float": -0.07,
+                                    "cause_str": "strategy", "end_str": "2026-10-16"}, "pod_a")
+    assert view_dict["review_key_str"] == "rare|pod_a|3|2026-10-16"

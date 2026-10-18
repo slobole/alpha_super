@@ -265,7 +265,13 @@ def _record_view_dict(record_list):
             "start_str": _day_str(mark_list[0].get("session_str")) if mark_list else "—"}
 
 
-def rare_view_dict(rare_dict):
+def review_key_set(report_dict, pod_id_str):
+    """Reviewed marks the operator may set now: this pod's difference and its rare-loss window."""
+    view_dict = pod_view_dict(report_dict, pod_id_str) or {}
+    return {key_str for key_str in (view_dict.get("review_key_str"), (view_dict.get("rare_dict") or {}).get("review_key_str")) if key_str}
+
+
+def rare_view_dict(rare_dict, pod_id_str=""):
     if not isinstance(rare_dict, dict) or not _finite(rare_dict.get("live_float")):
         return None
     window_int = rare_dict.get("window_int") if type(rare_dict.get("window_int")) is int else 0
@@ -278,6 +284,8 @@ def rare_view_dict(rare_dict):
             "detail_str": (f"Worse than 99 of 100 {days_str} windows in the backtest (1-in-100 line {_pct_str(rare_dict.get('line_float'), 1)})."
                            + (" Beyond the backtest's worst." if rare_dict.get("beyond_worst_bool") else "")),
             "cause_str": cause_str,
+            # One window (its length and last session): a new rare window shows again.
+            "review_key_str": "|".join(("rare", str(pod_id_str), str(window_int), _text(rare_dict.get("end_str"), 10))) if pod_id_str else "",
             "sub_str": f"Backtest, same days {_pct_str(rare_dict.get('backtest_float'))} · "
                        + {"strategy": "the strategy did this, not a fault",
                           "ours": "the backtest did not lose this: look on our side (Plan vs actual, fills)",
@@ -322,6 +330,9 @@ def pod_view_dict(report_dict, pod_id_str):
     session_str = _text(decision_dict.get("session_str") or pod_dict.get("session_str"), 10)
     return {
         "status_str": status_str, "state_str": state_str, "title_str": title_str, "differ_int": differ_int,
+        # One decision of one pod: a new decision that differs shows again.
+        "review_key_str": "|".join(str(part_obj or "") for part_obj in (pod_id_str, pod_dict.get("release_id_str"),
+            pod_dict.get("decision_plan_id_int"), session_str)) if status_str == "differs" else "",
         "session_str": session_str,
         "release_id_str": pod_dict.get("release_id_str"),
         "decision_plan_id_int": pod_dict.get("decision_plan_id_int"),
@@ -353,7 +364,7 @@ def pod_view_dict(report_dict, pod_id_str):
         "start_str": _day_str(curve_dict.get("start_str")) if curve_dict.get("start_str") else "—",
         "end_str": _day_str(point_list[-1]["date_str"]) if point_list else "—",
         "curve_period_str": (_day_str(point_list[0]["date_str"]) + " through " + _day_str(point_list[-1]["date_str"])) if point_list else "—",
-        "rare_dict": None if stale_bool else rare_view_dict(pod_dict.get("rare_loss_dict")),
+        "rare_dict": None if stale_bool else rare_view_dict(pod_dict.get("rare_loss_dict"), pod_id_str),
     }
 
 
@@ -480,8 +491,7 @@ def attention_list(report_dict, name_by_pod_dict):
                                 "title_str": "Decision differs from the backtest.",
                                 "detail_str": f"{view_dict['differ_int']} of {len(view_dict['table_dict']['row_list'])} targets · {view_dict['detail_str']}",
                                 "age_str": "—", "kind_str": "backtest_check", "next_command_list": [], "tab_str": "backtest",
-                                "review_key_str": "|".join(str(part_obj or "") for part_obj in (pod_id_str, view_dict["release_id_str"],
-                                    view_dict["decision_plan_id_int"], view_dict["session_str"]))})
+                                "review_key_str": view_dict["review_key_str"]})
         rare_dict = view_dict["rare_dict"]
         if rare_dict and rare_dict["cause_str"] == "ours":
             result_list.append({"state_str": "fail", "pod_id_str": pod_id_str, "pod_name_str": name_by_pod_dict[pod_id_str],
