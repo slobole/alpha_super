@@ -9,6 +9,7 @@ Every view is optional: with no report the pages render exactly as before.
 from datetime import date, datetime, timedelta, timezone
 import json
 import math
+import re
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -283,6 +284,17 @@ def rare_view_dict(rare_dict):
                           }.get(cause_str, "the backtest for these days is not available")}
 
 
+def _coverage_plain_str(reason_str):
+    """'Incomplete same-days coverage: 0 live / 2 reference dates missing.' in plain words."""
+    match_obj = re.match(r"Incomplete same-days coverage: (\d+) live / (\d+) reference dates missing\.", reason_str or "")
+    if not match_obj:
+        return reason_str
+    part_list = [f"{count_int} {label_str} day{'s' if count_int != 1 else ''}" for count_int, label_str in
+                 ((int(match_obj.group(2)), "backtest"), (int(match_obj.group(1)), "live")) if count_int]
+    return ("No return curve vs the backtest yet: " + " and ".join(part_list or ["some days"]) + " missing."
+            + (" Some saved returns are invalid." if "Invalid returns" in reason_str else ""))
+
+
 def pod_view_dict(report_dict, pod_id_str):
     """Everything the Pod page shows for one pod, or None when the report has nothing for it."""
     if not report_dict:
@@ -320,6 +332,7 @@ def pod_view_dict(report_dict, pod_id_str):
         "reason_str": ("Evidence is not from the latest session." if stale_bool else
                        _text(decision_dict.get("reason_str") or pod_dict.get("reference_reason_str"))),
         "coverage_reason_str": _text(pod_dict.get("coverage_reason_str") or curve_dict.get("coverage_reason_str")),
+        "coverage_plain_str": _coverage_plain_str(_text(pod_dict.get("coverage_reason_str") or curve_dict.get("coverage_reason_str"))),
         "ruler_reason_str": _text(pod_dict.get("ruler_reason_str")),
         "basis_str": _text(decision_dict.get("basis_str")),
         "data_str": " · ".join(part_str for part_str in (

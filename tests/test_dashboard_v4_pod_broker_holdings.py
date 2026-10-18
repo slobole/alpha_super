@@ -95,7 +95,8 @@ def test_failed_capture_replaces_values_without_using_old_evidence(broker_source
     _save_payload(target_obj, payload_dict)
     result_dict = _read_dict(broker_source_tuple)
     assert not result_dict["available_bool"] and not result_dict["position_list"]
-    assert result_dict["reason_str"] == "IBKR position values unavailable at the last capture"
+    assert result_dict["reason_str"].startswith("Values missing: IBKR sent no prices at the ")
+    assert result_dict["reason_str"].endswith(" capture. Shares are correct.") and "internal detail" not in result_dict["reason_str"]
 
 
 @pytest.mark.parametrize("field_str,value_obj", [

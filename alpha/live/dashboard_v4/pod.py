@@ -1,6 +1,7 @@
 """Small, allowlisted presentation of one saved LIVE cycle."""
 
 from copy import deepcopy
+from datetime import date
 import math
 
 from alpha.live.dashboard_v3.client_operations import EVENT_LABEL_DICT, SOURCE_MAX_AGE_SECONDS_INT
@@ -13,10 +14,10 @@ from alpha.live.ops_report import parse_timestamp_ts
 
 
 # "backtest" is listed only when the nightly backtest check has a result for the pod.
-TAB_TUPLE = (("plan", "Plan vs actual"), ("decision", "Decision"), ("backtest", "Backtest"), ("orders", "Orders"),
+TAB_TUPLE = (("plan", "Plan vs actual"), ("data", "Data"), ("decision", "Decision"), ("backtest", "Backtest"), ("orders", "Orders"),
              ("fills", "Fills"), ("reconcile", "Reconcile"), ("exceptions", "Exceptions"),
              ("events", "Broker events"), ("files", "Files"))
-STEP_TAB_DICT = {"Data": "decision", "Decide": "decision", "Plan": "plan", "Submit": "orders",
+STEP_TAB_DICT = {"Data": "data", "Decide": "decision", "Plan": "plan", "Submit": "orders",
                  "Fill": "fills", "Reconcile": "reconcile", "EOD": "events"}
 
 
@@ -44,6 +45,35 @@ def _time_str(value_obj, as_of_ts):
     market_ts = timestamp_ts.astimezone(MARKET_TIMEZONE_OBJ)
     format_str = "%H:%M:%S" if market_ts.date() == as_of_ts.astimezone(MARKET_TIMEZONE_OBJ).date() else "%m-%d %H:%M:%S"
     return market_ts.strftime(format_str)
+
+
+def _day_label_str(date_str):
+    """'2026-09-30' -> 'Wed Sep 30'; anything else unchanged."""
+    try:
+        date_obj = date.fromisoformat(date_str)
+    except (TypeError, ValueError):
+        return date_str
+    return f"{date_obj:%a %b} {date_obj.day}"
+
+
+def _data_table_dict(source_dict, data_step_dict, decide_step_dict):
+    """What market data this decision used, from the saved decision record."""
+    metadata_dict = (source_dict.get("decision_dict") or {}).get("snapshot_metadata_dict") or {}
+    snapshot_str = metadata_dict.get("norgate_snapshot_date_str") or metadata_dict.get("snapshot_date_str")
+    profile_str = metadata_dict.get("norgate_data_profile_str") or metadata_dict.get("data_profile_str")
+    row_list = []
+    if isinstance(snapshot_str, str) and snapshot_str:
+        row_list.append(_row_dict(["Prices through", _day_label_str(snapshot_str)]))
+    if isinstance(profile_str, str) and profile_str:
+        row_list.append(_row_dict(["Data set", ("Norgate · " if metadata_dict.get("norgate_data_profile_str") else "") + _text_str(profile_str)]))
+    if row_list:
+        row_list.append(_row_dict(["Freshness", "Checked fresh for this cycle before the decision"
+            if data_step_dict["state_str"] == "Done" else data_step_dict.get("fact_str") or "Not verified"]))
+        if decide_step_dict.get("actual_time_str"):
+            row_list.append(_row_dict(["Decision made", decide_step_dict["actual_time_str"]]))
+    table_dict = _table_dict(["Data", "This decision used"], row_list)
+    table_dict["empty_str"] = "No saved data record for this decision."
+    return table_dict
 
 
 def _table_dict(columns_list, rows_list, *, note_str=""):
@@ -174,7 +204,7 @@ def build_evidence_tables_dict(source_dict, *, as_of_ts, fresh_bool):
         event_rows.append(_row_dict([_time_str(item_dict.get("timestamp_str") or item_dict.get("event_timestamp_str"), as_of_ts),
             _text_str(item_dict.get("asset_str")), label_str]))
     result_dict = {
-        "plan": _table_dict(["Symbol", "Order", "Position", "Broker = model"], plan_rows),
+        "plan": _table_dict(["Symbol", "Order", "Position", "Matches broker"], plan_rows),
         "decision": _table_dict(["Symbol", "Target"], decision_rows, note_str="Entry and exit targets" if decision_dict.get("decision_book_type_str") == "incremental_entry_exit_book" else "" if decision_dict.get("decision_book_type_str") == "full_target_weight_book" else "Saved decision targets"),
         "orders": _table_dict(["Symbol", "Order", "Ack", "Source", "Ack time", "Filled", "Fill px", "Broker id"], order_rows),
         "fills": _table_dict(["Symbol", "Shares", "Fill px", "Time", "Broker id"], [
@@ -342,6 +372,10 @@ def build_pod_page_dict(overview_dict, source_dict, finance_dict, *, pod_id_str,
             for step_dict in step_list:
                 if step_dict["label_str"] == "Reconcile":
                     step_dict["tab_str"] = "exceptions"
+    tables_dict["data"] = _data_table_dict(source_dict, step_list[0], step_list[1])
+    if step_list[0]["state_str"] == "Done" and len(step_list[0].get("fact_str") or "") == 10:
+        # Display only: the saved data date itself stays in fact_str.
+        step_list[0]["display_fact_str"] = "Prices through " + _day_label_str(step_list[0]["fact_str"])
     failed_step_dict = next((step_dict for step_dict in step_list if step_dict["state_str"] == "Failed"), {})
     if backtest_table_dict is not None:
         tables_dict["backtest"] = backtest_table_dict
@@ -390,20 +424,25 @@ def build_pod_page_dict(overview_dict, source_dict, finance_dict, *, pod_id_str,
             pill_str="Action needed" if scheduler_attention_dict["state_str"] == "fail" else "Needs review")
     header_dict = {"state_str": pod_summary_dict["state_str"], "pill_str": pod_summary_dict["pill_str"],
         "verdict_str": pod_summary_dict["now_str"].rstrip(".") + ".", "detail_str": pod_summary_dict["now_detail_str"],
-        **{key_str: pod_summary_dict[key_str] for key_str in ("next_str", "next_time_str", "next_detail_str", "next_forecast_bool")}}
+        **{key_str: pod_summary_dict[key_str] for key_str in ("next_str", "next_time_str", "next_detail_str", "next_forecast_bool")},
+        "next_line_list": pod_summary_dict.get("next_line_list") or [], "next_in_str": pod_summary_dict.get("next_in_str") or "",
+        # A healthy waiting pod: the pill and the cycle panel already say it, so the header skips the status line.
+        "quiet_bool": bool(pod_summary_dict.get("idle_bool")) and pod_summary_dict["state_str"] == "done"}
     attention_dict = next((deepcopy(item_dict) for item_dict in overview_dict["attention_list"] if item_dict["pod_id_str"] == pod_id_str), {})
     cycle_state_str = _state_str(cycle_dict["tone_str"])
     if (source_dict.get("status_str") != "ok" and source_dict.get("selected_current_bool")
         and header_dict["state_str"] not in {"fail", "late"}):
         header_dict.update(state_str="unk", pill_str="Unknown", verdict_str="Current cycle unavailable.", detail_str="",
-            next_str="Time unknown", next_time_str="", next_detail_str="", next_forecast_bool=False)
+            next_str="Time unknown", next_time_str="", next_detail_str="", next_forecast_bool=False,
+            next_line_list=[], next_in_str="", quiet_bool=False)
     # Selected current-cycle contradictions may weaken current status. A saved
     # historical result must never replace today's Pod warning or Waiting state.
     if (selected_dict.get("current_bool") and STATE_RANK_DICT[cycle_state_str] < STATE_RANK_DICT[header_dict["state_str"]]
         and (not pod_summary_dict.get("idle_bool") or cycle_state_str == "fail")):
         header_dict.update(state_str=cycle_state_str, pill_str=cycle_dict["pill_str"], verdict_str=verdict_str, detail_str=verdict_detail_str)
         header_dict.update(next_str="Review saved evidence" if issue_bool else "Time unknown",
-            next_time_str="", next_detail_str="you · now" if issue_bool else "", next_forecast_bool=False)
+            next_time_str="", next_detail_str="you · now" if issue_bool else "", next_forecast_bool=False,
+            next_line_list=[], next_in_str="", quiet_bool=False)
         # The worse problem leads; a hold stays visible as the scheduler note.
         if issue_bool and (not attention_dict or STATE_RANK_DICT[cycle_state_str] < STATE_RANK_DICT.get(attention_dict.get("state_str"), 9)):
             replaced_dict = attention_dict

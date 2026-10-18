@@ -8,6 +8,7 @@ import math
 from pathlib import Path
 import sqlite3
 
+from alpha.live.dashboard_v3.filters import MARKET_TIMEZONE_OBJ
 from alpha.live.dashboard_v4.positions_data import (
     IDENTITY_FIELD_TUPLE, POSITION_LIMIT_INT, observed_timestamp_ts,
 )
@@ -92,7 +93,8 @@ def load_broker_holdings_dict(target_obj, *, as_of_ts):
         if timestamp_ts.utcoffset() != timedelta(0):
             raise ValueError("Portfolio time must be UTC")
         if payload_dict.get("available_bool") is False:
-            result_dict["reason_str"] = "IBKR position values unavailable at the last capture"
+            capture_str = timestamp_ts.astimezone(MARKET_TIMEZONE_OBJ).strftime("%H:%M")
+            result_dict["reason_str"] = f"Values missing: IBKR sent no prices at the {capture_str} capture. Shares are correct."
             return result_dict
         if payload_dict.get("available_bool") is not True or payload_dict.get("currency_str") != "USD":
             raise ValueError("Unsupported portfolio currency")

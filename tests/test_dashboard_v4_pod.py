@@ -78,7 +78,7 @@ def test_compact_position_uses_saved_broker_result_not_order_target_or_fill_tota
     }
     before_dict = deepcopy(source_dict)
     table_dict = build_evidence_tables_dict(source_dict, as_of_ts=DEMO_NOW_TS, fresh_bool=True)["plan"]
-    assert table_dict["column_list"] == ["Symbol", "Order", "Position", "Broker = model"]
+    assert table_dict["column_list"] == ["Symbol", "Order", "Position", "Matches broker"]
     assert table_dict["row_list"] == [{"symbol_str": "ABC", "order_str": "+19",
         "before_str": "7", "after_str": "18", "match_str": "fail"}]
     assert source_dict == before_dict
@@ -118,7 +118,7 @@ def test_compact_table_escapes_symbols_and_keeps_mobile_and_selection_fields(pod
     table_html_str = html_str.split('data-selection-key="evidence:plan"')[1].split('</table>')[0]
     assert '<img src=x' not in table_html_str and '&lt;img src=x' in table_html_str
     assert table_html_str.count('scope="col"') == 4
-    assert all(f'data-column="{label_str}"' in table_html_str for label_str in ("Symbol", "Order", "Position", "Broker = model"))
+    assert all(f'data-column="{label_str}"' in table_html_str for label_str in ("Symbol", "Order", "Position", "Matches broker"))
     assert '<span class="sr-only">Before </span>' in table_html_str
     assert '<span class="sr-only"> After </span>' in table_html_str
     assert 'data-observed-state' in table_html_str

@@ -275,7 +275,7 @@ and database failures. The selected cycle has a separate badge and verdict.
   Current data readiness stays in the current header and Overview, even when
   the latest monthly cycle is several weeks old.
 - Plan vs actual preserves each canonical order request in three columns:
-  Symbol, Position, and Broker = model. The signed requested order sits above
+  Symbol, Position, and Matches broker. The signed requested order sits above
   Before → After; it is not presented as the actual filled amount. Before uses the
   selected VPlan's broker snapshot; After uses that cycle's post-execution
   reconciliation, never today's position cache. Verified fill quantities and

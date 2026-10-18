@@ -4,7 +4,8 @@
 {% if not money_placeholder_bool %}
 {% if pod_page_dict.issue_bool %}<details class="pod-money-fold" data-keep-open="pod-money"><summary>Positions and return{% if pod_page_dict.money_asof_str %} · {{ pod_page_dict.money_asof_str }}{% endif %}</summary>{% endif %}
 <section class="tiles tiles-4" aria-label="Pod money at last close">{% for tile_dict in pod_page_dict.tile_list %}<div class="tile" data-selection-key="money:{{ tile_dict.label_str }}"><div class="l">{{ tile_dict.label_str }}</div><div class="v {{ tile_dict.tone_str }}">{{ tile_dict.value_str }}</div><div class="s">{{ tile_dict.detail_str }}</div></div>{% endfor %}</section>
-<div class="asof pod-money-date" data-selection-key="money-asof">{% if 'Close ' in pod_page_dict.money_asof_str %}{{ icon('calendar') }}{% endif %}{{ pod_page_dict.money_asof_str }}</div>
+{# The Value tile already shows the close date; this line stays only for other states (demo, unavailable). #}
+{% if not pod_page_dict.money_asof_str.startswith('Close ') %}<div class="asof pod-money-date" data-selection-key="money-asof">{% if 'Close ' in pod_page_dict.money_asof_str %}{{ icon('calendar') }}{% endif %}{{ pod_page_dict.money_asof_str }}</div>{% endif %}
 <div class="cols c-7-5 pod-finance">
   {% if pod_page_dict.holdings_allocation_dict.available_bool %}{% include '_pod_holdings.html' %}{% else %}
   <section class="panel"><div class="panel-h pod-positions-head"><span class="panel-t">Positions · {{ pod_page_dict.position_list|length }}</span><span class="pod-stamp" title="{{ pod_page_dict.positions_stamp_dict.title_str }}">{{ icon('calendar') }}<span class="sr-only">{{ pod_page_dict.positions_stamp_dict.title_str }}</span><span aria-hidden="true">{{ pod_page_dict.positions_stamp_dict.label_str }}</span></span></div>
