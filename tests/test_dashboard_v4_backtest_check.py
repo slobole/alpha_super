@@ -236,6 +236,8 @@ def test_demo_routes_with_and_without_the_report():
     assert "Decision differs from the backtest." in overview
     tab = client.get("/pods/demo_1_0?tab=backtest").data.decode()
     assert "data-backtest-tab" in tab and "data-backtest-issue" in tab
+    assert '<section class="issue issue-late" data-backtest-issue>' in tab  # amber, like the Overview row
+    assert "the stop rule applies" in tab
     assert "data-backtest-rare" in client.get("/pods/demo_1_1").data.decode()
     page = client.get("/pods/demo_1_2").data.decode()
     assert "data-backtest-gap" in page and "Backtest, same days" in page
