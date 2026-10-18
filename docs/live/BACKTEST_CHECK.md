@@ -79,8 +79,9 @@ Output: `backtest_check_latest.json` next to the watchdog report (`ops_report_la
   per cost component: current-action alerts, including the Pod stop-rule box, and rare-loss lines are hidden. Historical
   decision details remain dated and visible. System health warns only when the check did not run, failed or is stale;
   what it found (a difference, a gap in the return curve) shows on the Pod and Vs backtest pages, not in the header.
-- On Overview a difference row has a Reviewed button. It hides that one decision's difference (saved in
-  `alpha/live/logs/backtest_reviewed.json`); a new decision that differs shows again. Pod and Vs backtest keep it.
+- Reviewed buttons (Overview difference row, Pod difference and rare-loss boxes) hide that one decision's
+  difference or that one rare-loss window (saved in `alpha/live/logs/backtest_reviewed.json`); a new decision
+  that differs, or a new rare window, shows again. The Backtest tab and Vs backtest keep every detail.
 
 ## Calculations and timing
 
