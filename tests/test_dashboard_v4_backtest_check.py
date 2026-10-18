@@ -397,3 +397,12 @@ def test_overflowing_prior_numbers_do_not_prevent_a_fresh_nightly_report(tmp_pat
     provider_obj = _provider(tmp_path, _report([pod_dict]))
     assert bc._read_previous_dict(tmp_path / btd.REPORT_FILE_NAME_STR) == {}
     assert btd.load_report_dict(provider_obj, as_of_ts=NOW) is None
+
+
+def test_findings_alone_never_warn_system(tmp_path):
+    # A difference and a gap in the return curve are what the check found, not a broken check.
+    pod = dict(_pod(status="differs"), coverage_reason_str="Incomplete same-days coverage: 1 live / 0 reference dates missing.")
+    report = btd.load_report_dict(_provider(tmp_path, _report([pod])), as_of_ts=NOW)
+    row = btd.system_row_dict(report, as_of_ts=NOW)
+    assert row["state_str"] == "ok"
+    assert "1 differs" in row["now_str"] and "1 without a full return curve" in row["now_str"]

@@ -12,6 +12,7 @@ from flask import Flask, Response, abort, jsonify, render_template, request, sen
 
 from alpha.live.dashboard_v4.account_alias import account_label_str, load_alias_by_pod_dict
 from alpha.live.dashboard_v4 import backtest_check_data
+from alpha.live.dashboard_v4.backtest_review import BacktestReviewStore, register_review_route
 from alpha.live.dashboard_v4.data import LiveDataProvider, load_workspace_snapshot_tuple
 from alpha.live.dashboard_v4.overview import STATE_RANK_DICT, apply_attention_verdict, build_overview_dict
 from alpha.live.dashboard_v4.pod import TAB_TUPLE, build_pod_page_dict
@@ -112,14 +113,16 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         log_path_fn=order_log_path_fn, target_loader_fn=lambda pod_id_str: provider_obj.get_target_for_pod(pod_id_str),
         enabled_bool=orders_enabled_bool, broker_factory_fn=order_broker_factory_fn, now_fn=clock_fn)
     flask_app_obj.config["order_service_obj"] = order_service_obj
+    # Marks for backtest differences the operator already reviewed (a local file; never orders or pod state).
+    review_store_obj = BacktestReviewStore(provider_obj, memory_bool=demo_bool)
 
     @flask_app_obj.before_request
     def read_only_boundary():
         # Production rejects every write. Only explicitly enabled synthetic
         # demonstrations can accept the fixed Tools preview/confirm/cancel POSTs.
         if request.method not in {"GET", "HEAD", "OPTIONS"}:
-            order_post_bool = (orders_enabled_bool and request.method == "POST"
-                and request.endpoint in {"order_check", "order_send"})
+            order_post_bool = request.method == "POST" and (request.endpoint == "backtest_reviewed" or (
+                orders_enabled_bool and request.endpoint in {"order_check", "order_send"}))
             if not order_post_bool and (not demo_tools_bool or request.method != "POST" or request.endpoint not in {
                     "tools_action_preview", "tools_action_confirm", "tools_action_cancel"}):
                 return jsonify(error="read_only", message="This console is read-only."), 403
@@ -143,6 +146,13 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
 
     register_tools_action_routes(flask_app_obj, tools_service_obj)
     register_order_routes(flask_app_obj, order_service_obj)
+
+    def current_review_key_set(pod_id_str):
+        report_dict = backtest_check_data.load_report_dict(provider_obj, as_of_ts=clock_fn())
+        return {item_dict["review_key_str"] for item_dict in backtest_check_data.attention_list(report_dict, {pod_id_str: pod_id_str})
+            if item_dict.get("review_key_str")}
+
+    register_review_route(flask_app_obj, review_store_obj, current_review_key_set, now_fn=clock_fn)
     # Console reads are bounded per request; these caps bound concurrency too.
     console_tail_semaphore_obj = threading.BoundedSemaphore(4)
     console_download_semaphore_obj = threading.BoundedSemaphore(1)
@@ -407,7 +417,13 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         """Red and amber rows from the nightly backtest check; a normal day adds nothing."""
         report_dict = backtest_check_data.load_report_dict(provider_obj, as_of_ts=clock_fn())
         name_dict = {item_dict["pod_id_str"]: item_dict.get("name_str") or item_dict["pod_id_str"] for item_dict in overview_dict["pod_list"]}
-        added_list = backtest_check_data.attention_list(report_dict, name_dict)
+        reviewed_set = review_store_obj.reviewed_key_set()
+        added_list = [item_dict for item_dict in backtest_check_data.attention_list(report_dict, name_dict)
+            if item_dict.get("review_key_str") not in reviewed_set]
+        for item_dict in added_list:
+            if item_dict.get("review_key_str"):
+                item_dict.update(review_url_str=url_for("backtest_reviewed", pod_id_str=item_dict["pod_id_str"]),
+                    review_token_str=review_store_obj.action_token_str)
         overview_dict["attention_list"].extend(added_list)
         if added_list:
             apply_attention_verdict(overview_dict)
@@ -593,7 +609,7 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             overview_dict["attention_list"] = []
             for pod_dict in overview_dict["pod_list"]:
                 pod_dict.update(state_str="unk", pill_str="Unknown", now_str="Unknown",
-                    now_detail_str="Saved status is out of date.", next_str="—", next_time_str="",
+                    now_detail_str="Saved status is out of date.", next_str="Unknown", next_time_str="",
                     next_detail_str="Not current", next_timestamp_str="", next_forecast_bool=False)
                 for step_dict in pod_dict["step_list"]:
                     step_dict["state_str"] = "unk"
@@ -720,7 +736,7 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
                 + ([{"label_str": "Vs backtest", "selected_bool": level_str == "backtest", "url_str": performance_url_str(level="backtest"),
                      "icon_str": "performance", "badge_str": str(sum(1 for item_dict in backtest_check_data.attention_list(
                          backtest_report_dict, {pod_dict.get("pod_id_str"): "" for pod_dict in backtest_report_dict["pod_list"]})
-                         if item_dict["state_str"] == "fail") or "")}] if backtest_report_dict else []),
+                         if item_dict["state_str"] in {"fail", "late"}) or "")}] if backtest_report_dict else []),
             period_option_list=[{"label_str": option_str, "selected_bool": from_date_str is None and period_str == option_str,
                 "url_str": url_for("performance", level=level_str, period=option_str, unit=unit_str)} for option_str in ("1W", "MTD", "YTD", "All")],
             unit_option_list=[{"label_str": label_str, "selected_bool": unit_str == option_str,

@@ -466,7 +466,9 @@ def attention_list(report_dict, name_by_pod_dict):
             result_list.append({"state_str": "late", "pod_id_str": pod_id_str, "pod_name_str": name_by_pod_dict[pod_id_str],
                                 "title_str": "Decision differs from the backtest.",
                                 "detail_str": f"{view_dict['differ_int']} of {len(view_dict['table_dict']['row_list'])} targets · {view_dict['detail_str']}",
-                                "age_str": "—", "kind_str": "backtest_check", "next_command_list": [], "tab_str": "backtest"})
+                                "age_str": "—", "kind_str": "backtest_check", "next_command_list": [], "tab_str": "backtest",
+                                "review_key_str": "|".join(str(part_obj or "") for part_obj in (pod_id_str, view_dict["release_id_str"],
+                                    view_dict["decision_plan_id_int"], view_dict["session_str"]))})
         rare_dict = view_dict["rare_dict"]
         if rare_dict and rare_dict["cause_str"] == "ours":
             result_list.append({"state_str": "fail", "pod_id_str": pod_id_str, "pod_name_str": name_by_pod_dict[pod_id_str],
@@ -552,13 +554,15 @@ def system_row_dict(report_dict, *, as_of_ts):
     if stale_pod_int:
         now_str += f" · {stale_pod_int} stale"
     if incomplete_int:
-        now_str += f" · {incomplete_int} incomplete"
+        now_str += f" · {incomplete_int} without a full return curve"
     if gate_stale_bool:
         now_str += " · cost evidence stale"
     gate_incomplete_bool = (report_dict.get("cost_gate_dict") or {}).get("status_str") == "incomplete"
     if gate_incomplete_bool:
         now_str += " · MR cost sources incomplete"
-    state_str = "warning" if (report_dict["stale_bool"] or failed_int or stale_pod_int or incomplete_int or gate_stale_bool
+    # Only a check that did not run, could not read its sources or is out of date warns System. What the
+    # check found (a difference, a gap in the return curve) lives on the Pod and Vs backtest pages.
+    state_str = "warning" if (report_dict["stale_bool"] or failed_int or stale_pod_int or gate_stale_bool
                               or not expected_int or ok_int < expected_int or gate_incomplete_bool) else "ok"
     if report_dict["stale_bool"]:
         now_str = "Not from the latest session · " + now_str

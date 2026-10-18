@@ -77,7 +77,10 @@ Output: `backtest_check_latest.json` next to the watchdog report (`ops_report_la
   the owner's call.
 - Evidence that is not from the latest session (checked from 10:00 ET on session days) is marked stale per pod and
   per cost component: current-action alerts, including the Pod stop-rule box, and rare-loss lines are hidden. Historical
-  decision details remain dated and visible. System health warns about stale evidence and incomplete return coverage.
+  decision details remain dated and visible. System health warns only when the check did not run, failed or is stale;
+  what it found (a difference, a gap in the return curve) shows on the Pod and Vs backtest pages, not in the header.
+- On Overview a difference row has a Reviewed button. It hides that one decision's difference (saved in
+  `alpha/live/logs/backtest_reviewed.json`); a new decision that differs shows again. Pod and Vs backtest keep it.
 
 ## Calculations and timing
 

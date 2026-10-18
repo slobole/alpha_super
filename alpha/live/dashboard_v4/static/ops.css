@@ -234,7 +234,7 @@ button { font: inherit; color: inherit; }
 /* Attention and account tiles */
 .attn { background: var(--panel); border: 1px solid var(--rule); border-left: 3px solid var(--red); }
 .attn.attn-late { border-left-color: var(--amber); }
-.attn-row { display: grid; grid-template-columns: 22px 170px minmax(0, 1fr) 70px auto; white-space: nowrap; align-items: center; gap: 10px; padding: 12px 20px; border-bottom: 1px solid var(--rule); }
+.attn-row { display: grid; grid-template-columns: 22px 280px minmax(0, 1fr) 110px auto; white-space: nowrap; align-items: center; gap: 10px; padding: 12px 20px; border-bottom: 1px solid var(--rule); }
 .attn-row .what { white-space: normal; }
 /* A long pod name wraps inside its own column instead of running into the problem text. */
 .attn-row > .row { min-width: 0; flex-wrap: wrap; white-space: normal; }
@@ -381,7 +381,7 @@ a:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
   .tiles-4 { grid-template-columns: 1fr 1fr; }
   .finance-panels { grid-template-columns: minmax(0, 1fr); }
   .alloc { grid-template-columns: 300px minmax(0, 1fr); }
-  .calm .attn-row { grid-template-columns: 16px minmax(100px, 140px) minmax(0, 1fr) 50px auto; gap: 8px; padding: 12px 16px; white-space: normal; }
+  .calm .attn-row { grid-template-columns: 16px minmax(120px, 220px) minmax(0, 1fr) 90px auto; gap: 8px; padding: 12px 16px; white-space: normal; }
 }
 @media (max-width: 860px) {
   .app { grid-template-columns: 180px minmax(0, 1fr); }

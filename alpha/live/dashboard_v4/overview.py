@@ -222,7 +222,7 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
         pod_list.append({
             "pod_id_str": pod_id_str, "name_str": name_str,
             "cadence_str": f"{cadence_str} · {session_str}" if policy_str else "Schedule unknown",
-            "cadence_short_str": "M" if monthly_bool else "D" if policy_str else "—",
+            "cadence_short_str": "M" if monthly_bool else "D" if policy_str else "",
             "pill_str": cycle_dict["pill_str"], "state_str": pod_state_str,
             "now_str": now_str, "now_detail_str": now_detail_str,
             "next_str": next_str, "next_time_str": next_time_str, "next_detail_str": next_detail_str,

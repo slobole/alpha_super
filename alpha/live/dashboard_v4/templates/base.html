@@ -24,6 +24,7 @@
   {#- Positions must sort refreshed rows before overview restores their text selection. #}
   {%- if positions_page_dict is defined %}<script src="{{ url_for('static', filename='positions.js') }}" defer></script>{% endif %}
   <script src="{{ url_for('static', filename='overview.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='backtest_review.js') }}" defer></script>
   <script src="{{ url_for('static', filename='chart_interaction.js') }}" defer></script>
   <script src="{{ url_for('static', filename='donut_interaction.js') }}" defer></script>
   {%- if pod_page_dict is defined and pod_page_dict.orders_dict %}<script src="{{ url_for('static', filename='orders.js') }}" defer></script>{% endif %}
