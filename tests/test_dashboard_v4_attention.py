@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from alpha.live.dashboard_v4.overview import build_overview_dict
+from alpha.live.dashboard_v4.overview import apply_attention_verdict, attention_verdict_tuple, build_overview_dict
 from alpha.live.dashboard_v4.scheduler_view import scheduler_hold_dict, scheduler_issue_dict
 from test_dashboard_v4_cycle import pod_row_dict, _complete_evidence_dict
 
@@ -134,3 +134,18 @@ def test_multiline_error_reason_is_still_redacted(error_str, secret_str, masked_
     reason_str = _error_reason_str(error_str)
     assert secret_str not in reason_str and masked_str in reason_str
     assert "\n" not in reason_str and "\x1b" not in reason_str
+
+
+def test_headline_counts_every_row_and_takes_the_worst_colour():
+    assert attention_verdict_tuple([{"state_str": "fail"}, {"state_str": "late"}]) == ("1 item needs action.", "1 to check.", "fail")
+    assert attention_verdict_tuple([{"state_str": "fail"}, {"state_str": "fail"}]) == ("2 items need action.", "", "fail")
+    assert attention_verdict_tuple([{"state_str": "late"}]) == ("1 item to check.", "", "late")
+
+
+@pytest.mark.parametrize("kind_str,changed_bool", [("ok", True), ("system", True), ("attention", True), ("unknown", False), ("no_pods", False)])
+def test_rows_added_later_update_the_headline_unless_status_is_unknown(kind_str, changed_bool):
+    overview_dict = {"attention_list": [{"state_str": "late"}], "verdict_kind_str": kind_str, "verdict_str": "Before.",
+        "verdict_detail_str": "", "verdict_state_str": "done", "live_state_str": "done"}
+    apply_attention_verdict(overview_dict)
+    assert (overview_dict["verdict_str"] == "1 item to check.") is changed_bool
+    assert overview_dict["live_state_str"] == ("late" if changed_bool else "done")

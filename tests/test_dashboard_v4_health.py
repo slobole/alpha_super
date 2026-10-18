@@ -84,7 +84,7 @@ def test_disk_warning_keeps_higher_severity_scheduler_cause(healthy_workspace_tu
     assert view_dict["system_dict"]["state_str"] == "fail"
     assert view_dict["system_dict"]["detail_str"] == "Scheduler · Disk 76% used"
     assert view_dict["attention_list"][0]["title_str"] == "Scheduler error"
-    assert view_dict["verdict_str"] == "1 pod needs action."
+    assert view_dict["verdict_str"] == "1 item needs action."
 
 
 @pytest.mark.parametrize("cell_label_str", ["Norgate", "Pod state", "EOD Snapshot"])

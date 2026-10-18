@@ -184,6 +184,11 @@ button { font: inherit; color: inherit; }
 .page-head h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.2; }
 .verdict { margin-top: 5px; font-size: 14px; color: var(--ink-2); }
 .verdict b { color: var(--ink); font-weight: 600; }
+/* Overview headline: a state mark, and the colour of the worst open item. */
+.verdict[data-selection-key="overview-verdict"] { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.verdict .st-fail + b { color: var(--red); }
+.verdict .st-late + b { color: var(--amber); }
+.verdict .st-done + b { color: var(--green); }
 .asof { font-size: 12px; color: var(--ink-3); text-align: right; }
 .sample { font-size: 11px; color: var(--ink-3); text-align: right; padding: 0 24px 16px; }
 .ic { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
@@ -228,8 +233,12 @@ button { font: inherit; color: inherit; }
 
 /* Attention and account tiles */
 .attn { background: var(--panel); border: 1px solid var(--rule); border-left: 3px solid var(--red); }
+.attn.attn-late { border-left-color: var(--amber); }
 .attn-row { display: grid; grid-template-columns: 22px 170px minmax(0, 1fr) 70px auto; white-space: nowrap; align-items: center; gap: 10px; padding: 12px 20px; border-bottom: 1px solid var(--rule); }
 .attn-row .what { white-space: normal; }
+/* A long pod name wraps inside its own column instead of running into the problem text. */
+.attn-row > .row { min-width: 0; flex-wrap: wrap; white-space: normal; }
+.attn-row a.sname { overflow-wrap: anywhere; }
 .attn-row .what a, .attn-row a.sname { color: inherit; text-decoration: none; }
 .attn-row .what a:hover b, .attn-row a.sname:hover { text-decoration: underline; }
 .attn-actions { display: flex; gap: 6px; justify-content: flex-end; }
@@ -257,7 +266,7 @@ button { font: inherit; color: inherit; }
 .tile .s { margin-top: 2px; font-size: 12.5px; color: var(--ink-3); }
 
 /* Seven-step cycle: the Overview centrepiece, with no money columns. */
-.shead, .srow { display: grid; grid-template-columns: 220px minmax(0, 1fr) 190px 200px; align-items: center; column-gap: 36px; padding-left: 20px; padding-right: 20px; }
+.shead, .srow { display: grid; grid-template-columns: 220px minmax(0, 1fr) 190px 230px; align-items: center; column-gap: 36px; padding-left: 20px; padding-right: 20px; }
 .shead { padding-top: 16px; padding-bottom: 10px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); border-bottom: 1px solid var(--rule); }
 .srow { padding-top: 22px; padding-bottom: 20px; border-bottom: 1px solid #eceef2; min-width: 0; }
 .srow:last-child { border-bottom: 0; }
@@ -267,6 +276,14 @@ button { font: inherit; color: inherit; }
 .srow .who > .row { flex-wrap: wrap; }
 .srow .big { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
 .srow .sub { margin-top: 2px; font-size: 12.5px; color: var(--ink-3); overflow-wrap: anywhere; }
+/* NEXT: action on the left, day and time in words on the right, then a countdown. */
+.nx { display: grid; grid-template-columns: 50px minmax(0, 1fr); row-gap: 3px; font-size: 13px; }
+.nx .k { color: var(--ink-3); font-size: 11.5px; font-weight: 600; padding-top: 1px; }
+.nx .v { color: var(--ink); font-weight: 600; }
+.nx .v span { color: var(--ink-2); font-weight: 400; white-space: nowrap; }
+.nx .in { grid-column: 2; font-size: 12px; color: var(--ink-3); }
+.nx.act .k, .nx.act .v, .nx.act .v span { color: var(--red); }
+.nx.act .v span { white-space: normal; }
 .track { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); width: 100%; max-width: 580px; }
 .tk { position: relative; display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0; }
 .tk::before { content: ''; position: absolute; top: 7px; right: 50%; width: 100%; border-top: 2px solid #8891a0; }
@@ -421,6 +438,8 @@ a:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
   .frame[data-source-stale="true"] .next-cell .sub { display: block; font-size: 10px; }
   .srow .next-cell { text-align: right; }
   .srow .next-cell .big { font-family: var(--mono); font-size: 11px; }
+  .srow .next-cell:has(.nx) { grid-column: 1 / -1; text-align: left; }
+  .srow .next-cell .nx { grid-template-columns: 50px minmax(0, 1fr); font-size: 12.5px; }
   .now-cell::before, .next-cell::before { display: none; }
   .track { width: 168px; }
   .tk { gap: 0; }

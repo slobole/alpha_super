@@ -227,8 +227,13 @@ def test_overview_and_current_header_keep_next_operation_when_browsing_history(p
     overview_dict = build_overview_dict(workspace_dict, None, SimpleNamespace(), as_of_ts=now_ts, include_finance_bool=False)
     current_dict = overview_dict["pod_list"][0]
     assert current_dict["pill_str"] == current_dict["now_str"] == "Waiting"
-    assert current_dict["now_detail_str"] == "No trade scheduled"
+    assert current_dict["now_detail_str"] == "Last cycle Tue Sep 1 · completed"
     assert current_dict["next_detail_str"] == "Scheduled · trade 10-01 09:30:00"
+    # The readable NEXT: action, day and time in words, countdown to the trade, no seconds.
+    assert current_dict["next_line_list"] == [
+        {"key_str": "Decide", "when_str": "after close", "day_str": "Wed Sep 30"},
+        {"key_str": "Trade", "when_str": "09:30 open", "day_str": "Thu Oct 1"}]
+    assert current_dict["next_in_str"] == "in 11 days"
     source_dict = {"status_str": "ok", "pod_row_dict": deepcopy(row_dict), "selected_explicit_bool": True,
         "selected_cycle_dict": {"current_bool": False, "session_date_str": "2026-09-01"}}
     result_dict = build_pod_page_dict(overview_dict, source_dict, {}, pod_id_str=row_dict["pod_id_str"], as_of_ts=now_ts)

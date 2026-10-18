@@ -400,7 +400,7 @@ def build_pod_page_dict(overview_dict, source_dict, finance_dict, *, pod_id_str,
     # Selected current-cycle contradictions may weaken current status. A saved
     # historical result must never replace today's Pod warning or Waiting state.
     if (selected_dict.get("current_bool") and STATE_RANK_DICT[cycle_state_str] < STATE_RANK_DICT[header_dict["state_str"]]
-        and (header_dict["pill_str"] != "Waiting" or cycle_state_str == "fail")):
+        and (not pod_summary_dict.get("idle_bool") or cycle_state_str == "fail")):
         header_dict.update(state_str=cycle_state_str, pill_str=cycle_dict["pill_str"], verdict_str=verdict_str, detail_str=verdict_detail_str)
         header_dict.update(next_str="Review saved evidence" if issue_bool else "Time unknown",
             next_time_str="", next_detail_str="you · now" if issue_bool else "", next_forecast_bool=False)

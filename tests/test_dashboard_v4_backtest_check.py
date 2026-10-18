@@ -183,6 +183,7 @@ def test_views_and_attention_rows(tmp_path):
     assert view["rare_dict"]["state_str"] == "late" and "the strategy did this" in view["rare_dict"]["sub_str"]
     rows = btd.attention_list(report, {"pod_a": "Pod A"})
     assert [row["kind_str"] for row in rows] == ["backtest_check"]  # a loss the strategy explains adds no row
+    assert rows[0]["state_str"] == "late"  # a difference is something to check, never a red X
     ours = dict(rare, backtest_float=0.0, cause_str="ours")
     report = btd.load_report_dict(_provider(tmp_path, _report([_pod(rare=ours)], generated=NOW - timedelta(minutes=30))), as_of_ts=NOW)
     assert [row["kind_str"] for row in btd.attention_list(report, {"pod_a": "Pod A"})] == ["rare_loss"]

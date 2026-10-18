@@ -13,7 +13,7 @@ from flask import Flask, Response, abort, jsonify, render_template, request, sen
 from alpha.live.dashboard_v4.account_alias import account_label_str, load_alias_by_pod_dict
 from alpha.live.dashboard_v4 import backtest_check_data
 from alpha.live.dashboard_v4.data import LiveDataProvider, load_workspace_snapshot_tuple
-from alpha.live.dashboard_v4.overview import STATE_RANK_DICT, build_overview_dict
+from alpha.live.dashboard_v4.overview import STATE_RANK_DICT, apply_attention_verdict, build_overview_dict
 from alpha.live.dashboard_v4.pod import TAB_TUPLE, build_pod_page_dict
 from alpha.live.dashboard_v4.pod_finance import build_pod_finance_dict
 from alpha.live.dashboard_v4.positions import build_positions_page_dict
@@ -409,10 +409,8 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         name_dict = {item_dict["pod_id_str"]: item_dict.get("name_str") or item_dict["pod_id_str"] for item_dict in overview_dict["pod_list"]}
         added_list = backtest_check_data.attention_list(report_dict, name_dict)
         overview_dict["attention_list"].extend(added_list)
-        fail_int = sum(1 for item_dict in added_list if item_dict["state_str"] in {"fail", "late"})
-        if fail_int and overview_dict.get("verdict_str") == "No action needed.":
-            overview_dict.update(verdict_str=f"{fail_int} item{'s' if fail_int > 1 else ''} need{'' if fail_int > 1 else 's'} review.",
-                verdict_detail_str="See the backtest check.")
+        if added_list:
+            apply_attention_verdict(overview_dict)
 
     def attach_missing_trades_attention(overview_dict, workspace_dict):
         """One Overview line per pod with missing trades: "2 trades missing · APX BUY 300, MDLZ SELL 41"."""
@@ -439,9 +437,8 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
                 "pod_id_str": pod_dict["pod_id_str"], "title_str": title_str, "detail_str": "· " + detail_str,
                 "age_str": "—", "kind_str": "missing_trades", "next_command_list": []})
             added_int += 1
-        if added_int and overview_dict.get("verdict_str") == "No action needed.":
-            overview_dict.update(verdict_str=f"{added_int} pod{'s' if added_int > 1 else ''} need{'' if added_int > 1 else 's'} review.",
-                verdict_detail_str="Trades are missing.")
+        if added_int:
+            apply_attention_verdict(overview_dict)
 
     def build_orders_dict(pod_id_str, workspace_dict, fresh_bool):
         """Missing trades rows plus the order panel switches for one Pod page."""

@@ -17,6 +17,16 @@ def _time_str(timestamp_ts, now_ts):
     return market_ts.strftime(format_str)
 
 
+def _clock_word_str(timestamp_ts):
+    """'09:30 open', 'close' or a plain market time, for the readable NEXT lines."""
+    clock_str = timestamp_ts.astimezone(MARKET_TIMEZONE_OBJ).strftime("%H:%M")
+    return {"09:30": "09:30 open", "16:00": "close"}.get(clock_str, clock_str)
+
+
+def _line_dict(key_str, timestamp_ts, when_str):
+    return {"key_str": key_str, "timestamp_str": timestamp_ts.isoformat(), "when_str": when_str}
+
+
 def build_next_operation_dict(row_dict, cycle_dict, *, now_ts, action_required_bool=False):
     """Retain current obligations; forecast only a verified waiting/completed Pod.
 
@@ -51,7 +61,9 @@ def build_next_operation_dict(row_dict, cycle_dict, *, now_ts, action_required_b
     candidate_list = []
     eod_ts = parse_timestamp_ts(eod_step_dict["planned_timestamp_str"])
     if eod_step_dict["state_str"] == "Planned" and eod_ts is not None:
-        candidate_list.append((eod_ts, {**result_dict, "next_detail_str": "Scheduled"}))
+        candidate_list.append((eod_ts, {**result_dict, "next_detail_str": "Scheduled",
+            "next_line_list": [_line_dict(result_dict["next_str"], eod_ts, eod_ts.astimezone(MARKET_TIMEZONE_OBJ).strftime("%H:%M"))],
+            "next_in_timestamp_str": eod_ts.isoformat()}))
     try:
         calendar_id_str = str(row_dict.get("session_calendar_id_str") or "")
         calendar_obj = scheduler_utils.get_exchange_calendar_obj(calendar_id_str)
@@ -67,7 +79,9 @@ def build_next_operation_dict(row_dict, cycle_dict, *, now_ts, action_required_b
             if eod_ts > now_ts:
                 candidate_list.append((eod_ts, {"next_str": "EOD", "next_time_str": _time_str(eod_ts, now_ts),
                     "next_timestamp_str": eod_ts.isoformat(), "next_detail_str": "Scheduled",
-                    "next_forecast_bool": True}))
+                    "next_forecast_bool": True,
+                    "next_line_list": [_line_dict("EOD", eod_ts, eod_ts.astimezone(MARKET_TIMEZONE_OBJ).strftime("%H:%M"))],
+                    "next_in_timestamp_str": eod_ts.isoformat()}))
 
         # Reuse the same read-only calendar forecast as V3. Do not call the
         # scheduler's next_due/get_scheduler_decision: those synchronize state.
@@ -85,9 +99,13 @@ def build_next_operation_dict(row_dict, cycle_dict, *, now_ts, action_required_b
             decide_dict = {"next_str": "Decide", "next_time_str": "after " + _time_str(signal_ts, now_ts),
                 # No exact deadline or countdown: vendor readiness is not known.
                 "next_timestamp_str": "", "next_detail_str": "Scheduled · when data is ready",
-                "next_forecast_bool": True}
+                "next_forecast_bool": True,
+                "next_line_list": [_line_dict("Decide", signal_ts, "after " + _clock_word_str(signal_ts))]}
             if target_ts is not None and target_ts > signal_ts:
                 decide_dict["next_detail_str"] = "Scheduled · trade " + _time_str(target_ts, now_ts)
+                # The trade time is a calendar fact, so it may carry the countdown.
+                decide_dict["next_line_list"].append(_line_dict("Trade", target_ts, _clock_word_str(target_ts)))
+                decide_dict["next_in_timestamp_str"] = target_ts.isoformat()
             # The next trading decision outranks the routine EOD snapshot, so a
             # monthly Pod answers "when does it trade next?" on every day.
             return decide_dict

@@ -462,7 +462,8 @@ def attention_list(report_dict, name_by_pod_dict):
             continue
         view_dict = pod_view_dict(report_dict, pod_id_str)
         if view_dict["status_str"] == "differs":
-            result_list.append({"state_str": "fail", "pod_id_str": pod_id_str, "pod_name_str": name_by_pod_dict[pod_id_str],
+            # A difference is something to check, not a failed step: amber, never red.
+            result_list.append({"state_str": "late", "pod_id_str": pod_id_str, "pod_name_str": name_by_pod_dict[pod_id_str],
                                 "title_str": "Decision differs from the backtest.",
                                 "detail_str": f"{view_dict['differ_int']} of {len(view_dict['table_dict']['row_list'])} targets · {view_dict['detail_str']}",
                                 "age_str": "—", "kind_str": "backtest_check", "next_command_list": [], "tab_str": "backtest"})

@@ -71,6 +71,42 @@ def _attention_sort_tuple(attention_dict):
     return (0 if deadline_str else 1, deadline_str, STATE_RANK_DICT.get(attention_dict["state_str"], 9))
 
 
+def attention_verdict_tuple(attention_list):
+    """The headline counts every open row and takes the colour of the worst one."""
+    act_int = sum(1 for item_dict in attention_list if item_dict["state_str"] == "fail")
+    check_int = len(attention_list) - act_int
+    if act_int:
+        return (f"{act_int} item{'s' if act_int != 1 else ''} need{'s' if act_int == 1 else ''} action.",
+            f"{check_int} to check." if check_int else "", "fail")
+    return f"{check_int} item{'s' if check_int != 1 else ''} to check.", "", "late"
+
+
+def apply_attention_verdict(overview_dict):
+    """Rows added after the build (backtest check, missing trades) update the headline the same way."""
+    attention_list = overview_dict["attention_list"]
+    if not attention_list or overview_dict.get("verdict_kind_str") not in {"attention", "system", "partial", "ok"}:
+        return
+    verdict_str, verdict_detail_str, verdict_state_str = attention_verdict_tuple(attention_list)
+    overview_dict.update(verdict_str=verdict_str, verdict_detail_str=verdict_detail_str,
+        verdict_state_str=verdict_state_str, verdict_kind_str="attention",
+        live_state_str=min([overview_dict["live_state_str"]] + [item_dict["state_str"] for item_dict in attention_list],
+            key=lambda state_str: STATE_RANK_DICT.get(state_str, 9)))
+
+
+def _day_str(timestamp_ts, now_ts):
+    """'Today', 'Tomorrow' or 'Wed Sep 30' in market time."""
+    market_ts, now_market_ts = timestamp_ts.astimezone(MARKET_TIMEZONE_OBJ), now_ts.astimezone(MARKET_TIMEZONE_OBJ)
+    day_int = (market_ts.date() - now_market_ts.date()).days
+    return "Today" if day_int == 0 else "Tomorrow" if day_int == 1 else f"{market_ts:%a %b} {market_ts.day}"
+
+
+def _in_str(timestamp_ts, now_ts):
+    """Countdown under NEXT: hours for the next two days, then calendar days."""
+    seconds_float = (timestamp_ts - now_ts).total_seconds()
+    day_int = (timestamp_ts.astimezone(MARKET_TIMEZONE_OBJ).date() - now_ts.astimezone(MARKET_TIMEZONE_OBJ).date()).days
+    return "in " + (f"{day_int} days" if seconds_float >= 2 * 86400 else _duration_str(seconds_float))
+
+
 def _data_time_str(value_str):
     if len(value_str) == 10:
         return value_str  # A market session date is not a UTC timestamp.
@@ -162,6 +198,10 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
             next_detail_str = (next_detail_str + " · " if next_detail_str else "") + "in " + _duration_str((next_ts - as_of_ts).total_seconds())
         next_str = next_dict["next_str"]
         now_str, now_detail_str = cycle_dict.get("now_str") or "Unknown", cycle_dict.get("now_detail_str") or ""
+        last_trade_ts = parse_timestamp_ts(row_dict.get("latest_vplan_target_execution_timestamp_str"))
+        if cycle_dict["pill_str"] == "Waiting" and last_trade_ts is not None and row_dict.get("latest_vplan_status_str") == "completed":
+            # A waiting pod's last cycle completed (the idle gate requires it): say when.
+            now_detail_str = "Last cycle " + _day_str(last_trade_ts, as_of_ts) + " · completed"
         daily_status_dict = cycle_dict.get("daily_status_dict")
         if pod_state_str in {"fail", "late"}:
             if daily_status_dict is not None:
@@ -172,6 +212,13 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
                 now_str, now_detail_str = "ACK missing", cycle_dict["now_str"]
             next_str = required_dict.get("label_str") if action_required_bool else "Review " + next_str
             next_time_str, next_detail_str = "", "you · now"
+        # Readable NEXT: one line per step with day and time in words, then a countdown.
+        next_line_list, next_in_str = [], ""
+        if next_str == next_dict["next_str"] and next_dict.get("next_line_list"):
+            next_line_list = [{"key_str": line_dict["key_str"], "when_str": line_dict["when_str"],
+                "day_str": _day_str(parse_timestamp_ts(line_dict["timestamp_str"]), as_of_ts)} for line_dict in next_dict["next_line_list"]]
+            in_ts = parse_timestamp_ts(next_dict.get("next_in_timestamp_str"))
+            next_in_str = _in_str(in_ts, as_of_ts) if in_ts and in_ts > as_of_ts else ""
         pod_list.append({
             "pod_id_str": pod_id_str, "name_str": name_str,
             "cadence_str": f"{cadence_str} · {session_str}" if policy_str else "Schedule unknown",
@@ -180,6 +227,7 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
             "now_str": now_str, "now_detail_str": now_detail_str,
             "next_str": next_str, "next_time_str": next_time_str, "next_detail_str": next_detail_str,
             "next_forecast_bool": next_dict["next_forecast_bool"], "next_timestamp_str": next_dict["next_timestamp_str"],
+            "next_line_list": next_line_list, "next_in_str": next_in_str, "next_act_bool": False,
             "step_list": step_list,
             "scheduler_dict": scheduler_dict,
             "auto_submit_enabled_bool": row_dict.get("auto_submit_enabled_bool"),
@@ -252,6 +300,15 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
                     now_detail_str=hold_dict["detail_str"], next_str="Review saved evidence", next_time_str="",
                     next_detail_str="you · now", next_forecast_bool=False, next_timestamp_str="")
 
+        pod_dict = pod_list[-1]
+        pod_dict["idle_bool"] = pod_dict["state_str"] == "skip"
+        if pod_dict["idle_bool"] and fresh_bool and matched_bool and scheduler_dict.get("alive_bool") is True:
+            # Waiting between cycles with a running scheduler is healthy: green, not grey.
+            pod_dict.update(state_str="done", pill_str="OK · waiting")
+        if pod_dict["next_detail_str"] == "you · now":
+            pod_dict.update(next_line_list=[{"key_str": "You", "day_str": "now", "when_str": pod_dict["next_str"]}],
+                next_in_str="", next_act_bool=True)
+
     attention_list.sort(key=_attention_sort_tuple)
     scoped_summary_dict = {**source_dict, "pod_row_dict_list": scoped_row_list}
     if demo_bool:
@@ -297,19 +354,23 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
     market_dict = build_market_view_dict(now_ts=as_of_ts)
     live_state_str = min([pod_dict["state_str"] for pod_dict in pod_list] + [system_state_str], key=STATE_RANK_DICT.get)
     if not fresh_bool:
+        verdict_kind_str, verdict_state_str = "unknown", "unk"
         verdict_str, verdict_detail_str = "Status unknown.", "Saved operations are missing or out of date."
     elif not pod_list:
+        verdict_kind_str, verdict_state_str = "no_pods", "unk"
         verdict_str, verdict_detail_str = "No LIVE pods verified.", "Check the local release configuration."
     elif attention_list:
-        count_int = len(attention_list)
-        verdict_str = f"{count_int} pod{'s' if count_int != 1 else ''} need{'s' if count_int == 1 else ''} action."
-        verdict_detail_str = "Review the saved evidence."
+        verdict_kind_str = "attention"
+        verdict_str, verdict_detail_str, verdict_state_str = attention_verdict_tuple(attention_list)
     elif system_cause_str:
+        verdict_kind_str, verdict_state_str = "system", system_state_str
         verdict_str = "System needs action." if system_state_str == "fail" else "Status needs review."
         verdict_detail_str = system_cause_str + "."
     elif system_state_str != "done" or any(pod_dict["state_str"] == "unk" for pod_dict in pod_list):
+        verdict_kind_str, verdict_state_str = "partial", "unk"
         verdict_str, verdict_detail_str = "Status needs review.", "Some saved evidence is unavailable."
     else:
+        verdict_kind_str, verdict_state_str = "ok", "done"
         verdict_str, verdict_detail_str = "No action needed.", market_dict["detail_str"] if market_dict["label_str"] == "Market closed" else "Pods are on track."
     data_session_list = []
     for row_dict in scoped_row_list:
@@ -330,6 +391,7 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
                         "detail_str": system_cause_str or ("Scheduler unknown" if scheduler_unknown_bool and system_state_str == "unk" else
                             "Data " + _data_time_str(min(data_session_list)) if data_session_list else "Data unknown")},
         "live_state_str": live_state_str, "verdict_str": verdict_str, "verdict_detail_str": verdict_detail_str,
+        "verdict_state_str": verdict_state_str, "verdict_kind_str": verdict_kind_str,
         "attention_list": attention_list, "pod_list": pod_list,
     }
     # Reuse the same scoped assessment for cash; foreign mode rows never enter

@@ -66,7 +66,10 @@ def test_healthy_monthly_idle_is_known_not_unknown(fixture_tuple, monkeypatch):
     workspace_dict["operations_account_list"] = workspace_dict["operations_account_list"][2:]
     monkeypatch.setattr("alpha.live.dashboard_v4.overview.build_health_rollup", lambda *args, **kwargs: SimpleNamespace(severity_str="green"))
     view_dict = _view_dict(fixture_tuple)
-    assert {pod_dict["state_str"] for pod_dict in view_dict["pod_list"]} == {"skip"}
+    # Waiting between cycles with a running scheduler is healthy: green, and still idle.
+    assert {pod_dict["state_str"] for pod_dict in view_dict["pod_list"]} == {"done"}
+    assert {pod_dict["pill_str"] for pod_dict in view_dict["pod_list"]} == {"OK · waiting"}
+    assert all(pod_dict["idle_bool"] for pod_dict in view_dict["pod_list"])
     assert view_dict["live_state_str"] == "done"
     assert view_dict["attention_list"] == []
     assert view_dict["verdict_str"] == "No action needed."
@@ -129,7 +132,7 @@ def test_overview_attention_obeys_scheduler_allowance(fixture_tuple, stage_str, 
     view_dict = build_overview_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=now_dt)
     assert bool(view_dict["attention_list"]) is late_bool
     assert view_dict["pod_list"][0]["state_str"] == ("late" if late_bool else "now")
-    assert view_dict["verdict_str"] == ("1 pod needs action." if late_bool else "No action needed.")
+    assert view_dict["verdict_str"] == ("1 item to check." if late_bool else "No action needed.")
     if late_bool:
         assert view_dict["attention_list"][0]["title_str"] not in {"No action", "Waiting reconcile"}
     assert workspace_dict == original_dict

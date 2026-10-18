@@ -47,7 +47,7 @@ def test_monthly_idle_header_does_not_become_a_completed_cycle_status():
     overview_dict = build_overview_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=DEMO_NOW_TS)
     source_dict = provider_obj.get_pod_cycles_dict(pod_id_str, as_of_ts=DEMO_NOW_TS)
     view_dict = build_pod_page_dict(overview_dict, source_dict, {}, pod_id_str=pod_id_str, as_of_ts=DEMO_NOW_TS)
-    assert view_dict["pill_str"] == "Waiting"
+    assert view_dict["pill_str"] == "OK · waiting"
     assert view_dict["cycle_pill_str"] == "On track"
 
 

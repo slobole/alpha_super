@@ -64,7 +64,7 @@ def test_latest_monthly_cycle_keeps_its_saved_data_date(monthly_page_tuple, suff
     assert page_dict["selected_cycle_dict"]["session_date_str"] == "2026-09-01"
     assert page_dict["step_list"][0]["state_str"] == "Done"
     assert page_dict["step_list"][0]["fact_str"] == "2026-08-31"
-    assert page_dict["header_dict"]["pill_str"] == "Waiting"
+    assert page_dict["header_dict"]["pill_str"] == "OK · waiting"
     assert monthly_page_tuple[1]["norgate_snapshot_status_dict"]["snapshot_date_str"] == "2026-09-16"
 
 
@@ -95,4 +95,4 @@ def test_current_ready_snapshot_cannot_fill_missing_saved_decision_metadata(mont
     assert page_dict["step_list"][0]["state_str"] == "Unknown"
     assert page_dict["step_list"][0]["fact_str"] == "Freshness not verified"
     assert page_dict["step_list"][1]["state_str"] == "Done"
-    assert page_dict["header_dict"]["pill_str"] == "Waiting"
+    assert page_dict["header_dict"]["pill_str"] == "OK · waiting"
