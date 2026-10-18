@@ -200,13 +200,30 @@ def test_now_map_says_why_when_one_pod_has_no_values(monkeypatch):
 
     def one_missing(target_obj, *, as_of_ts):
         if target_obj.release_obj.pod_id_str == "demo_1_1":
-            return {"available_bool": False}
+            return {"available_bool": False, "missing_str": "IBKR sent no prices at the 16:10 capture"}
         return original_fn(target_obj, as_of_ts=as_of_ts)
     monkeypatch.setattr(positions_enrichment, "load_broker_holdings_dict", one_missing)
     workspace_dict, snapshot_obj, provider_obj = build_demo_workspace_tuple(include_holdings_bool=True)
     try:
         page_dict = build_positions_page_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=DEMO_NOW_TS)
         assert page_dict["map_dict"]["available_bool"] is False and page_dict["side_dict"] == {}
-        assert page_dict["map_dict"]["reason_str"].startswith("The map needs complete IBKR values.")
+        # The message names the pod and why.
+        assert page_dict["map_dict"]["reason_str"] == ("The map needs IBKR values for every pod. "
+            "Missing: QPI (IBKR sent no prices at the 16:10 capture).")
+    finally:
+        provider_obj.close()
+
+
+@pytest.mark.parametrize("activity_dict,shown_bool", [
+    ({"available_bool": True, "symbol_dict": {}}, False),  # nothing changed today: no empty column
+    ({"available_bool": False, "symbol_dict": {}}, True),  # unknown stays visible as "Unknown"
+])
+def test_today_column_shows_only_when_it_says_something(monkeypatch, activity_dict, shown_bool):
+    from alpha.live.dashboard_v4 import positions_enrichment
+    monkeypatch.setattr(positions_enrichment, "load_position_activity_dict", lambda target_obj, *, as_of_ts: dict(activity_dict))
+    workspace_dict, snapshot_obj, provider_obj = build_demo_workspace_tuple(include_holdings_bool=True)
+    try:
+        page_dict = build_positions_page_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=DEMO_NOW_TS)
+        assert page_dict["today_column_bool"] is shown_bool
     finally:
         provider_obj.close()

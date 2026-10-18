@@ -278,9 +278,15 @@ def build_positions_page_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
     # The map draws only the complete one-date valuation the weights use.
     result_dict["map_dict"] = build_now_map_dict(result_dict.pop("map_source_list", None) or [], identity_list, pod_str=pod_str,
         book_value_float=result_dict.get("book_value_float"), asof_str=result_dict.get("values_asof_str", ""))
-    if not result_dict["map_dict"]["available_bool"] and result_dict.get("values_note_str"):
+    if not result_dict["map_dict"]["available_bool"] and result_dict.get("map_missing_list"):
+        # Name each pod the map cannot value, and why.
+        result_dict["map_dict"]["reason_str"] = "The map needs IBKR values for every pod. Missing: " + "; ".join(
+            f"{name_str} ({missing_str})" for name_str, missing_str in result_dict["map_missing_list"]) + "."
+    elif not result_dict["map_dict"]["available_bool"] and result_dict.get("values_note_str"):
         result_dict["map_dict"]["reason_str"] = "The map needs complete IBKR values. " + result_dict["values_note_str"]
     result_dict["side_dict"] = now_side_dict(result_dict["map_dict"])
+    # An all-empty Today column says nothing: show it only when some row has a change, a pending order or "Unknown".
+    result_dict["today_column_bool"] = any(row_dict.get("today_str") or row_dict.get("today_pending_bool") for row_dict in all_row_list)
     closed_int = sum(not row_dict.get("open_bool", True) for row_dict in all_row_list)
     if complete_bool and pod_str == "all" and closed_int:
         # "All" also lists positions closed today; name both counts so they agree.

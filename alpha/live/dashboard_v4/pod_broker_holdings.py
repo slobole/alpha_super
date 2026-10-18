@@ -39,7 +39,8 @@ def load_broker_holdings_dict(target_obj, *, as_of_ts):
     None of their quantities, money or timestamps enter this value snapshot.
     A missing/failed capture never falls back to older portfolio values.
     """
-    result_dict = {"available_bool": False, "reason_str": "IBKR position values not saved yet",
+    # missing_str: the short reason the Positions map names per pod.
+    result_dict = {"available_bool": False, "reason_str": "IBKR position values not saved yet", "missing_str": "no IBKR values saved yet",
         "position_list": [], "cash_float": None, "broker_nav_float": None,
         "observed_timestamp_str": "", "source_str": "IBKR portfolio", "currency_str": "USD"}
     try:
@@ -95,6 +96,7 @@ def load_broker_holdings_dict(target_obj, *, as_of_ts):
         if payload_dict.get("available_bool") is False:
             capture_str = timestamp_ts.astimezone(MARKET_TIMEZONE_OBJ).strftime("%H:%M")
             result_dict["reason_str"] = f"Values missing: IBKR sent no prices at the {capture_str} capture. Shares are correct."
+            result_dict["missing_str"] = f"IBKR sent no prices at the {capture_str} capture"
             return result_dict
         if payload_dict.get("available_bool") is not True or payload_dict.get("currency_str") != "USD":
             raise ValueError("Unsupported portfolio currency")
@@ -143,9 +145,10 @@ def load_broker_holdings_dict(target_obj, *, as_of_ts):
                         unrealized_pnl_float=float(unrealized_pnl_obj))
             if shares_float != 0:
                 verified_position_list.append(verified_position_dict)
-        result_dict.update(available_bool=True, reason_str="", cash_float=cash_float,
+        result_dict.update(available_bool=True, reason_str="", missing_str="", cash_float=cash_float,
             broker_nav_float=nav_float, observed_timestamp_str=timestamp_ts.isoformat(),
             position_list=verified_position_list)
     except (AttributeError, IndexError, KeyError, TypeError, ValueError, OverflowError, ArithmeticError, RecursionError, OSError, sqlite3.Error):
         result_dict["reason_str"] = "Saved IBKR position values could not be verified"
+        result_dict["missing_str"] = "saved IBKR values could not be verified"
     return result_dict

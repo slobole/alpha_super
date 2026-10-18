@@ -86,11 +86,12 @@ def enrich_positions_dict(result_dict, source_by_pod_dict, *, pod_str, as_of_ts)
     scope table rows; tiles and By pod keep the portfolio scope.
     """
     symbol_dict, valuation_dict, activity_dict, value_time_list = {}, {}, {}, []
+    missing_list = []  # (pod name, short reason) for every pod the map cannot value
     for pod_id_str, source_dict in source_by_pod_dict.items():
         broker_dict = load_broker_holdings_dict(source_dict["target_obj"], as_of_ts=as_of_ts)
         if broker_dict["available_bool"] and not math.isfinite(sum(abs(item_dict["value_float"])
                 for item_dict in broker_dict["position_list"]) + abs(broker_dict["cash_float"])):
-            broker_dict = {"available_bool": False}
+            broker_dict = {"available_bool": False, "missing_str": "saved IBKR values could not be verified"}
         activity_dict[pod_id_str] = (load_position_activity_dict(source_dict["target_obj"], as_of_ts=as_of_ts)
             if result_dict["source_fresh_bool"] else {"available_bool": False, "symbol_dict": {}})
         position_dict = source_dict["position_map_dict"]
@@ -102,6 +103,10 @@ def enrich_positions_dict(result_dict, source_by_pod_dict, *, pod_str, as_of_ts)
             value_time_list.append(value_ts)
             matched_bool = position_dict == {symbol_str: item_dict["shares_float"] for symbol_str, item_dict in mark_dict.items()}
             valuation_dict[pod_id_str] = {**broker_dict, "matched_bool": matched_bool, "date_str": date_str}
+            if not matched_bool:
+                missing_list.append((source_dict["identity_dict"]["name_str"], "holdings changed after the IBKR capture"))
+        else:
+            missing_list.append((source_dict["identity_dict"]["name_str"], broker_dict.get("missing_str") or "no IBKR values saved"))
         today_dict = activity_dict[pod_id_str].get("symbol_dict", {}) if activity_dict[pod_id_str]["available_bool"] else {}
         for symbol_str in position_dict.keys() | today_dict.keys():
             shares_float = position_dict.get(symbol_str, 0.)
@@ -134,7 +139,8 @@ def enrich_positions_dict(result_dict, source_by_pod_dict, *, pod_str, as_of_ts)
         for pod_id_str in selected_pod_list)
     result_dict.update(values_available_bool=bool(valuation_dict), pnl_available_bool=False,
         changed_available_bool=activity_complete_bool, money_complete_bool=money_complete_bool,
-        values_asof_str="", values_note_str="", map_source_list=[], book_value_float=denominator_float)
+        values_asof_str="", values_note_str="", map_source_list=[], book_value_float=denominator_float,
+        map_missing_list=missing_list)
     full_row_list, selected_row_list = [], []
     for symbol_str, holder_list in sorted(symbol_dict.items()):
         full_row_list.append({"symbol_str": symbol_str, "pod_list": holder_list, **_money_dict(holder_list, denominator_float)})
