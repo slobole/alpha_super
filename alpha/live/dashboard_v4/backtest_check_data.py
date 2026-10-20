@@ -18,7 +18,7 @@ from alpha.live.dashboard_v4.console_data import open_shared_read_obj
 SCHEMA_VERSION_STR = "backtest_check.v1"
 REPORT_FILE_NAME_STR = "backtest_check_latest.json"
 REPORT_BYTE_LIMIT_INT = 4 * 1024 * 1024
-# The job runs on session days at about 08:00 ET; a report is current until the next session's 10:00 ET.
+# The job runs Mon-Fri at 06:30 ET; a report is current until the next session's 10:00 ET.
 STALE_GRACE_HOUR_INT = 10
 POD_LIMIT_INT = 64
 MARKET_TIMEZONE_OBJ = ZoneInfo("America/New_York")
@@ -600,7 +600,7 @@ def system_row_dict(report_dict, *, as_of_ts):
     """Collector entry for System health · Runs on a schedule (only when the report file exists)."""
     if report_dict is None:
         return {"state_str": "unknown", "now_str": "Report unreadable", "last_timestamp_str": "",
-                "expected_str": "Session days ~08:00 ET", "detail_str": "", "checked_bool": True}
+                "expected_str": "Mon-Fri 06:30 ET", "detail_str": "", "checked_bool": True}
     pod_list = report_dict["pod_list"]
     differ_int = sum(1 for pod_dict in pod_list if (pod_dict.get("decision_dict") or {}).get("status_str") == "differs")
     failed_int = sum(1 for pod_dict in pod_list if pod_dict.get("reference_status_str") == "failed")
@@ -627,7 +627,7 @@ def system_row_dict(report_dict, *, as_of_ts):
     if report_dict["stale_bool"]:
         now_str = "Not from the latest session · " + now_str
     return {"state_str": state_str, "now_str": now_str[:200], "last_timestamp_str": report_dict["generated_ts"].isoformat(),
-            "expected_str": "Session days ~08:00 ET", "detail_str": "Report only: it never blocks orders.", "checked_bool": True}
+            "expected_str": "Mon-Fri 06:30 ET", "detail_str": "Report only: it never blocks orders.", "checked_bool": True}
 
 
 def report_file_exists_bool(provider_obj):

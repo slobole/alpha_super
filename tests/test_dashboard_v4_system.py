@@ -239,6 +239,9 @@ def test_different_pod_data_dates_use_short_aggregate_wording(source_tuple):
     assert rows_dict["norgate"]["now_str"] == rows_dict["market_data"]["now_str"] == "Dates vary by Pod"
     assert rows_dict["market_data"]["expected_str"] == "Needed Varies by Pod"
     assert rows_dict["market_data"]["state_str"] == "done"
+    # The time column says what it is: the newest download a Pod made itself.
+    assert rows_dict["norgate"]["last_str"] == "Last pod download 09-18 18:00:00"
+    assert rows_dict["market_data"]["last_str"] == rows_dict["norgate"]["last_str"]
 
 
 @pytest.mark.parametrize("scope_obj", [False, None, 1, "true"])

@@ -311,9 +311,11 @@ def build_system_page_dict(overview_dict, workspace_dict, source_dict, *, as_of_
     have_str = have_list[0] if have_list and len(set(have_list)) == 1 else "See Pods below" if have_list else "—"
     need_str = need_list[0] if need_list and len(set(need_list)) == 1 else "Varies by Pod" if need_list else "—"
     sync_last_str = _time_str(max(sync_time_list, key=_timestamp_ts), as_of_ts) if sync_time_list else "—"
+    # The newest download a Pod made itself; monthly Pods download only before a decision.
+    sync_label_str = "Last pod download " + sync_last_str if sync_last_str != "—" else "—"
     sync_data_str = "Dates vary by Pod" if have_str == "See Pods below" else "Saved data " + have_str if have_str != "—" else "Unknown"
     sync_row_dict = _row_dict("norgate", "Data sync · Norgate", _worst_str(norgate_state_list),
-        sync_data_str, sync_last_str, "As required by each Pod")
+        sync_data_str, sync_label_str, "As required by each Pod")
     if sync_row_dict["state_str"] in {"fail", "late"}:
         sync_row_dict["now_str"] = ("Needs action" if sync_row_dict["state_str"] == "fail" else "Needs review") + " · " + (
             sync_data_str if have_str != "—" else "Data date unknown")
@@ -328,7 +330,7 @@ def build_system_page_dict(overview_dict, workspace_dict, source_dict, *, as_of_
     if market_state_str not in {"fail", "late"} and (not need_list or "—" in need_list):
         market_state_str = "unk"
     market_row_dict = _row_dict("market_data", "Market data", market_state_str,
-        "Dates vary by Pod" if have_str == "See Pods below" else "Have " + have_str, sync_last_str, "Needed " + need_str)
+        "Dates vary by Pod" if have_str == "See Pods below" else "Have " + have_str, sync_label_str, "Needed " + need_str)
     fred_str = "Last decision used " + min(fred_date_list) if fred_date_list and "—" not in fred_date_list else "—"
     fred_state_str = _worst_str(fred_state_list)
     if fred_state_str in {"fail", "late"}:

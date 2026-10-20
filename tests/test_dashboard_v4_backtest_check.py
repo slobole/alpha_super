@@ -295,6 +295,7 @@ def test_system_row_reports_failures_and_age(tmp_path):
     report = btd.load_report_dict(_provider(tmp_path, _report([pod])), as_of_ts=NOW)
     row = btd.system_row_dict(report, as_of_ts=NOW)
     assert row["state_str"] == "warning" and "1 failed" in row["now_str"]
+    assert row["expected_str"] == "Mon-Fri 06:30 ET"  # when the scheduled task actually runs
     assert btd.system_row_dict(None, as_of_ts=NOW)["state_str"] == "unknown"
 
 
