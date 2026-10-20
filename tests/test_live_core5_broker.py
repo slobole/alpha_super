@@ -60,6 +60,7 @@ class _FakeBroker:
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
     monkeypatch.setattr(IBKRSocketClient, "connect", lambda *argument_tuple: pytest.fail("Real broker forbidden"))
+    monkeypatch.setattr(IBKRSocketClient, "daily_connection", lambda *argument_tuple: pytest.fail("Real broker forbidden"))
 
 
 @pytest.fixture
@@ -74,6 +75,7 @@ def broker_case_tuple(monkeypatch):
         yield broker_obj
 
     monkeypatch.setattr(socket_obj, "connect", connect_fake)
+    monkeypatch.setattr(socket_obj, "daily_connection", connect_fake)
     return socket_obj, broker_obj
 
 
@@ -109,6 +111,18 @@ def test_snapshot_optional_valuation_uses_same_connection_and_original_observati
     snapshot_obj = broker_module.get_core5_account_snapshot(socket_obj, ROUTE_STR, True)
     assert snapshot_obj.portfolio_valuation_dict is valuation_dict
     assert socket_obj.test_connect_count_int == 1
+
+
+@pytest.mark.parametrize("include_bool", [False, True])
+def test_only_core5_eod_valuation_selects_lean_connection(broker_case_tuple, monkeypatch, include_bool):
+    socket_obj, _ = broker_case_tuple
+    forbidden_str = "connect" if include_bool else "daily_connection"
+    monkeypatch.setattr(socket_obj, forbidden_str, lambda: pytest.fail("Wrong connection profile"))
+    monkeypatch.setattr(socket_obj, "_capture_portfolio_valuation_dict",
+        lambda *argument_tuple: {"available_bool": True})
+    snapshot_obj = broker_module.get_core5_account_snapshot(socket_obj, ROUTE_STR, include_bool)
+    assert snapshot_obj.cash_float == 12000
+    assert (snapshot_obj.portfolio_valuation_dict is not None) is include_bool
 
 
 @pytest.mark.parametrize("tag_str,value_obj", [

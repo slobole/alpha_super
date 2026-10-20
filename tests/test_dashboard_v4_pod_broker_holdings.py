@@ -95,8 +95,21 @@ def test_failed_capture_replaces_values_without_using_old_evidence(broker_source
     _save_payload(target_obj, payload_dict)
     result_dict = _read_dict(broker_source_tuple)
     assert not result_dict["available_bool"] and not result_dict["position_list"]
-    assert result_dict["reason_str"].startswith("Values missing: IBKR sent no prices at the ")
-    assert result_dict["reason_str"].endswith(" capture. Shares are correct.") and "internal detail" not in result_dict["reason_str"]
+    assert result_dict["reason_str"].startswith("Values missing: IBKR portfolio unavailable at the ")
+    assert "internal detail" not in result_dict["reason_str"]
+
+
+@pytest.mark.parametrize("reason_str", [
+    "IBKR portfolio request timed out", "IBKR portfolio capture busy",
+    "IBKR portfolio incomplete", "IBKR holdings changed or incomplete", "IBKR account not ready",
+])
+def test_known_capture_failure_is_shown_without_claiming_missing_prices(broker_source_tuple, reason_str):
+    target_obj, payload_dict = broker_source_tuple
+    payload_dict.update(available_bool=False, reason_str=reason_str, position_list=[])
+    _save_payload(target_obj, payload_dict)
+    result_dict = _read_dict(broker_source_tuple)
+    assert result_dict["missing_str"] == f"{reason_str} at the 09:55 capture"
+    assert "sent no prices" not in result_dict["reason_str"]
 
 
 @pytest.mark.parametrize("field_str,value_obj", [

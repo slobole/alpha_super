@@ -81,7 +81,9 @@ def get_core5_account_snapshot(
     include_portfolio_valuation_bool: bool = False,
 ) -> BrokerSnapshot:
     """Capture strict USD totals, signed holdings and all-client open orders."""
-    with socket_client_obj.connect() as ib_obj:
+    connection_fn = (socket_client_obj.daily_connection if include_portfolio_valuation_bool
+                     else socket_client_obj.connect)
+    with connection_fn() as ib_obj:
         _check_connection(ib_obj, socket_client_obj, account_route_str)
         account_value_list = _account_rows_list(ib_obj.accountSummary(account=account_route_str), account_route_str)
         cash_float = _usd_value_float(account_value_list, "TotalCashValue")

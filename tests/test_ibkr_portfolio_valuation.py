@@ -94,6 +94,7 @@ def capture_case(monkeypatch):
         yield ib_obj
 
     monkeypatch.setattr(case_obj.client_obj, "connect", fake_connect)
+    monkeypatch.setattr(case_obj.client_obj, "daily_connection", fake_connect)
     yield case_obj
     ib_obj.wrapper.reset()
 
@@ -137,6 +138,7 @@ def test_snapshot_timestamp_preserves_default_disconnect_boundary(capture_case, 
 
     monkeypatch.setattr("alpha.live.ibkr_socket_client.datetime", SnapshotClock)
     monkeypatch.setattr(capture_case.client_obj, "connect", disconnect_advances_clock)
+    monkeypatch.setattr(capture_case.client_obj, "daily_connection", disconnect_advances_clock)
     monkeypatch.setattr(capture_case.client_obj, "_capture_portfolio_valuation_dict", capture_advances_clock)
     snapshot_obj = capture_case.client_obj.get_account_snapshot(
         ACCOUNT_STR, include_portfolio_valuation_bool=include_bool
@@ -325,14 +327,113 @@ def _seed_single_account_startup(case_obj, complete_bool=True):
     return request_future
 
 
-def test_single_account_uses_completed_download_on_same_fresh_connection(capture_case):
+def test_single_account_ignores_startup_cache_and_requests_fresh_values(capture_case):
     _seed_single_account_startup(capture_case)
+    capture_case.account_value_list = _account_value_list(cash_str="200", nav_str="250")
     valuation_dict = _capture(capture_case).portfolio_valuation_dict
     assert valuation_dict["available_bool"] is True
-    assert valuation_dict["cash_float"] == 100.0
+    assert valuation_dict["cash_float"] == 200.0
     assert valuation_dict["position_list"][0]["value_float"] == 50.0
-    assert capture_case.request_list == []
+    assert capture_case.request_list == [(True, ACCOUNT_STR)]
     assert capture_case.connection_count_int == 1
+
+
+def test_single_account_without_startup_values_gets_complete_capture(capture_case):
+    capture_case.ib_obj.wrapper.accounts = [ACCOUNT_STR]
+    assert _capture(capture_case).portfolio_valuation_dict["available_bool"] is True
+    assert capture_case.request_list == [(True, ACCOUNT_STR)]
+
+
+def test_full_target_rows_with_wrong_account_completion_are_rejected(capture_case):
+    capture_case.end_account_str = OTHER_ACCOUNT_STR
+    assert _capture(capture_case).portfolio_valuation_dict["available_bool"] is False
+
+
+@pytest.mark.parametrize("include_bool", [False, True])
+def test_only_optional_eod_uses_lean_connection(capture_case, monkeypatch, include_bool):
+    forbidden_str = "connect" if include_bool else "daily_connection"
+    monkeypatch.setattr(capture_case.client_obj, forbidden_str,
+        lambda: pytest.fail(f"Unexpected {forbidden_str} connection"))
+    snapshot_obj = capture_case.client_obj.get_account_snapshot(
+        ACCOUNT_STR, include_portfolio_valuation_bool=include_bool)
+    assert snapshot_obj.position_amount_map == {"AAA": 2.0}
+    if include_bool:
+        assert snapshot_obj.portfolio_valuation_dict["available_bool"]
+
+
+@pytest.mark.parametrize("exception_obj", [TimeoutError("busy"), PermissionError("denied")])
+def test_capture_lock_failure_preserves_ordinary_snapshot(capture_case, monkeypatch, exception_obj):
+    @contextmanager
+    def failed_lock(*argument_tuple):
+        raise exception_obj
+        yield
+    monkeypatch.setattr("alpha.live.ibkr_socket_client.portfolio_capture_lock", failed_lock)
+    snapshot_obj = _capture(capture_case)
+    assert snapshot_obj.portfolio_valuation_dict["available_bool"] is False
+    assert snapshot_obj.cash_float == 90.0
+    assert snapshot_obj.position_amount_map == {"AAA": 2.0}
+    assert snapshot_obj.open_order_id_list == ["11"]
+    assert capture_case.request_list == []
+
+
+@pytest.mark.parametrize("timeout_bool", [False, True])
+def test_capture_disconnects_before_unlock_even_on_timeout(capture_case, monkeypatch, timeout_bool):
+    event_list = []
+    connected_list = [True]
+    @contextmanager
+    def observed_lock(*argument_tuple):
+        event_list.append("lock")
+        yield
+        assert not connected_list[0]
+        event_list.append("unlock")
+    def disconnect():
+        event_list.append("disconnect")
+        connected_list[0] = False
+    monkeypatch.setattr("alpha.live.ibkr_socket_client.portfolio_capture_lock", observed_lock)
+    monkeypatch.setattr(capture_case.ib_obj, "isConnected", lambda: connected_list[0])
+    monkeypatch.setattr(capture_case.ib_obj, "disconnect", disconnect)
+    capture_case.no_reply_bool = timeout_bool
+    result_dict = _capture(capture_case).portfolio_valuation_dict
+    assert result_dict["available_bool"] is not timeout_bool
+    assert event_list == ["lock", "disconnect", "unlock"]
+
+
+@pytest.mark.parametrize("exception_type", [TimeoutError, RuntimeError])
+def test_cleanup_failure_cannot_report_success(capture_case, monkeypatch, exception_type):
+    @contextmanager
+    def failed_cleanup(*argument_tuple):
+        yield
+        raise exception_type("cleanup failed")
+    monkeypatch.setattr("alpha.live.ibkr_socket_client.portfolio_capture_lock", failed_cleanup)
+    snapshot_obj = _capture(capture_case)
+    assert snapshot_obj.portfolio_valuation_dict["available_bool"] is False
+    assert "position_list" not in snapshot_obj.portfolio_valuation_dict
+    assert snapshot_obj.cash_float == 90.0
+
+
+def test_capture_pumps_transport_close_before_releasing_lock(capture_case, monkeypatch):
+    connection_obj = capture_case.ib_obj.client.conn
+    connection_obj.transport = object()
+    connected_list = [True]
+    event_list = []
+    @contextmanager
+    def observed_lock(*argument_tuple):
+        yield
+        assert connection_obj.transport is None
+        assert event_list == ["disconnect", "transport_closed"]
+    def close_transport():
+        connection_obj.transport = None
+        event_list.append("transport_closed")
+        connection_obj.disconnected.emit("")
+    def disconnect():
+        connected_list[0] = False
+        event_list.append("disconnect")
+        asyncio.get_event_loop().call_soon(close_transport)
+    monkeypatch.setattr("alpha.live.ibkr_socket_client.portfolio_capture_lock", observed_lock)
+    monkeypatch.setattr(capture_case.ib_obj, "isConnected", lambda: connected_list[0])
+    monkeypatch.setattr(capture_case.ib_obj, "disconnect", disconnect)
+    assert _capture(capture_case).portfolio_valuation_dict["available_bool"] is True
+    assert connection_obj.transport is None
 
 
 @pytest.mark.parametrize("cancel_bool", [False, True])

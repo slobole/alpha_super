@@ -109,15 +109,25 @@ to allow IBKR display rounding. Shorts and negative cash keep the value table
 without a donut. Unsupported currencies/contracts or incomplete downloads keep
 the quantities-only panel. This is whole-account display: one account = one Pod.
 
-For a single managed account, ib_async 2.1 startup already downloads its
-portfolio on the newly constructed connection. Capture requires completion;
-the read-only accountValues future guard rejects pending/cancelled startup
-downloads. An offline test exercises this installed SDK contract. For multiple
-accounts, capture requests one account-scoped download and collects fresh
-account/portfolio events; native completion alone is insufficient without all
-matching shares and USD totals. The extra wait is bounded by the configured
-broker timeout, clamped to 0.1–10 seconds. No callbacks or subscriptions are
-replaced or cancelled. Timeout/error leaves the ordinary EOD snapshot intact.
+Valuation-enabled EOD uses the existing lean read-only connection without
+automatic account/Multi subscriptions. Ordinary trading connections are unchanged.
+After ordinary cash, holdings and open-order reads, capture requests a fresh
+account download, even for a single managed account. It collects fresh target
+events and observes the exact account completion while forwarding/restoring the
+owned connection's SDK callback. All matching shares and explicit USD totals
+remain required. A pending accountValues request is rejected, never replaced.
+The request timeout remains the configured broker timeout, clamped to 0.1–10
+seconds.
+
+A native OS file lock serializes these optional captures by normalized API
+host/port across pod processes and release roots for the same OS user. Lock files
+live under `~/.alpha_super/locks`, remain on disk, and release automatically on
+process exit. Waiting is capped at ten seconds. The owned connection disconnects
+and completes local transport shutdown before unlocking. Lock, request or cleanup
+failure leaves the ordinary EOD snapshot intact and marks display data unavailable.
+External clients, other OS users and other machines do not participate in this
+lock and can still interfere. The dashboard shows known saved failure reasons
+without exposing arbitrary broker errors.
 
 An additive nullable portfolio_valuation_json_str column in broker_snapshot_cache
 holds the complete display sample and exact release/user/Pod/account identity.

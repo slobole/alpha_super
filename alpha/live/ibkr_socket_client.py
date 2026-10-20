@@ -34,6 +34,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only in lightweight 
             raise ModuleNotFoundError("ib_async is required for live IBKR connectivity.")
 
 from alpha.live import scheduler_utils
+from alpha.live.portfolio_capture_lock import portfolio_capture_lock
 from alpha.live.models import (
     BrokerOrderAck,
     BrokerOrderEvent,
@@ -464,7 +465,8 @@ class IBKRSocketClient:
         include_portfolio_valuation_bool: bool = False,
         include_all_client_orders_bool: bool = False,
     ) -> BrokerSnapshot:
-        with self.connect() as ib_obj:
+        connection_fn = self.daily_connection if include_portfolio_valuation_bool else self.connect
+        with connection_fn() as ib_obj:
             account_value_list = ib_obj.accountSummary(account=account_route_str)
             account_value_map = {
                 account_value_obj.tag: account_value_obj.value
@@ -520,7 +522,7 @@ class IBKRSocketClient:
             if include_portfolio_valuation_bool:
                 # Display marks cannot replace the completed cash/holdings read.
                 valuation_dict = self._capture_portfolio_valuation_dict(
-                    ib_obj, account_route_str, snapshot_obj.position_amount_map, force_refresh_bool=True)
+                    ib_obj, account_route_str, snapshot_obj.position_amount_map)
                 snapshot_obj = replace(snapshot_obj, portfolio_valuation_dict=valuation_dict)
         return snapshot_obj
 
@@ -529,12 +531,12 @@ class IBKRSocketClient:
         ib_obj: IB,
         account_route_str: str,
         position_amount_map: dict[str, float],
-        *, force_refresh_bool: bool = False,
     ) -> dict[str, object]:
-        """Optional EOD display values; never replace the trading snapshot.
+        """Terminal read on an owned lean EOD connection; preserve base snapshot.
 
-        connect() owns a new IB instance per call. No shared subscriptions or
-        callbacks are replaced, and the enclosing context still disconnects it.
+        All callers have finished their ordinary account reads. Disconnect before
+        releasing the endpoint lock so the next pod cannot overlap our subscription.
+        Ordinary trading connections never enter this path.
         """
         valuation_dict: dict[str, object] = {
             "available_bool": False,
@@ -543,44 +545,78 @@ class IBKRSocketClient:
             "source_str": "IBKR portfolio",
             "currency_str": "USD",
         }
+        lock_acquired_bool = False
+        try:
+            with portfolio_capture_lock(self.host_str, self.port_int):
+                lock_acquired_bool = True
+                try:
+                    valuation_dict.update(self._download_portfolio_valuation_dict(
+                        ib_obj, account_route_str, position_amount_map))
+                finally:
+                    if ib_obj.isConnected():
+                        ib_obj.disconnect()
+                        close_deadline_float = monotonic() + 1.0
+                        while ib_obj.client.conn.transport is not None:
+                            if monotonic() >= close_deadline_float:
+                                raise TimeoutError("IBKR portfolio connection did not close")
+                            ib_obj.sleep(0.01)
+        except Exception as exception_obj:
+            # Lock/cleanup failure must not fail the ordinary EOD snapshot.
+            valuation_dict["available_bool"] = False
+            valuation_dict.pop("position_list", None)
+            valuation_dict["reason_str"] = (
+                "IBKR portfolio capture busy" if isinstance(exception_obj, TimeoutError) and not lock_acquired_bool
+                else "IBKR portfolio unavailable")
+        finally:
+            valuation_dict["observed_timestamp_str"] = datetime.now(tz=UTC).isoformat()
+        return valuation_dict
+
+    def _download_portfolio_valuation_dict(
+        self, ib_obj: IB, account_route_str: str, position_amount_map: dict[str, float],
+    ) -> dict[str, object]:
+        valuation_dict: dict[str, object] = {
+            "available_bool": False, "reason_str": "IBKR portfolio unavailable",
+        }
         try:
             account_list = ib_obj.managedAccounts()
             if not account_route_str or account_route_str not in account_list:
                 return valuation_dict
-            # ib_async 2.1's single-account startup awaits accountValues. A
-            # timeout cancels its Future but leaves this key until the full
-            # accountDownloadEnd arrives. Reading the key never changes it.
             if "accountValues" in ib_obj.wrapper._futures:
                 return valuation_dict
-            if account_list == [account_route_str] and not force_refresh_bool:
-                portfolio_item_list = ib_obj.portfolio(account=account_route_str)
-                account_value_list = ib_obj.accountValues(account=account_route_str)
-            else:
-                # Multi-account startup and the capsule's read-only connection
-                # have no portfolio marks. This is the sole classic account download
-                # on this dedicated connection. Collect fresh target rows;
-                # the SDK's unscoped completion alone is not completeness proof.
-                portfolio_item_list: list[object] = []
-                account_value_list: list[object] = []
+            # Lean startup has no portfolio download, including single-account
+            # sessions. Require fresh rows and the exact account's completion.
+            portfolio_item_list: list[object] = []
+            account_value_list: list[object] = []
+            completed_bool = False
+            original_end_fn = ib_obj.wrapper.accountDownloadEnd
 
-                def collect_portfolio_item(portfolio_item_obj):
-                    if portfolio_item_obj.account == account_route_str:
-                        portfolio_item_list.append(portfolio_item_obj)
+            def collect_portfolio_item(portfolio_item_obj):
+                if portfolio_item_obj.account == account_route_str:
+                    portfolio_item_list.append(portfolio_item_obj)
 
-                def collect_account_value(account_value_obj):
-                    if account_value_obj.account == account_route_str:
-                        account_value_list.append(account_value_obj)
+            def collect_account_value(account_value_obj):
+                if account_value_obj.account == account_route_str:
+                    account_value_list.append(account_value_obj)
 
-                ib_obj.updatePortfolioEvent += collect_portfolio_item
-                ib_obj.accountValueEvent += collect_account_value
-                try:
-                    ib_obj.run(
-                        ib_obj.reqAccountUpdatesAsync(account_route_str),
-                        timeout=max(0.1, min(self.timeout_seconds_float, 10.0)),
-                    )
-                finally:
-                    ib_obj.updatePortfolioEvent -= collect_portfolio_item
-                    ib_obj.accountValueEvent -= collect_account_value
+            def observe_download_end(completed_account_str):
+                nonlocal completed_bool
+                completed_bool = completed_account_str == account_route_str
+                original_end_fn(completed_account_str)
+
+            ib_obj.updatePortfolioEvent += collect_portfolio_item
+            ib_obj.accountValueEvent += collect_account_value
+            ib_obj.wrapper.accountDownloadEnd = observe_download_end
+            try:
+                ib_obj.run(
+                    ib_obj.reqAccountUpdatesAsync(account_route_str),
+                    timeout=max(0.1, min(self.timeout_seconds_float, 10.0)),
+                )
+            finally:
+                ib_obj.wrapper.accountDownloadEnd = original_end_fn
+                ib_obj.updatePortfolioEvent -= collect_portfolio_item
+                ib_obj.accountValueEvent -= collect_account_value
+            if not completed_bool:
+                return valuation_dict
             valuation_dict.update(self._build_portfolio_valuation_values_dict(
                 portfolio_item_list, account_value_list, position_amount_map
             ))
@@ -589,8 +625,6 @@ class IBKRSocketClient:
         except Exception:
             # A missing display value must not fail the existing EOD capture.
             pass
-        finally:
-            valuation_dict["observed_timestamp_str"] = datetime.now(tz=UTC).isoformat()
         return valuation_dict
 
     @staticmethod

@@ -182,6 +182,9 @@ def test_capsule_eod_marks_refresh_on_the_same_connection_and_never_replace_acco
     def valuation_connection():
         ib_obj = FakeIB(state_obj, 31)
         ib_obj.wrapper._futures = {}
+        ib_obj.wrapper.accountDownloadEnd = lambda account_str: None
+        ib_obj.client.conn = SimpleNamespace(transport=None)
+        ib_obj.disconnect = lambda: setattr(ib_obj, "connected_bool", False)
         ib_obj.managedAccounts = lambda: account_list
         ib_obj.updatePortfolioEvent = Event()
         ib_obj.accountValueEvent = Event()
@@ -202,6 +205,7 @@ def test_capsule_eod_marks_refresh_on_the_same_connection_and_never_replace_acco
                 contract_obj = SimpleNamespace(**vars(position_obj.contract), conId=asset_int, multiplier="")
                 ib_obj.updatePortfolioEvent.emit(SimpleNamespace(account="DU1", contract=contract_obj,
                     position=position_obj.position, marketPrice=100.0, marketValue=position_obj.position * 100.0))
+            ib_obj.wrapper.accountDownloadEnd("DU1")
         ib_obj.run = run_update
         connection_list.append(ib_obj)
         try:

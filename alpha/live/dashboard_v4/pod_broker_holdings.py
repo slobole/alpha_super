@@ -95,8 +95,14 @@ def load_broker_holdings_dict(target_obj, *, as_of_ts):
             raise ValueError("Portfolio time must be UTC")
         if payload_dict.get("available_bool") is False:
             capture_str = timestamp_ts.astimezone(MARKET_TIMEZONE_OBJ).strftime("%H:%M")
-            result_dict["reason_str"] = f"Values missing: IBKR sent no prices at the {capture_str} capture. Shares are correct."
-            result_dict["missing_str"] = f"IBKR sent no prices at the {capture_str} capture"
+            reason_obj = payload_dict.get("reason_str")
+            reason_str = reason_obj if isinstance(reason_obj, str) and reason_obj in {
+                "IBKR portfolio request timed out", "IBKR portfolio capture busy",
+                "IBKR portfolio incomplete", "IBKR holdings changed or incomplete",
+                "IBKR account not ready",
+            } else "IBKR portfolio unavailable"
+            result_dict["missing_str"] = f"{reason_str} at the {capture_str} capture"
+            result_dict["reason_str"] = f"Values missing: {result_dict['missing_str']}."
             return result_dict
         if payload_dict.get("available_bool") is not True or payload_dict.get("currency_str") != "USD":
             raise ValueError("Unsupported portfolio currency")
