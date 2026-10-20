@@ -357,6 +357,7 @@ def pod_view_dict(report_dict, pod_id_str):
                        "note_str": "", "empty_str": _text(decision_dict.get("reason_str")) or "Nothing to compare for this session."},
         "record_dict": _record_view_dict(pod_dict.get("record_list")),
         "point_list": point_list, "gap_str": _pct_str(curve_dict.get("gap_float")),
+        "excluded_non_session_zero_date_list": curve_dict.get("excluded_non_session_zero_date_list", []),
         "gap_month_str": _pct_str(curve_dict.get("gap_month_float")),
         "gap_float": curve_dict.get("gap_float") if _finite(curve_dict.get("gap_float")) else None,
         "live_str": _pct_str(point_list[-1]["live_float"]) if point_list else "—",
@@ -375,6 +376,42 @@ def add_backtest_series(chart_dict, return_path_list, view_dict):
     if not chart_dict.get("available_bool") or not view_dict or len(view_dict["point_list"]) < 2 or not return_path_list:
         return chart_dict
     backtest_by_date_dict = {point_dict["date_str"]: point_dict["backtest_float"] for point_dict in view_dict["point_list"]}
+    excluded_date_list = view_dict.get("excluded_non_session_zero_date_list", [])
+    if not isinstance(excluded_date_list, list):
+        return chart_dict
+    try:
+        if any(not isinstance(date_str, str) or datetime.fromisoformat(date_str).date().isoformat() != date_str
+               for date_str in excluded_date_list):
+            return chart_dict
+    except ValueError:
+        return chart_dict
+    excluded_date_set = set(excluded_date_list)
+    if excluded_date_set:
+        from alpha.live.backtest_check import session_date_list
+
+        dated_list = [str(row_dict.get("market_date_str", "")) for row_dict in return_path_list
+                      if not str(row_dict.get("market_date_str", "")).endswith(" SOD")]
+        if not dated_list:
+            return chart_dict
+        try:
+            exchange_date_set = set(session_date_list(min(dated_list), max(dated_list)))
+        except (ValueError, TypeError):
+            return chart_dict
+        aligned_path_list, previous_value_obj = [], None
+        for row_dict in return_path_list:
+            date_str = str(row_dict.get("market_date_str", ""))
+            value_obj = row_dict.get("cumulative_return_float")
+            # *** CRITICAL *** Display alignment needs both dated report evidence
+            # and a still-flat official path. Never bridge a missing trading day.
+            if (date_str in excluded_date_set and date_str not in exchange_date_set
+                    and date_str not in backtest_by_date_dict and _finite(value_obj)
+                    and value_obj == previous_value_obj):
+                continue
+            aligned_path_list.append(row_dict)
+            previous_value_obj = value_obj if _finite(value_obj) else None
+        return_path_list = aligned_path_list
+        if not exchange_date_set.issubset({str(row_dict.get("market_date_str", "")) for row_dict in return_path_list}):
+            return chart_dict
     live_segment, test_segment, base_float = [], [], None
     first_live_str = next((row_dict["market_date_str"] for row_dict in return_path_list
                            if not str(row_dict.get("market_date_str", "")).endswith(" SOD")), None)

@@ -309,6 +309,77 @@ def test_incomplete_coverage_never_displays_a_partial_gap(missing_side_str):
     assert curve_dict["point_list"] == []
 
 
+def test_zero_return_broker_holiday_is_disclosed_without_changing_compounding():
+    live_return_dict = {"2026-07-02": 0.01, "2026-07-03": 0.0, "2026-07-06": -0.02}
+    reference_return_dict = {"2026-07-02": 0.01, "2026-07-06": -0.01}
+    expected_date_list = ["2026-07-02", "2026-07-06"]
+    comparison_dict = bc.curve_dict(live_return_dict, reference_return_dict, expected_date_list=expected_date_list)
+    assert comparison_dict["coverage_status_str"] == "complete"
+    assert comparison_dict["excluded_non_session_zero_date_list"] == ["2026-07-03"]
+    assert "2026-07-03" in comparison_dict["alignment_note_str"]
+    assert comparison_dict["coverage_reason_str"] == ""
+    assert [point_dict["date_str"] for point_dict in comparison_dict["point_list"]] == expected_date_list
+    assert comparison_dict["point_list"][-1]["live_float"] == pytest.approx(1.01 * 1.0 * 0.98 - 1)
+    assert comparison_dict["gap_float"] == pytest.approx(0.98 / 0.99 - 1)
+    assert live_return_dict["2026-07-03"] == 0.0  # The source observations stay intact.
+
+
+@pytest.mark.parametrize("holiday_return_float", [0.001, -0.001, 1e-12, float("nan"), float("inf"), False, "0", None])
+def test_nonzero_or_invalid_broker_holiday_cannot_be_dropped(holiday_return_float):
+    live_return_dict = {"2026-07-02": 0.0, "2026-07-03": holiday_return_float, "2026-07-06": 0.0}
+    comparison_dict = bc.curve_dict(live_return_dict, {"2026-07-02": 0.0, "2026-07-06": 0.0})
+    assert comparison_dict["coverage_status_str"] == "incomplete"
+    assert comparison_dict["excluded_non_session_zero_date_list"] == []
+    assert comparison_dict["missing_reference_date_list"] == ["2026-07-03"]
+    assert comparison_dict["gap_float"] is None
+
+
+def test_zero_return_holiday_does_not_hide_a_missing_exchange_session():
+    live_return_dict = {"2026-07-02": 0.0, "2026-07-03": 0.0, "2026-07-06": 0.0}
+    comparison_dict = bc.curve_dict(live_return_dict, {"2026-07-02": 0.0})
+    assert comparison_dict["coverage_status_str"] == "incomplete"
+    assert comparison_dict["excluded_non_session_zero_date_list"] == ["2026-07-03"]
+    assert comparison_dict["missing_reference_date_list"] == ["2026-07-06"]
+    assert comparison_dict["gap_float"] is None
+
+
+def test_known_reference_holiday_is_compared_instead_of_excluded():
+    live_return_dict = {"2026-07-02": 0.0, "2026-07-03": 0.0, "2026-07-06": 0.0}
+    reference_return_dict = {"2026-07-02": 0.0, "2026-07-03": -0.01, "2026-07-06": 0.0}
+    comparison_dict = bc.curve_dict(live_return_dict, reference_return_dict)
+    assert comparison_dict["coverage_status_str"] == "complete"
+    assert comparison_dict["excluded_non_session_zero_date_list"] == []
+    assert comparison_dict["gap_float"] == pytest.approx(1 / 0.99 - 1)
+
+
+def test_loren_holiday_alignment_keeps_all_77_required_exchange_sessions():
+    expected_date_list = bc.session_date_list("2026-07-01", "2026-10-19")
+    assert len(expected_date_list) == 77
+    live_return_dict = {date_str: 0.0 for date_str in expected_date_list}
+    live_return_dict.update({"2026-07-03": 0.0, "2026-09-07": 0.0})
+    reference_return_dict = {date_str: 0.0 for date_str in expected_date_list[:-1]}
+    incomplete_dict = bc.curve_dict(live_return_dict, reference_return_dict, expected_date_list=expected_date_list)
+    assert incomplete_dict["excluded_non_session_zero_date_list"] == ["2026-07-03", "2026-09-07"]
+    assert incomplete_dict["missing_reference_date_list"] == ["2026-10-19"]
+    assert incomplete_dict["gap_float"] is None
+    reference_return_dict["2026-10-19"] = 0.0
+    complete_dict = bc.curve_dict(live_return_dict, reference_return_dict, expected_date_list=expected_date_list)
+    assert complete_dict["coverage_status_str"] == "complete"
+    assert len(complete_dict["point_list"]) == 77
+    assert complete_dict["gap_float"] == 0.0
+
+
+def test_sparse_expected_calendar_does_not_classify_a_session_as_a_holiday():
+    comparison_dict = bc.curve_dict(
+        {"2026-10-12": 0.0, "2026-10-13": 0.0, "2026-10-14": 0.0},
+        {"2026-10-12": 0.0, "2026-10-14": 0.0},
+        expected_date_list=["2026-10-12", "2026-10-14"],
+    )
+    assert comparison_dict["excluded_non_session_zero_date_list"] == []
+    assert comparison_dict["missing_reference_date_list"] == ["2026-10-13"]
+    assert comparison_dict["gap_float"] is None
+
+
 def test_rare_windows_are_consecutive_and_end_on_the_required_session():
     ruler_dict = {"3": {"one_in_100_float": -0.05, "worst_float": -0.2}}
     sparse_return_dict = {"2026-10-12": 0.0, "2026-10-14": -0.03, "2026-10-16": -0.03}

@@ -341,17 +341,34 @@ def daily_returns_from_equity(equity_by_date_dict: dict[str, float], *, initial_
 def curve_dict(live_return_dict: dict[str, float], reference_return_dict: dict[str, float], *, expected_date_list: list[str] | None = None) -> dict:
     """Complete matching dates only: I_t=I_(t-1)*(1+r_t); gap=I_live/I_reference-1."""
     date_set = set(live_return_dict) | set(reference_return_dict) | set(expected_date_list or [])
+    exchange_date_set = set()
     if date_set:
-        date_set.update(session_date_list(min(date_set), max(date_set)))
+        exchange_date_set = set(session_date_list(min(date_set), max(date_set)))
+        date_set.update(exchange_date_set)
+    # *** CRITICAL *** Only an unmatched, calendar-confirmed non-session with a
+    # reported exact numeric zero may be omitted: multiplying by (1 + 0) = 1
+    # preserves TWR. Never invent reference returns or omit a required session.
+    excluded_non_session_zero_date_list = sorted(
+        date_str for date_str in set(live_return_dict) - set(reference_return_dict)
+        - exchange_date_set - set(expected_date_list or [])
+        if type(live_return_dict[date_str]) in (int, float) and live_return_dict[date_str] == 0.0
+    )
+    date_set.difference_update(excluded_non_session_zero_date_list)
     missing_live_list = sorted(date_set - set(live_return_dict))
     missing_reference_list = sorted(date_set - set(reference_return_dict))
-    invalid_bool = any(_finite_float(value_float) is None or value_float <= -1
+    coverage_dict = {"excluded_non_session_zero_date_list": excluded_non_session_zero_date_list,
+                     "missing_live_date_list": missing_live_list, "missing_reference_date_list": missing_reference_list}
+    alignment_reason_str = ("Reported zero-return IBKR non-session rows excluded: "
+                            + ", ".join(excluded_non_session_zero_date_list) + ".") if excluded_non_session_zero_date_list else ""
+    coverage_dict["alignment_note_str"] = alignment_reason_str
+    invalid_bool = any(isinstance(value_float, bool) or not isinstance(value_float, (int, float))
+                       or _finite_float(value_float) is None or value_float <= -1
                        for value_float in list(live_return_dict.values()) + list(reference_return_dict.values()))
     if missing_live_list or missing_reference_list or invalid_bool:
-        return {"point_list": [], "gap_float": None, "gap_month_float": None, "start_str": None,
+        return {**coverage_dict, "point_list": [], "gap_float": None, "gap_month_float": None, "start_str": None,
                 "coverage_status_str": "incomplete", "coverage_reason_str":
                 f"Incomplete same-days coverage: {len(missing_live_list)} live / {len(missing_reference_list)} reference dates missing."
-                + (" Invalid returns." if invalid_bool else "")}
+                + (" Invalid returns." if invalid_bool else "") + (" " + alignment_reason_str if alignment_reason_str else "")}
     date_list = sorted(date_set)[-CURVE_LIMIT_INT:]
     live_float = test_float = 1.0
     point_list = []
@@ -360,13 +377,15 @@ def curve_dict(live_return_dict: dict[str, float], reference_return_dict: dict[s
         test_float *= 1.0 + reference_return_dict[date_str]
         point_list.append({"date_str": date_str, "live_float": live_float - 1.0, "backtest_float": test_float - 1.0})
     if not point_list:
-        return {"point_list": [], "gap_float": None, "gap_month_float": None, "start_str": None,
-                "coverage_status_str": "incomplete", "coverage_reason_str": "No matching return history."}
+        return {**coverage_dict, "point_list": [], "gap_float": None, "gap_month_float": None, "start_str": None,
+                "coverage_status_str": "incomplete", "coverage_reason_str": "No matching return history."
+                + (" " + alignment_reason_str if alignment_reason_str else "")}
     month_str = date_list[-1][:7]
     before_list = [point for point in point_list if point["date_str"][:7] < month_str]
     base_live, base_test = (before_list[-1]["live_float"], before_list[-1]["backtest_float"]) if before_list else (0.0, 0.0)
     last_dict = point_list[-1]
-    return {"point_list": point_list, "start_str": date_list[0], "coverage_status_str": "complete", "coverage_reason_str": "",
+    return {**coverage_dict, "point_list": point_list, "start_str": date_list[0], "coverage_status_str": "complete",
+            "coverage_reason_str": "",
             "gap_float": (1 + last_dict["live_float"]) / (1 + last_dict["backtest_float"]) - 1.0,
             "gap_month_float": ((1 + last_dict["live_float"]) / (1 + base_live)) / ((1 + last_dict["backtest_float"]) / (1 + base_test)) - 1.0}
 
@@ -555,6 +574,8 @@ def load_or_build_ruler_dict(release_obj, *, cache_dir_path: Path, deployment_st
     return_list = [value_float for _, value_float in sorted(return_dict.items())]
     ruler_dict = {"built_date_str": today_obj.isoformat(), "history_end_str": end_str, "session_count_int": len(return_list),
                   "window_dict": build_ruler_dict(return_list)}
+    if maps_dict.get("reference_benchmark_source_dict"):
+        ruler_dict["reference_benchmark_source_dict"] = dict(maps_dict["reference_benchmark_source_dict"])
     _atomic_write_json(cache_path, ruler_dict)
     return ruler_dict
 
@@ -629,6 +650,8 @@ def check_pod_dict(target_obj, *, as_of_date_str: str, live_return_dict: dict, p
         pod_dict["decision_dict"] = {"status_str": "not_checked", "reason_str": "The backtest could not run."}
         pod_dict["record_list"] = merge_record_list(previous_record_list, session_str, "not_checked")
         return pod_dict
+    if maps_dict.get("reference_benchmark_source_dict"):
+        pod_dict["reference_benchmark_source_dict"] = dict(maps_dict["reference_benchmark_source_dict"])
     from alpha.live.reference_compare import get_reference_realized_weight_map_dict
 
     skip_set = PARKING_ASSET_SET if module_str.startswith(MR_CAPSULE_IMPORT_PREFIX_STR) else frozenset()

@@ -58,6 +58,8 @@ Execution mapping:
 from __future__ import annotations
 
 from collections import defaultdict
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from typing import Sequence
 
@@ -69,7 +71,7 @@ from IPython.display import display
 from alpha.engine.backtest import run_daily
 from alpha.engine.report import save_results
 from alpha.engine.strategy import Strategy
-from data.norgate_loader import build_index_constituent_matrix, load_raw_prices
+from data.norgate_loader import build_index_constituent_matrix, load_raw_prices, use_norgate_data_profile
 from data.norgate_snapshot_store import (
     CAPITALSPECIAL_ADJUSTMENT_STR,
     TOTALRETURN_ADJUSTMENT_STR,
@@ -168,16 +170,35 @@ __all__ = [
 ]
 
 
+_REFERENCE_BENCHMARK_PROFILE_CONTEXT_VAR: ContextVar[str | None] = ContextVar(
+    "ndx_reference_benchmark_profile", default=None,
+)
+
+
+@contextmanager
+def use_reference_benchmark_profile(data_profile_str: str | None):
+    """Route only the reporting benchmark; stock/regime/universe reads stay local."""
+    profile_token_obj = _REFERENCE_BENCHMARK_PROFILE_CONTEXT_VAR.set(data_profile_str)
+    try:
+        yield
+    finally:
+        _REFERENCE_BENCHMARK_PROFILE_CONTEXT_VAR.reset(profile_token_obj)
+
+
 def append_total_return_benchmark_data_df(
     pricing_data_df: pd.DataFrame,
     config_obj: AtrNormalizedNdxConfig,
 ) -> pd.DataFrame:
-    total_return_benchmark_df = load_raw_prices(
-        symbols=[],
-        benchmarks=[config_obj.performance_benchmark_data_symbol_str],
-        start_date=config_obj.history_start_date_str,
-        end_date=config_obj.end_date_str,
-    )
+    benchmark_profile_str = _REFERENCE_BENCHMARK_PROFILE_CONTEXT_VAR.get()
+    # *** CRITICAL *** This context covers only the reporting benchmark read.
+    # Close_T stock signals and next-open execution keep their original profile.
+    with (use_norgate_data_profile(benchmark_profile_str) if benchmark_profile_str else nullcontext()):
+        total_return_benchmark_df = load_raw_prices(
+            symbols=[],
+            benchmarks=[config_obj.performance_benchmark_data_symbol_str],
+            start_date=config_obj.history_start_date_str,
+            end_date=config_obj.end_date_str,
+        )
     benchmark_data_symbol_str = config_obj.performance_benchmark_data_symbol_str
     # *** CRITICAL*** Benchmark provenance must not expand or remap the
     # strategy calendar. Align the TR benchmark to the already-established

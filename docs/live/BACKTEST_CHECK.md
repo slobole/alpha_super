@@ -40,7 +40,7 @@ Output: `backtest_check_latest.json` next to the watchdog report (`ops_report_la
 | Part | How | Shows in V4 |
 |---|---|---|
 | Decision check | The reference starts with the first executed plan's session and budget and ends at the last finished exchange session. Full books require matching symbols and exposure directions; weights of matching symbols and total gross exposure each tolerate ±5 percentage points because reference weights are marked at that close. Small per-symbol differences cannot accumulate into an unchecked total-exposure difference. Entry/exit books check actions and equal-slot entry weights from the actual configured DV2, DV2-IND, HPI and MR reference objects (`1 / slots`, tolerance `0.000001` in decimal weight). Other entry-weight contracts remain unchecked. Exact decision-session coverage is required; older holdings never substitute. | Pod page: Backtest tab, red box when a current check differs; Overview row |
-| Same-days curve | Live daily TWR (IBKR Flex) and reference daily return, including the reference's first session from initial cash. Every finished exchange session from deployment must exist in both sources. Missing dates or invalid returns make the curve/gap unavailable, with the reason displayed; dates are never silently dropped. Non-session broker rows also require matching reference evidence. Up to 400 complete dated points are displayed. | Pod Value chart: dashed second line only when the whole selected period is covered; Performance → Vs backtest |
+| Same-days curve | Live daily TWR (IBKR Flex) and reference daily return, including the reference's first session from initial cash. Every finished exchange session from deployment must exist in both sources. Missing dates or invalid returns make the curve/gap unavailable, with the reason displayed. Unmatched IBKR rows on independently confirmed non-session dates are excluded only when their reported return is exactly numeric zero; the dates and reason are retained in the report. All other non-session rows require matching reference evidence. Up to 400 complete dated points are displayed. | Pod Value chart: dashed second line only when the whole selected period is covered; Performance → Vs backtest |
 | Rare loss | Live loss over 1 / 3 / 5 consecutive exchange sessions ending at the required last finished session, below the reference's 1-in-100 line. The historical ruler ends before deployment, uses the runner's declared historical start/config default, requires continuous session history and at least 250 windows per length, and expires after 35 days. Cause: "strategy" when the reference lost at least 70% as much, "ours" otherwise, "unknown" if same-window reference data is absent. Missing live sessions suppress that window. | Amber line on the Pod page (red when "ours"); Overview row only when "ours" |
 | MR cost component | Stock fills of the MR capsule pods vs the official open, per side, worse = positive. BIL/SPMO parking fills and fills without an official open are excluded from the average/count. The deadline starts at the first stock fill, including fills without an official open: 183 calendar days (approximately six months). The 200th qualifying fill must occur by that deadline. An early completed sample remains timely when reviewed later. The average uses all valid fills available through the as-of date. | Performance → Vs backtest; Overview row when above / failed / time cap. A pass means the cost component only; unexplained halts still need separate review. |
 
@@ -48,6 +48,13 @@ Output: `backtest_check_latest.json` next to the watchdog report (`ops_report_la
 
 - Read-only toward live state: pod databases opened with SQLite `mode=ro`; the Flex store through
   `client_reporting` (read-only). No `LiveStateStore`, no release sync, no broker, no orders.
+- The legacy NDX VXN reference reads only its `$SPXTR/TOTALRETURN` reporting benchmark from the
+  existing `norgate_eod_etf_plus_vix_helper` snapshot. Its released NDX profile, PIT universe,
+  stock/SPY prices and VXN inputs stay unchanged. The benchmark context is local to the run;
+  missing benchmark dates fail rather than extending or filling the stock calendar. The ETF
+  snapshot must cover the requested reference end date. Its profile, date and manifest hash are
+  retained in reference maps, comparison summaries, pod check reports and newly built rulers.
+  This remains a current-snapshot reconstruction, not proof of original decision-time data parity.
 - Backtests run one pod at a time inside `isolated_fred_cache_context`: all FRED cache writes go under that
   reference run's `macro_cache` directory, including historical ruler runs. The existing configured cache is
   a read-only offline fallback. The series, macro mode, as-of boundary and strategy parameters do not change.
@@ -94,6 +101,14 @@ Output: `backtest_check_latest.json` next to the watchdog report (`ops_report_la
   rare-loss attribution for the affected window is unknown. A missing deployment-first NAV is not rebased later.
 - Each complete displayed curve compounds independently: `I_0 = 1`, `I_t = I_(t-1) * (1 + r_t)`.
   Relative gap: `I_live / I_reference - 1`; monthly gap divides each curve by its own prior-month closing index first.
+- Omitting an unmatched, reported exact-zero non-session return preserves compounding because `1 + 0 = 1`.
+  This is comparison-calendar alignment, not a claim of no account activity. Raw Flex rows stay unchanged.
+  Nonzero/near-zero, invalid, boolean or string values are never excluded; a zero on an exchange session remains required.
+  Existing reference observations on non-session dates are still compared. The report records excluded dates and
+  exact missing live/reference dates, including when the comparison remains incomplete. No reference return is invented.
+  The Pod Value overlay uses the same dated exclusions only when the official cumulative return is still unchanged
+  from its preceding point and the date is independently confirmed closed. Raw official chart/source rows stay intact;
+  changed returns, undisclosed gaps and missing exchange sessions still suppress the overlay.
 - Full-book gross exposure: `G = sum(abs(w_i))` across compared assets after excluding non-asset ledger keys.
   Matching requires `abs(w_live_i - w_reference_i) <= 0.05` for every matching symbol and
   `abs(G_live - G_reference) <= 0.05`; the total tolerance is not multiplied by the number of symbols.

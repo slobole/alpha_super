@@ -5,6 +5,7 @@ import importlib
 import inspect
 import json
 from copy import deepcopy
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -218,12 +219,33 @@ def run_auto_reference_strategy(
             minimum_snapshot_date_str=reference_end_date_str,
         )
 
+    benchmark_context_obj = nullcontext()
+    benchmark_source_dict = {}
+    if (module_import_str == "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled"
+            and snapshot_module.is_snapshot_mode_enabled_bool()):
+        from strategies.momentum.strategy_mo_atr_normalized_ndx import use_reference_benchmark_profile
+
+        # The existing ETF profile carries $SPXTR/TOTALRETURN. Do not expand or
+        # replace the released NDX profile just to run a reporting benchmark.
+        benchmark_profile_str = "norgate_eod_etf_plus_vix_helper"
+        benchmark_snapshot_obj = snapshot_module.load_valid_snapshot_manifest(
+            benchmark_profile_str, minimum_snapshot_date_str=reference_end_date_str,
+        )
+        benchmark_context_obj = use_reference_benchmark_profile(benchmark_profile_str)
+        benchmark_source_dict = {
+            "symbol_str": "$SPXTR", "adjustment_str": "TOTALRETURN",
+            "data_profile_str": benchmark_profile_str,
+            "snapshot_date_str": benchmark_snapshot_obj.snapshot_date_ts.date().isoformat(),
+            "manifest_hash_str": benchmark_snapshot_obj.manifest_hash_str,
+        }
+
     # The current live/reference contract is still price_return_ledger_v1.
     # Keep this diagnostic on the same accounting basis as LIVE/IBKR until a
     # separately authorized broker-dividend reconciliation rollout exists.
     with (
         use_norgate_data_profile(release_obj.data_profile_str),
         dividend_cash_ledger_disabled_context(),
+        benchmark_context_obj,
     ):
         strategy_obj = run_variant_fn(**run_kwarg_dict)
     if not isinstance(strategy_obj, Strategy):
@@ -231,6 +253,11 @@ def run_auto_reference_strategy(
             f"Strategy module '{module_import_str}' run_variant(...) returned "
             f"{type(strategy_obj).__name__}, expected Strategy."
         )
+    if benchmark_source_dict:
+        after_benchmark_snapshot_obj = snapshot_module.load_valid_snapshot_manifest(benchmark_profile_str)
+        if after_benchmark_snapshot_obj.manifest_hash_str != benchmark_source_dict["manifest_hash_str"]:
+            raise RuntimeError("Reference benchmark snapshot changed during the run.")
+        strategy_obj.reference_benchmark_source_dict = benchmark_source_dict
     if dv2_ind_snapshot_obj is not None:
         after_snapshot_obj = snapshot_module.load_valid_snapshot_manifest(release_obj.data_profile_str)
         if after_snapshot_obj.manifest_hash_str != dv2_ind_snapshot_obj.manifest_hash_str:
@@ -365,6 +392,7 @@ def build_reference_maps_dict(reference_strategy_obj: Strategy) -> dict[str, Any
         })
     return {
         "reference_strategy_obj": reference_strategy_obj,
+        "reference_benchmark_source_dict": dict(getattr(reference_strategy_obj, "reference_benchmark_source_dict", {})),
         **reference_accounting_policy_dict,
         **provenance_field_dict,
         "transaction_map_dict": transaction_map_dict,
@@ -706,6 +734,8 @@ def write_reference_compare_artifacts(
         **trade_fill_summary_dict,
         "reference_strategy_pickle_path_str": reference_strategy_pickle_path_str,
     }
+    if reference_maps_dict.get("reference_benchmark_source_dict"):
+        summary_dict["reference_benchmark_source_dict"] = dict(reference_maps_dict["reference_benchmark_source_dict"])
     if release_obj.strategy_import_str in NDX_E2_STRATEGY_IMPORT_TUPLE:
         summary_dict["reference_provenance_dict"] = get_ndx_e2_reference_provenance_dict(reference_maps_dict)
     if release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR:

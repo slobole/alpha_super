@@ -53,6 +53,82 @@ def test_no_report_means_no_view(tmp_path):
     assert btd.attention_list(None, {"pod_a": "A"}) == []
 
 
+def test_complete_curve_alignment_note_does_not_hide_performance(tmp_path):
+    from alpha.live import backtest_check
+
+    pod_dict = _pod()
+    pod_dict["curve_dict"] = backtest_check.curve_dict(
+        {"2026-07-02": 0.01, "2026-07-03": 0.0, "2026-07-06": 0.02},
+        {"2026-07-02": 0.01, "2026-07-06": 0.01},
+    )
+    pod_dict["coverage_reason_str"] = pod_dict["curve_dict"]["coverage_reason_str"]
+    report_dict = btd.load_report_dict(_provider(tmp_path, _report([pod_dict])), as_of_ts=NOW)
+    assert report_dict is not None
+    assert report_dict["pod_list"][0]["curve_dict"]["alignment_note_str"]
+    view_dict = btd.pod_view_dict(report_dict, "pod_a")
+    assert view_dict["coverage_reason_str"] == ""
+    assert view_dict["gap_float"] == pytest.approx(1.02 / 1.01 - 1)
+    row_dict = btd.performance_view_dict(report_dict, {"pod_a": "A"})["pod_row_list"][0]
+    assert row_dict["now_state_str"] != "late"
+    assert "without a full return curve" not in btd.system_row_dict(report_dict, as_of_ts=NOW)["now_str"]
+
+
+def test_overlay_aligns_disclosed_flat_holiday_without_changing_official_path():
+    view_dict = {"point_list": [{"date_str": "2026-07-02", "live_float": 0.01, "backtest_float": 0.01},
+                               {"date_str": "2026-07-06", "live_float": 0.02, "backtest_float": 0.03}],
+                 "excluded_non_session_zero_date_list": ["2026-07-03"]}
+    path_list = [{"market_date_str": "2026-07-02 SOD", "cumulative_return_float": 0.0},
+                 {"market_date_str": "2026-07-02", "cumulative_return_float": 0.01},
+                 {"market_date_str": "2026-07-03", "cumulative_return_float": 0.01},
+                 {"market_date_str": "2026-07-06", "cumulative_return_float": 0.02}]
+    chart_dict = btd.add_backtest_series({"available_bool": True}, path_list, view_dict)
+    assert chart_dict["backtest_bool"]
+    assert len(path_list) == 4
+    for series_dict in chart_dict["drawing_dict"]["series_list"]:
+        assert [point_dict["market_date_str"] for point_dict in series_dict["point_list"]] == [
+            "2026-07-02 SOD", "2026-07-02", "2026-07-06"]
+
+
+@pytest.mark.parametrize("missing_date_str,current_float,disclosed_bool", [
+    ("2026-07-03", 0.02, True),  # Changed official return cannot use old zero evidence.
+    ("2026-07-03", 0.01, False),  # An undisclosed missing date stays blocking.
+    ("2026-07-06", 0.01, True),  # Even a disclosed flat trading day cannot be omitted.
+])
+def test_overlay_rejects_changed_or_unproven_holiday_alignment(missing_date_str, current_float, disclosed_bool):
+    view_dict = {"point_list": [{"date_str": "2026-07-02", "live_float": 0.01, "backtest_float": 0.01},
+                               {"date_str": "2026-07-07", "live_float": 0.02, "backtest_float": 0.03}],
+                 "excluded_non_session_zero_date_list": [missing_date_str] if disclosed_bool else []}
+    path_list = [{"market_date_str": "2026-07-02", "cumulative_return_float": 0.01},
+                 {"market_date_str": missing_date_str, "cumulative_return_float": current_float},
+                 {"market_date_str": "2026-07-07", "cumulative_return_float": 0.02}]
+    chart_dict = {"available_bool": True}
+    assert btd.add_backtest_series(chart_dict, path_list, view_dict) == chart_dict
+
+
+@pytest.mark.parametrize("excluded_dates_obj", [[{}], [[]], [None], ["bad-date"], "2026-07-03", None])
+def test_overlay_malformed_alignment_evidence_fails_closed(excluded_dates_obj):
+    view_dict = {"point_list": [{"date_str": "2026-07-02", "backtest_float": 0.0},
+                               {"date_str": "2026-07-06", "backtest_float": 0.0}],
+                 "excluded_non_session_zero_date_list": excluded_dates_obj}
+    path_list = [{"market_date_str": "2026-07-02", "cumulative_return_float": 0.0},
+                 {"market_date_str": "2026-07-03", "cumulative_return_float": 0.0},
+                 {"market_date_str": "2026-07-06", "cumulative_return_float": 0.0}]
+    chart_dict = {"available_bool": True}
+    assert btd.add_backtest_series(chart_dict, path_list, view_dict) == chart_dict
+
+
+def test_overlay_holiday_alignment_never_bridges_a_missing_official_session():
+    view_dict = {"point_list": [{"date_str": "2026-07-02", "backtest_float": 0.0},
+                               {"date_str": "2026-07-06", "backtest_float": 0.0},
+                               {"date_str": "2026-07-07", "backtest_float": 0.0}],
+                 "excluded_non_session_zero_date_list": ["2026-07-03"]}
+    path_list = [{"market_date_str": "2026-07-02", "cumulative_return_float": 0.0},
+                 {"market_date_str": "2026-07-03", "cumulative_return_float": 0.0},
+                 {"market_date_str": "2026-07-07", "cumulative_return_float": 0.0}]
+    chart_dict = {"available_bool": True}
+    assert btd.add_backtest_series(chart_dict, path_list, view_dict) == chart_dict
+
+
 def test_report_is_scoped_to_current_live_identities(tmp_path):
     report = _report([_pod(), _pod(pod_id="pod_old", account="U9", release="r9"), _pod(pod_id="pod_other", release="r_other")])
     loaded = btd.load_report_dict(_provider(tmp_path, report), as_of_ts=NOW)
