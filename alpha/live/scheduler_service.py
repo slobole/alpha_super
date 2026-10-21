@@ -604,17 +604,21 @@ def _build_daily_check_dict(
         vplan_sent_bool = vplan_obj is not None
         if dispatch_dict and dispatch_dict.get("reason_code_str") != "dispatch_retry_pending":
             vplan_sent_bool = bool(dispatch_dict.get("attempted_request_key_list"))
+        if (not isinstance(snapshot_obj.open_order_id_list, list)
+                or not isinstance(snapshot_obj.position_amount_map, dict)):
+            return None
+        open_order_count_int = len(snapshot_obj.open_order_id_list)
         exception_list = build_daily_exception_list(
             decision_plan_obj, vplan_obj, snapshot_obj, vplan_sent_bool=vplan_sent_bool
         )
+        missing_list = []
+        for exception_dict in exception_list:
+            quantity_obj = exception_dict.get("quantity_float")
+            quantity_str = "" if quantity_obj is None else f" {_format_share_str(float(quantity_obj))}"
+            missing_list.append(f"{exception_dict['asset_str']} {exception_dict['side_str']}{quantity_str}")
     except (AttributeError, KeyError, TypeError, ValueError, sqlite3.Error):
         return None
-    missing_list = []
-    for exception_dict in exception_list:
-        quantity_obj = exception_dict.get("quantity_float")
-        quantity_str = "" if quantity_obj is None else f" {_format_share_str(float(quantity_obj))}"
-        missing_list.append(f"{exception_dict['asset_str']} {exception_dict['side_str']}{quantity_str}")
-    match_bool = len(exception_list) == 0 and len(snapshot_obj.open_order_id_list) == 0
+    match_bool = len(exception_list) == 0 and open_order_count_int == 0
     next_read_ts = None
     if match_bool:
         # The slow interval, never past the last half hour, never in the past.
@@ -624,7 +628,7 @@ def _build_daily_check_dict(
     return {
         "checked_timestamp_ts": snapshot_obj.snapshot_timestamp_ts,
         "next_read_timestamp_ts": next_read_ts,
-        "open_order_count_int": len(snapshot_obj.open_order_id_list),
+        "open_order_count_int": open_order_count_int,
         "missing_list": missing_list,
         "match_bool": match_bool,
     }
@@ -636,7 +640,10 @@ def _build_related_pod_status_dict_list(
     releases_root_path_str: str,
     env_mode_str: str,
     related_pod_id_list: list[str],
+    check_timestamp_ts: datetime | None = None,
 ) -> list[dict[str, object]]:
+    """``check_timestamp_ts``: the clock a daily read is judged against when the
+    status is built after a tick, which may have read the broker after ``as_of_ts``."""
     if len(related_pod_id_list) == 0:
         return []
     pod_filter_str = related_pod_id_list[0] if len(related_pod_id_list) == 1 else None
@@ -665,7 +672,8 @@ def _build_related_pod_status_dict_list(
             continue
         daily_check_dict = _build_daily_check_dict(
             state_store_obj, release_obj, latest_decision_plan_obj,
-            _get_current_cycle_vplan_obj(state_store_obj, latest_decision_plan_obj), as_of_ts=as_of_ts)
+            _get_current_cycle_vplan_obj(state_store_obj, latest_decision_plan_obj),
+            as_of_ts=as_of_ts if check_timestamp_ts is None else check_timestamp_ts)
         # JSON-safe: this list is written to the scheduler sleep event.
         pod_status_dict["daily_check_dict"] = {} if daily_check_dict is None else {
             "checked_timestamp_str": daily_check_dict["checked_timestamp_ts"].isoformat(),
@@ -2737,6 +2745,7 @@ def serve(
                 post_tick_pod_status_dict_list = _build_related_pod_status_dict_list(
                     state_store_obj=state_store_obj,
                     as_of_ts=as_of_ts,
+                    check_timestamp_ts=datetime.now(tz=UTC),
                     releases_root_path_str=releases_root_path_str,
                     env_mode_str=env_mode_str,
                     related_pod_id_list=current_scheduler_decision_obj.related_pod_id_list,
@@ -2840,6 +2849,7 @@ def serve(
                 "pod_status_dict_list": _build_related_pod_status_dict_list(
                     state_store_obj=state_store_obj,
                     as_of_ts=as_of_ts,
+                    check_timestamp_ts=datetime.now(tz=UTC),
                     releases_root_path_str=releases_root_path_str,
                     env_mode_str=env_mode_str,
                     related_pod_id_list=current_scheduler_decision_obj.related_pod_id_list,

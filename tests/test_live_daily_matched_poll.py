@@ -118,14 +118,17 @@ def test_shared_account_keeps_the_active_poll(tmp_path, monkeypatch):
     assert decision_obj.due_now_bool is True and decision_obj.reason_code_str == "ready_to_reconcile"
 
 
-def test_unreadable_saved_read_keeps_the_active_poll(tmp_path, monkeypatch):
+@pytest.mark.parametrize("column_str,value_str", [
+    ("position_json_str", "{bad"), ("position_json_str", "null"), ("open_order_id_json_str", "null"),
+    ("open_order_id_json_str", "7"), ("snapshot_timestamp_str", "yesterday")])
+def test_unreadable_saved_read_keeps_the_active_poll(tmp_path, monkeypatch, column_str, value_str):
     # Corrupt saved state must neither slow the poll nor stop the decision.
     store_obj, release_obj, _plan_obj = _store_with_sent_plan(tmp_path, monkeypatch)
     monkeypatch.setattr(runner, "get_status_summary", lambda **_kwarg_dict: _pod_status_summary_dict(release_obj))
     _read(store_obj, release_obj, _time("2024-01-31", 9, 35))
     with store_obj._connect() as connection_obj:
-        connection_obj.execute("UPDATE broker_snapshot_cache SET position_json_str='{bad' WHERE account_route_str=?",
-            (release_obj.account_route_str,))
+        connection_obj.execute(f"UPDATE broker_snapshot_cache SET {column_str}=? WHERE account_route_str=?",
+            (value_str, release_obj.account_route_str))
 
     decision_obj = get_scheduler_decision(store_obj, _time("2024-01-31", 9, 36), "unused", "paper")
     pod_status_dict_list, spec_list = _wait_spec_list(store_obj, release_obj, _time("2024-01-31", 9, 36), _time("2024-01-31", 9, 36))
@@ -133,6 +136,22 @@ def test_unreadable_saved_read_keeps_the_active_poll(tmp_path, monkeypatch):
     assert decision_obj.due_now_bool is True and decision_obj.reason_code_str == "ready_to_reconcile"
     assert pod_status_dict_list[0]["daily_check_dict"] == {}
     assert spec_list[0]["field_map_dict"]["holdings"] == "not read yet"
+
+
+def test_status_built_after_a_tick_judges_the_read_against_the_tick_clock(tmp_path, monkeypatch):
+    # The loop clock is 09:35:00, the broker answered at 09:35:02: the post-tick
+    # status is judged at the later clock, so the fresh read is not "future".
+    store_obj, release_obj, _plan_obj = _store_with_sent_plan(tmp_path, monkeypatch)
+    monkeypatch.setattr(runner, "get_status_summary", lambda **_kwarg_dict: _pod_status_summary_dict(release_obj))
+    _read(store_obj, release_obj, _time("2024-01-31", 9, 35, 2))
+
+    after_tick_list = _build_related_pod_status_dict_list(store_obj, _time("2024-01-31", 9, 35), "unused", "paper",
+        [release_obj.pod_id_str], check_timestamp_ts=_time("2024-01-31", 9, 35, 5))
+    loop_clock_list = _build_related_pod_status_dict_list(store_obj, _time("2024-01-31", 9, 35), "unused", "paper",
+        [release_obj.pod_id_str])
+
+    assert datetime.fromisoformat(after_tick_list[0]["daily_check_dict"]["next_read_timestamp_str"]) == _time("2024-01-31", 9, 50, 2)
+    assert loop_clock_list[0]["daily_check_dict"] == {}
 
 
 def test_future_dated_saved_read_keeps_the_active_poll(tmp_path, monkeypatch):
