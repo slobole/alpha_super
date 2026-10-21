@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -222,15 +223,12 @@ def get_scheduler_decision(
                         or latest_decision_plan_obj.status_str in {"expired", "blocked"}):
                     reconcile_due_ts = min(close_ts, target_ts + timedelta(seconds=reconcile_grace_seconds_int))
                     daily_check_dict = _build_daily_check_dict(
-                        state_store_obj, release_obj, latest_decision_plan_obj, current_vplan_obj)
+                        state_store_obj, release_obj, latest_decision_plan_obj, current_vplan_obj, as_of_ts=as_of_ts)
                     matched_wait_bool = daily_check_dict is not None and bool(daily_check_dict["match_bool"])
                     if matched_wait_bool:
                         # Nothing the active poll could do: read again on the slow
                         # interval, back to the active poll for the last half hour.
-                        reconcile_due_ts = max(reconcile_due_ts, min(
-                            daily_check_dict["checked_timestamp_ts"]
-                            + timedelta(seconds=DEFAULT_DAILY_MATCHED_POLL_SECONDS_INT),
-                            close_ts - DAILY_MATCHED_POLL_STOP_BEFORE_CLOSE))
+                        reconcile_due_ts = max(reconcile_due_ts, daily_check_dict["next_read_timestamp_ts"])
                     due_bool = reconcile_due_ts <= as_of_ts
                     # A daily broker outage must not starve another pod's due
                     # decision or EOD snapshot. This pod's EOD remains blocked
@@ -567,12 +565,16 @@ def _build_daily_check_dict(
     release_obj: LiveRelease,
     decision_plan_obj: DecisionPlan,
     vplan_obj: VPlan | None,
+    *,
+    as_of_ts: datetime,
 ) -> dict[str, object] | None:
     """The latest saved broker read of a pending daily cycle, judged as the close judges it.
 
-    None until the target session has a read. ``match_bool`` means the holdings
-    equal the sent plan (the decision's intent when nothing was sent) and no
-    order is open at the account: the close would record this cycle clean.
+    None until the target session has a read, and whenever the saved state
+    cannot be read or judged: the broker read itself then decides, as before.
+    ``match_bool`` means the holdings equal the sent plan (the decision's intent
+    when nothing was sent) and no order is open at the account: the close would
+    record this cycle clean, so the next read waits ``next_read_timestamp_ts``.
     """
     target_ts = decision_plan_obj.target_execution_timestamp_ts
     close_ts = scheduler_utils.get_session_close_timestamp_ts(
@@ -584,37 +586,47 @@ def _build_daily_check_dict(
     if any(other_obj.account_route_str == release_obj.account_route_str and other_obj.pod_id_str != release_obj.pod_id_str
             for other_obj in state_store_obj.get_enabled_release_list()):
         return None
-    snapshot_obj = state_store_obj.get_latest_broker_snapshot_for_account(release_obj.account_route_str)
-    if snapshot_obj is None or not target_ts < snapshot_obj.snapshot_timestamp_ts < close_ts:
-        return None
     if vplan_obj is not None and (
         vplan_obj.status_str != "submitted"
         or vplan_obj.decision_plan_id_int != decision_plan_obj.decision_plan_id_int
     ):
         return None
-    # The close's own rule (runner._reconcile_daily_cycles): a dispatch record
-    # that attempted nothing judges the holdings against the decision's intent.
-    dispatch_dict = decision_plan_obj.snapshot_metadata_dict.get("opening_dispatch_result_dict", {})
-    vplan_sent_bool = vplan_obj is not None
-    if dispatch_dict and dispatch_dict.get("reason_code_str") != "dispatch_retry_pending":
-        vplan_sent_bool = bool(dispatch_dict.get("attempted_request_key_list"))
     try:
+        snapshot_obj = state_store_obj.get_latest_broker_snapshot_for_account(release_obj.account_route_str)
+        # A read before the open belongs to the plan build; one stamped in the
+        # future cannot postpone anything.
+        if (snapshot_obj is None or not target_ts < snapshot_obj.snapshot_timestamp_ts < close_ts
+                or snapshot_obj.snapshot_timestamp_ts > as_of_ts):
+            return None
+        # The close's own rule (runner._reconcile_daily_cycles): a dispatch record
+        # that attempted nothing judges the holdings against the decision's intent.
+        dispatch_dict = decision_plan_obj.snapshot_metadata_dict.get("opening_dispatch_result_dict", {})
+        vplan_sent_bool = vplan_obj is not None
+        if dispatch_dict and dispatch_dict.get("reason_code_str") != "dispatch_retry_pending":
+            vplan_sent_bool = bool(dispatch_dict.get("attempted_request_key_list"))
         exception_list = build_daily_exception_list(
             decision_plan_obj, vplan_obj, snapshot_obj, vplan_sent_bool=vplan_sent_bool
         )
-    except (KeyError, TypeError, ValueError):
-        # A read that cannot be judged never slows the poll; the close judges it.
+    except (AttributeError, KeyError, TypeError, ValueError, sqlite3.Error):
         return None
     missing_list = []
     for exception_dict in exception_list:
         quantity_obj = exception_dict.get("quantity_float")
         quantity_str = "" if quantity_obj is None else f" {_format_share_str(float(quantity_obj))}"
         missing_list.append(f"{exception_dict['asset_str']} {exception_dict['side_str']}{quantity_str}")
+    match_bool = len(exception_list) == 0 and len(snapshot_obj.open_order_id_list) == 0
+    next_read_ts = None
+    if match_bool:
+        # The slow interval, never past the last half hour, never in the past.
+        next_read_ts = max(as_of_ts, min(
+            snapshot_obj.snapshot_timestamp_ts + timedelta(seconds=DEFAULT_DAILY_MATCHED_POLL_SECONDS_INT),
+            close_ts - DAILY_MATCHED_POLL_STOP_BEFORE_CLOSE))
     return {
         "checked_timestamp_ts": snapshot_obj.snapshot_timestamp_ts,
+        "next_read_timestamp_ts": next_read_ts,
         "open_order_count_int": len(snapshot_obj.open_order_id_list),
         "missing_list": missing_list,
-        "match_bool": len(exception_list) == 0 and len(snapshot_obj.open_order_id_list) == 0,
+        "match_bool": match_bool,
     }
 
 
@@ -653,10 +665,12 @@ def _build_related_pod_status_dict_list(
             continue
         daily_check_dict = _build_daily_check_dict(
             state_store_obj, release_obj, latest_decision_plan_obj,
-            _get_current_cycle_vplan_obj(state_store_obj, latest_decision_plan_obj))
+            _get_current_cycle_vplan_obj(state_store_obj, latest_decision_plan_obj), as_of_ts=as_of_ts)
         # JSON-safe: this list is written to the scheduler sleep event.
         pod_status_dict["daily_check_dict"] = {} if daily_check_dict is None else {
             "checked_timestamp_str": daily_check_dict["checked_timestamp_ts"].isoformat(),
+            "next_read_timestamp_str": (None if daily_check_dict["next_read_timestamp_ts"] is None
+                else daily_check_dict["next_read_timestamp_ts"].isoformat()),
             "open_order_count_int": int(daily_check_dict["open_order_count_int"]),
             "missing_list": list(daily_check_dict["missing_list"]),
             "match_bool": bool(daily_check_dict["match_bool"]),
@@ -933,7 +947,9 @@ def _build_daily_wait_operator_message_spec_dict(
             "missing": missing_str,
             "open_orders": None if checked_timestamp_str is None else open_order_count_int,
             "checked": _format_operator_field_timestamp_str(checked_timestamp_str),
-            "next": next_due_timestamp_str,
+            # The read names its own next read; the decision in hand may predate it.
+            "next": _format_operator_field_timestamp_str(daily_check_dict.get("next_read_timestamp_str"))
+                or next_due_timestamp_str,
         },
     )
 

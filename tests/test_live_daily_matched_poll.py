@@ -118,6 +118,47 @@ def test_shared_account_keeps_the_active_poll(tmp_path, monkeypatch):
     assert decision_obj.due_now_bool is True and decision_obj.reason_code_str == "ready_to_reconcile"
 
 
+def test_unreadable_saved_read_keeps_the_active_poll(tmp_path, monkeypatch):
+    # Corrupt saved state must neither slow the poll nor stop the decision.
+    store_obj, release_obj, _plan_obj = _store_with_sent_plan(tmp_path, monkeypatch)
+    monkeypatch.setattr(runner, "get_status_summary", lambda **_kwarg_dict: _pod_status_summary_dict(release_obj))
+    _read(store_obj, release_obj, _time("2024-01-31", 9, 35))
+    with store_obj._connect() as connection_obj:
+        connection_obj.execute("UPDATE broker_snapshot_cache SET position_json_str='{bad' WHERE account_route_str=?",
+            (release_obj.account_route_str,))
+
+    decision_obj = get_scheduler_decision(store_obj, _time("2024-01-31", 9, 36), "unused", "paper")
+    pod_status_dict_list, spec_list = _wait_spec_list(store_obj, release_obj, _time("2024-01-31", 9, 36), _time("2024-01-31", 9, 36))
+
+    assert decision_obj.due_now_bool is True and decision_obj.reason_code_str == "ready_to_reconcile"
+    assert pod_status_dict_list[0]["daily_check_dict"] == {}
+    assert spec_list[0]["field_map_dict"]["holdings"] == "not read yet"
+
+
+def test_future_dated_saved_read_keeps_the_active_poll(tmp_path, monkeypatch):
+    store_obj, release_obj, _plan_obj = _store_with_sent_plan(tmp_path, monkeypatch)
+    _read(store_obj, release_obj, _time("2024-01-31", 14))
+
+    decision_obj = get_scheduler_decision(store_obj, _time("2024-01-31", 9, 36), "unused", "paper")
+
+    assert decision_obj.due_now_bool is True and decision_obj.reason_code_str == "ready_to_reconcile"
+
+
+def test_daily_wait_line_next_read_comes_from_the_read_itself(tmp_path, monkeypatch):
+    # Right after a read the decision in hand predates it; the line must not say "next = now".
+    store_obj, release_obj, _plan_obj = _store_with_sent_plan(tmp_path, monkeypatch)
+    monkeypatch.setattr(runner, "get_status_summary", lambda **_kwarg_dict: _pod_status_summary_dict(release_obj))
+    _read(store_obj, release_obj, _time("2024-01-31", 9, 35, 2))
+
+    _pod_status_dict_list, spec_list = _wait_spec_list(store_obj, release_obj, _time("2024-01-31", 9, 35, 2), _time("2024-01-31", 9, 35, 2))
+    assert spec_list[0]["field_map_dict"]["next"] == "2024-01-31 14:50:02 UTC"
+
+    # Once the slow window has ended the next read is now, whatever the read says.
+    _read(store_obj, release_obj, _time("2024-01-31", 15, 40))
+    _pod_status_dict_list, spec_list = _wait_spec_list(store_obj, release_obj, _time("2024-01-31", 15, 41), _time("2024-01-31", 15, 41))
+    assert spec_list[0]["field_map_dict"]["next"] == "2024-01-31 20:41:00 UTC"
+
+
 def test_close_read_is_never_delayed_by_a_clean_read(tmp_path, monkeypatch):
     store_obj, release_obj, _plan_obj = _store_with_sent_plan(tmp_path, monkeypatch)
     _read(store_obj, release_obj, _time("2024-01-31", 15, 59, 30))
@@ -275,6 +316,7 @@ def test_daily_wait_line_replaces_the_fill_lines(tmp_path, monkeypatch):
 
     daily_check_dict = dict(pod_status_dict_list[0]["daily_check_dict"])
     assert datetime.fromisoformat(daily_check_dict.pop("checked_timestamp_str")) == _time("2024-01-31", 9, 35)
+    assert datetime.fromisoformat(daily_check_dict.pop("next_read_timestamp_str")) == _time("2024-01-31", 9, 50)
     assert daily_check_dict == {"open_order_count_int": 0, "missing_list": [], "match_bool": True}
     assert [spec_dict["phase_action_str"] for spec_dict in spec_list] == ["daily.wait"]
     assert spec_list[0]["level_str"] == "INFO"
