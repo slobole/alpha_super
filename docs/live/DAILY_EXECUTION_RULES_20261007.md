@@ -164,7 +164,14 @@ is added to production databases. Daily explicit share targets persist atomicall
 inside daily-only decision metadata; the production decision table and unique
 key are retained without the removed intent-revision migration.
 
-Daily holdings/open-order reconciliation keeps its existing polling cadence.
+Daily holdings/open-order reconciliation polls on the active interval (30 s)
+while anything is open or differs. Once a read shows the holdings equal to the
+sent plan (the decision's intent when nothing was sent) and no open order at the
+account, the next broker read is 15 minutes after that read, until 30 minutes
+before the exchange close; from then on the active interval applies again, so a
+change is still seen before the MOC cutoff. The close keeps its own final read,
+and a cycle never closes before it. The operator line for a daily reconcile
+wait is `daily.wait` (holdings, missing, open orders, read time, next read).
 Fill-history collection and official-open requests run only on the first
 reconcile attempt after the target exchange close. A new `daily_post_close_report`
 table records the attempt before broker I/O and its `reported` or `failed` outcome;

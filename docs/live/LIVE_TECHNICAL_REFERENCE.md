@@ -740,15 +740,19 @@ Current defaults in `scheduler_service.py`:
 
 ```text
 active_poll_seconds = 30
-idle_max_sleep_seconds = 900
+idle_max_sleep_seconds = 3600
 reconcile_grace_seconds = 300
 error_retry_seconds = 60
+daily_matched_poll_seconds = 900
+daily_matched_poll_stop_before_close = 30 minutes
 ```
 
 Current scheduler formulas:
 
 ```text
 reconcile_due_timestamp = target_execution_timestamp + 5 minutes
+daily pods, after a read with holdings == plan and no open order:
+  reconcile_due_timestamp = min(read_timestamp + 15 minutes, session_close - 30 minutes)
 sleep_seconds = min(next_due_timestamp - now_utc, idle_max_sleep_seconds)
 ```
 
