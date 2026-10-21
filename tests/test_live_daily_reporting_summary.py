@@ -1,13 +1,14 @@
 """Sparse order reporting must not change daily settlement or broker requests."""
 from dataclasses import asdict, replace
 from datetime import timedelta
+import json
 from types import SimpleNamespace
 
 import pytest
 
 from alpha.live import runner
 from alpha.live.execution_engine import build_broker_order_request_list_from_vplan
-from alpha.live.models import BrokerOrderAck, BrokerOrderFill, BrokerOrderRecord, SessionOpenPrice
+from alpha.live.models import BrokerOrderAck, BrokerOrderFill, BrokerOrderRecord, BrokerOrderRequest, SessionOpenPrice
 from alpha.live.state_store_v2 import LiveStateStore
 from test_live_daily_reconcile import CLOSE_TS, OPEN_TS, daily_case
 
@@ -181,6 +182,49 @@ def test_unproved_report_keeps_the_sent_summary_and_still_writes_the_fills(daily
         asdict(request_obj) for request_obj in request_list]
     assert broker_obj.sent_request_list == [] and broker_obj.cancel_ref_list == []
     assert broker_obj.refresh_count_int == 2
+
+
+def test_completion_sell_is_repaired_from_its_claimed_request(daily_case, tmp_path):
+    # The in-session completion sell is not an opening leg; its claimed request
+    # is the canonical proof at the post-close report.
+    store_obj, release_obj, decision_obj, plan_obj, broker_obj = daily_case
+    submission_key_str = plan_obj.submission_key_str or f"vplan:{plan_obj.decision_plan_id_int}"
+    request_obj = BrokerOrderRequest(release_id_str=release_obj.release_id_str, pod_id_str=release_obj.pod_id_str,
+        account_route_str=release_obj.account_route_str, submission_key_str=submission_key_str,
+        order_request_key_str=f"{submission_key_str}:daily-completion:MSFT", asset_str="MSFT",
+        broker_order_type_str="MKT", order_class_str="MarketOrder", unit_str="shares", amount_float=-5.0,
+        target_bool=False, trade_id_int=None, sizing_reference_price_float=100.0, portfolio_value_float=100000.0,
+        decision_plan_id_int=decision_obj.decision_plan_id_int, vplan_id_int=plan_obj.vplan_id_int,
+        execution_deadline_timestamp_str=CLOSE_TS.isoformat())
+    sent_ts = OPEN_TS + timedelta(minutes=5)
+    with store_obj._connect() as connection_obj:
+        connection_obj.execute("""INSERT INTO daily_completion_request (decision_plan_id_int,asset_str,vplan_id_int,
+            pod_id_str,account_route_str,order_request_key_str,request_json_str,claimed_timestamp_str) VALUES (?,?,?,?,?,?,?,?)""",
+            (decision_obj.decision_plan_id_int, "MSFT", plan_obj.vplan_id_int, release_obj.pod_id_str,
+                release_obj.account_route_str, request_obj.order_request_key_str,
+                json.dumps(asdict(request_obj), sort_keys=True), sent_ts.isoformat()))
+    sent_obj = BrokerOrderRecord("2001", decision_obj.decision_plan_id_int, plan_obj.vplan_id_int,
+        release_obj.account_route_str, "MSFT", request_obj.order_request_key_str, "MKT", "shares", -5.0, 0.0,
+        "Submitted", sent_ts, remaining_amount_float=5.0, submission_key_str=submission_key_str)
+    store_obj.upsert_vplan_broker_order_record_list([sent_obj])
+    store_obj.upsert_vplan_broker_ack_list([BrokerOrderAck(decision_obj.decision_plan_id_int, plan_obj.vplan_id_int,
+        release_obj.account_route_str, request_obj.order_request_key_str, "MSFT", "MKT", True, True, "broker_acked",
+        "open_order", "2001", 2001, sent_ts)])
+    fill_obj = BrokerOrderFill("2001", decision_obj.decision_plan_id_int, plan_obj.vplan_id_int,
+        release_obj.account_route_str, "MSFT", -5.0, 99.5, sent_ts + timedelta(seconds=2),
+        raw_payload_dict={"exec_id_str": "exec:2001"})
+    sparse_obj = replace(sent_obj, status_str="Filled", amount_float=0.0, remaining_amount_float=0.0)
+
+    runner._persist_daily_execution_report(store_obj, broker_obj, release_obj, decision_obj, plan_obj,
+        [sparse_obj], [], [fill_obj], CLOSE_TS, str(tmp_path / "report.log"))
+
+    row_dict, = [row_dict for row_dict in store_obj.get_broker_order_row_dict_list_for_vplan(
+        plan_obj.vplan_id_int, include_evidence_bool=True) if row_dict["broker_order_id_str"] == "2001"]
+    assert (row_dict["amount_float"], row_dict["filled_amount_float"], row_dict["remaining_amount_float"],
+        row_dict["avg_fill_price_float"], row_dict["status_str"]) == (-5.0, 5.0, 0.0, 99.5, "Filled")
+    assert row_dict["raw_payload_dict"]["order_summary_source_str"] == "canonical_request_and_executions"
+    assert len(store_obj.get_fill_row_dict_list_for_vplan(plan_obj.vplan_id_int)) == 1
+    assert broker_obj.sent_request_list == []
 
 
 def test_contradicting_report_fails_and_cannot_block_holdings_settlement(daily_case, tmp_path):

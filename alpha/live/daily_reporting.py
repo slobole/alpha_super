@@ -54,6 +54,9 @@ def normalize_daily_order_summary_list(record_list, fill_list, known_order_list,
         if len(known_match_list) > 1:
             raise ValueError("Sparse order summary has ambiguous saved order identity.")
         fallback_record_obj = record_obj
+        # What an unproved refresh writes back: the saved row whenever there is
+        # one (valid or not), never the sparse record over it.
+        saved_record_obj = record_obj
         preserve_complete_bool = False
         empty_quantity_bool = record_obj.amount_float == 0 or record_obj.filled_amount_float == 0
         if known_match_list:
@@ -75,14 +78,15 @@ def normalize_daily_order_summary_list(record_list, fill_list, known_order_list,
                 and (known_dict["status_str"] != "Filled" or (
                     abs(abs(known_filled_float) - abs(known_amount_float)) <= 1e-9 and known_remaining_float == 0))
             )
+            saved_record_obj = replace(record_obj, amount_float=known_amount_float,
+                filled_amount_float=known_filled_float, remaining_amount_float=known_remaining_float,
+                avg_fill_price_float=known_price_float, status_str=known_dict["status_str"],
+                submitted_timestamp_ts=datetime.fromisoformat(known_dict["submitted_timestamp_str"]),
+                last_status_timestamp_ts=(datetime.fromisoformat(known_dict["last_status_timestamp_str"])
+                    if known_dict["last_status_timestamp_str"] else None),
+                raw_payload_dict=json.loads(known_dict["raw_payload_json_str"]))
             if valid_known_bool:
-                fallback_record_obj = replace(record_obj, amount_float=known_amount_float,
-                    filled_amount_float=known_filled_float, remaining_amount_float=known_remaining_float,
-                    avg_fill_price_float=known_price_float, status_str=known_dict["status_str"],
-                    submitted_timestamp_ts=datetime.fromisoformat(known_dict["submitted_timestamp_str"]),
-                    last_status_timestamp_ts=(datetime.fromisoformat(known_dict["last_status_timestamp_str"])
-                        if known_dict["last_status_timestamp_str"] else None),
-                    raw_payload_dict=json.loads(known_dict["raw_payload_json_str"]))
+                fallback_record_obj = saved_record_obj
                 preserve_complete_bool = known_dict["status_str"] == "Filled"
         request_match_list = [request_obj for request_obj in request_list
             if request_obj.order_request_key_str == record_obj.order_request_key_str]
@@ -92,7 +96,7 @@ def normalize_daily_order_summary_list(record_list, fill_list, known_order_list,
             if preserve_complete_bool or not empty_quantity_bool:
                 normalized_record_list.append(fallback_record_obj if preserve_complete_bool else record_obj)
             else:
-                normalized_record_list.append(_unproved_summary_obj(fallback_record_obj, "no_canonical_request"))
+                normalized_record_list.append(_unproved_summary_obj(saved_record_obj, "no_canonical_request"))
             continue
         request_obj = request_match_list[0]
         if (any(getattr(request_obj, field_str) != getattr(record_obj, field_str)
@@ -134,7 +138,7 @@ def normalize_daily_order_summary_list(record_list, fill_list, known_order_list,
                 normalized_record_list.append(fallback_record_obj if preserve_complete_bool else record_obj)
             else:
                 # Missing ACKs never turn empty quantities into proved fills.
-                normalized_record_list.append(_unproved_summary_obj(fallback_record_obj, "no_broker_ack"))
+                normalized_record_list.append(_unproved_summary_obj(saved_record_obj, "no_broker_ack"))
             continue
         execution_id_set = set()
         matched_fill_list = []
@@ -172,7 +176,7 @@ def normalize_daily_order_summary_list(record_list, fill_list, known_order_list,
             if preserve_complete_bool or not empty_quantity_bool:
                 normalized_record_list.append(fallback_record_obj if preserve_complete_bool else record_obj)
             else:
-                normalized_record_list.append(_unproved_summary_obj(fallback_record_obj, "incomplete_executions"))
+                normalized_record_list.append(_unproved_summary_obj(saved_record_obj, "incomplete_executions"))
             continue
         average_price_float = sum(abs(float(fill_obj.fill_amount_float)) * float(fill_obj.fill_price_float)
             for fill_obj in matched_fill_list) / filled_amount_float

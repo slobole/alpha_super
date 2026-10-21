@@ -130,6 +130,25 @@ def test_incomplete_proof_keeps_the_saved_summary_and_names_the_gap(evidence_str
         assert initial_dict == known_row(known_obj)
 
 
+@pytest.mark.parametrize("saved_kwargs_dict", [
+    # remaining NULL on a Filled row (column added by migration), a partial
+    # without a price, a Filled row short of its request: all "invalid" for the
+    # repair path, all kept as saved when the refresh brings no proof.
+    {"filled_amount_float": 3.0, "remaining_amount_float": None, "avg_fill_price_float": 771.14, "status_str": "Filled"},
+    {"filled_amount_float": 1.0, "remaining_amount_float": 2.0, "avg_fill_price_float": None, "status_str": "Submitted"},
+    {"filled_amount_float": 2.0, "remaining_amount_float": 1.0, "avg_fill_price_float": 771.14, "status_str": "Filled"},
+])
+def test_invalid_saved_row_is_kept_when_proof_is_missing(saved_kwargs_dict):
+    request_obj, known_obj, sparse_obj, fill_obj, _ack_dict = summary_case()
+    saved_obj = replace(known_obj, **saved_kwargs_dict)
+    result_obj, = normalize_daily_order_summary_list([sparse_obj], [fill_obj],
+        [known_row(saved_obj)], [request_obj], [], as_of_ts=AS_OF_TS)
+    assert (result_obj.amount_float, result_obj.filled_amount_float, result_obj.remaining_amount_float,
+        result_obj.avg_fill_price_float, result_obj.status_str) == (3.0, saved_obj.filled_amount_float,
+        saved_obj.remaining_amount_float, saved_obj.avg_fill_price_float, saved_obj.status_str)
+    assert result_obj.raw_payload_dict["order_summary_proof_gap_str"] == "no_broker_ack"
+
+
 def test_unproven_sparse_record_without_known_summary_is_written_as_is_and_names_the_gap():
     request_obj, _, sparse_obj, fill_obj, _ = summary_case()
     result_obj, = normalize_daily_order_summary_list([sparse_obj], [fill_obj], [], [request_obj], [], as_of_ts=AS_OF_TS)

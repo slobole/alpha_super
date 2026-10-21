@@ -39,7 +39,9 @@ from alpha.live.logging_utils import (
     log_event,
     log_pod_trace_event,
 )
-from alpha.live.models import BrokerOrderEvent, DecisionPlan, LivePriceSnapshot, LiveRelease, PodState, SubmitBatchResult, VPlan
+from alpha.live.models import (
+    BrokerOrderEvent, BrokerOrderRequest, DecisionPlan, LivePriceSnapshot, LiveRelease, PodState, SubmitBatchResult, VPlan,
+)
 from alpha.live.mr_capsule_adapter import MR_CAPSULE_STRATEGY_IMPORT_TUPLE, validate_mr_capsule_release
 from alpha.live.daily_reconcile import (
     DAILY_TERMINAL_STATUS_SET, _refresh as refresh_daily_snapshot,
@@ -3952,9 +3954,18 @@ def _persist_daily_execution_report(state_store_obj, broker_adapter_obj, release
             (vplan_obj.vplan_id_int,)).fetchall()]
         ack_list = [dict(row_obj) for row_obj in connection_obj.execute(
             "SELECT * FROM vplan_broker_ack WHERE vplan_id_int=?", (vplan_obj.vplan_id_int,)).fetchall()]
-        completion_ref_set = {row_obj[0] for row_obj in connection_obj.execute(
-            "SELECT order_request_key_str FROM daily_completion_request WHERE decision_plan_id_int=?",
-            (decision_plan_obj.decision_plan_id_int,)).fetchall()}
+        completion_row_list = connection_obj.execute(
+            "SELECT order_request_key_str, request_json_str FROM daily_completion_request WHERE decision_plan_id_int=?",
+            (decision_plan_obj.decision_plan_id_int,)).fetchall()
+        completion_ref_set = {row_obj[0] for row_obj in completion_row_list}
+        # The claimed in-session completion sells are canonical requests too, so
+        # their summaries can be proved like the opening legs.
+        completion_request_list = []
+        for row_obj in completion_row_list:
+            try:
+                completion_request_list.append(BrokerOrderRequest(**json.loads(row_obj[1])))
+            except (TypeError, ValueError):
+                continue
         legacy_manual_key_dict = {}
         if connection_obj.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='mr_capsule_execution_request'").fetchone():
             legacy_row_list = connection_obj.execute("""SELECT r.order_request_key_str,r.request_kind_str,r.request_json_str
@@ -4022,7 +4033,8 @@ def _persist_daily_execution_report(state_store_obj, broker_adapter_obj, release
         order_request_key_str=legacy_manual_key_dict.get(record_obj.broker_order_id_str)
             or record_obj.order_request_key_str or known_key_dict.get(record_obj.broker_order_id_str)) for record_obj in record_list]
     normalized_record_list = normalize_daily_order_summary_list(normalized_record_list, normalized_fill_list,
-        known_order_list, build_broker_order_request_list_from_vplan(vplan_obj), ack_list, as_of_ts=as_of_ts)
+        known_order_list, [*build_broker_order_request_list_from_vplan(vplan_obj), *completion_request_list],
+        ack_list, as_of_ts=as_of_ts)
     state_store_obj.upsert_vplan_broker_order_record_list(normalized_record_list)
     state_store_obj.insert_vplan_broker_order_event_list([replace(event_obj, **identity_dict,
         order_request_key_str=legacy_manual_key_dict.get(event_obj.broker_order_id_str)
