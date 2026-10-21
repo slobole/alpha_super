@@ -3943,8 +3943,15 @@ def eod_snapshot(
 def _persist_daily_execution_report(state_store_obj, broker_adapter_obj, release_obj, decision_plan_obj,
         vplan_obj, record_list, event_list, fill_list, as_of_ts, log_path_str, *, late_bool=False,
         collect_open_prices_bool=False):
+    from alpha.live.daily_reporting import normalize_daily_order_summary_list
+
     identity_dict = {"decision_plan_id_int": decision_plan_obj.decision_plan_id_int, "vplan_id_int": vplan_obj.vplan_id_int}
     with state_store_obj._connect() as connection_obj:
+        known_order_list = [dict(row_obj) for row_obj in connection_obj.execute(
+            "SELECT * FROM vplan_broker_order WHERE vplan_id_int=? ORDER BY broker_order_record_id_int",
+            (vplan_obj.vplan_id_int,)).fetchall()]
+        ack_list = [dict(row_obj) for row_obj in connection_obj.execute(
+            "SELECT * FROM vplan_broker_ack WHERE vplan_id_int=?", (vplan_obj.vplan_id_int,)).fetchall()]
         completion_ref_set = {row_obj[0] for row_obj in connection_obj.execute(
             "SELECT order_request_key_str FROM daily_completion_request WHERE decision_plan_id_int=?",
             (decision_plan_obj.decision_plan_id_int,)).fetchall()}
@@ -3967,7 +3974,6 @@ def _persist_daily_execution_report(state_store_obj, broker_adapter_obj, release
                     order_id_str = row_obj["order_request_key_str"][len(manual_prefix_str):]
                     if order_id_str:
                         legacy_manual_key_dict[order_id_str] = row_obj["order_request_key_str"]
-    known_order_list = state_store_obj.get_broker_order_row_dict_list_for_vplan(vplan_obj.vplan_id_int)
     known_key_dict = {str(row_dict["broker_order_id_str"]): row_dict.get("order_request_key_str")
         for row_dict in known_order_list}
     late_order_id_set = {str(row_dict["broker_order_id_str"]) for row_dict in known_order_list
@@ -4012,9 +4018,12 @@ def _persist_daily_execution_report(state_store_obj, broker_adapter_obj, release
     normalized_fill_list = [replace(fill_obj, official_open_price_float=None, open_price_source_str="late_execution",
         raw_payload_dict={**fill_obj.raw_payload_dict, "execution_phase_str": "late_execution"})
         if late_bool or fill_obj.broker_order_id_str in late_order_id_set else fill_obj for fill_obj in normalized_fill_list]
-    state_store_obj.upsert_vplan_broker_order_record_list([replace(record_obj, **identity_dict,
+    normalized_record_list = [replace(record_obj, **identity_dict,
         order_request_key_str=legacy_manual_key_dict.get(record_obj.broker_order_id_str)
-            or record_obj.order_request_key_str or known_key_dict.get(record_obj.broker_order_id_str)) for record_obj in record_list])
+            or record_obj.order_request_key_str or known_key_dict.get(record_obj.broker_order_id_str)) for record_obj in record_list]
+    normalized_record_list = normalize_daily_order_summary_list(normalized_record_list, normalized_fill_list,
+        known_order_list, build_broker_order_request_list_from_vplan(vplan_obj), ack_list, as_of_ts=as_of_ts)
+    state_store_obj.upsert_vplan_broker_order_record_list(normalized_record_list)
     state_store_obj.insert_vplan_broker_order_event_list([replace(event_obj, **identity_dict,
         order_request_key_str=legacy_manual_key_dict.get(event_obj.broker_order_id_str)
             or event_obj.order_request_key_str or known_key_dict.get(event_obj.broker_order_id_str)) for event_obj in event_list])

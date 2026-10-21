@@ -3,7 +3,10 @@
 Retries stop REPORT_RETRY_WINDOW after the target session close. An attempt
 left 'attempted' by a stopped process is retried once its lease expires.
 """
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+import json
+import math
 
 from alpha.live import scheduler_utils
 from alpha.live.daily_reconcile import is_daily_reconcile_release_bool
@@ -11,6 +14,160 @@ from alpha.live.daily_reconcile import is_daily_reconcile_release_bool
 
 REPORT_ATTEMPT_LEASE = timedelta(minutes=30)
 REPORT_RETRY_WINDOW = timedelta(hours=24)
+
+
+def normalize_daily_order_summary_list(record_list, fill_list, known_order_list, request_list, ack_list, *, as_of_ts):
+    """Repair incomplete Filled summaries from exact order and execution proof.
+
+    Reporting only: filled = sum(abs(execution shares));
+    VWAP = sum(abs(execution shares) * execution price) / filled.
+    Empty quantities require complete proof or a prior complete summary;
+    otherwise reporting fails before orders or fills are written. Native nonzero
+    quantities keep their existing reporting path when optional proof is missing.
+    Daily holdings settlement is independent.
+    """
+    normalized_record_list = []
+    identity_field_tuple = ("broker_order_id_str", "decision_plan_id_int", "vplan_id_int",
+        "account_route_str", "asset_str", "order_request_key_str", "broker_order_type_str",
+        "unit_str", "submission_key_str")
+    for record_obj in record_list:
+        if not (record_obj.status_str == "Filled" and record_obj.remaining_amount_float in (0, None)
+                and (record_obj.amount_float == 0 or record_obj.filled_amount_float == 0
+                    or record_obj.remaining_amount_float is None or record_obj.avg_fill_price_float is None)):
+            normalized_record_list.append(record_obj)
+            continue
+        known_match_list = [row_dict for row_dict in known_order_list
+            if row_dict["broker_order_id_str"] == record_obj.broker_order_id_str or (
+                record_obj.order_request_key_str and row_dict["order_request_key_str"] == record_obj.order_request_key_str)]
+        if len(known_match_list) > 1:
+            raise ValueError("Sparse order summary has ambiguous saved order identity.")
+        fallback_record_obj = record_obj
+        preserve_complete_bool = False
+        empty_quantity_bool = record_obj.amount_float == 0 or record_obj.filled_amount_float == 0
+        if known_match_list:
+            known_dict = known_match_list[0]
+            if any(known_dict.get(field_str) != getattr(record_obj, field_str) for field_str in identity_field_tuple):
+                raise ValueError("Sparse order summary conflicts with saved order identity.")
+            known_amount_float = float(known_dict["amount_float"])
+            known_filled_float = float(known_dict["filled_amount_float"])
+            known_remaining_float = known_dict["remaining_amount_float"]
+            known_price_float = known_dict["avg_fill_price_float"]
+            valid_known_bool = (
+                math.isfinite(known_amount_float) and known_amount_float != 0
+                and math.isfinite(known_filled_float) and abs(known_filled_float) <= abs(known_amount_float)
+                and (known_filled_float >= 0 or known_amount_float < 0)
+                and (known_remaining_float is None or (math.isfinite(known_remaining_float)
+                    and 0 <= known_remaining_float <= abs(known_amount_float)))
+                and (known_price_float is None or (math.isfinite(known_price_float) and known_price_float > 0))
+                and (known_filled_float == 0 or known_price_float is not None)
+                and (known_dict["status_str"] != "Filled" or (
+                    abs(abs(known_filled_float) - abs(known_amount_float)) <= 1e-9 and known_remaining_float == 0))
+            )
+            if valid_known_bool:
+                fallback_record_obj = replace(record_obj, amount_float=known_amount_float,
+                    filled_amount_float=known_filled_float, remaining_amount_float=known_remaining_float,
+                    avg_fill_price_float=known_price_float, status_str=known_dict["status_str"],
+                    submitted_timestamp_ts=datetime.fromisoformat(known_dict["submitted_timestamp_str"]),
+                    last_status_timestamp_ts=(datetime.fromisoformat(known_dict["last_status_timestamp_str"])
+                        if known_dict["last_status_timestamp_str"] else None),
+                    raw_payload_dict=json.loads(known_dict["raw_payload_json_str"]))
+                preserve_complete_bool = known_dict["status_str"] == "Filled"
+        request_match_list = [request_obj for request_obj in request_list
+            if request_obj.order_request_key_str == record_obj.order_request_key_str]
+        if len(request_match_list) > 1:
+            raise ValueError("Sparse order summary has ambiguous canonical request identity.")
+        if not request_match_list:
+            if not preserve_complete_bool and empty_quantity_bool:
+                raise ValueError("Sparse order summary has no canonical request proof.")
+            normalized_record_list.append(fallback_record_obj if preserve_complete_bool else record_obj)
+            continue
+        request_obj = request_match_list[0]
+        if (any(getattr(request_obj, field_str) != getattr(record_obj, field_str)
+                for field_str in identity_field_tuple if field_str != "broker_order_id_str")
+                or not request_obj.decision_plan_id_int or not request_obj.vplan_id_int):
+            raise ValueError("Sparse order summary conflicts with canonical request identity.")
+        requested_amount_float = float(request_obj.amount_float)
+        if not math.isfinite(requested_amount_float) or requested_amount_float == 0:
+            raise ValueError("Sparse order summary has an invalid canonical requested quantity.")
+        if (not math.isfinite(record_obj.amount_float) or (record_obj.amount_float != 0
+                and abs(record_obj.amount_float - requested_amount_float) > 1e-9)):
+            raise ValueError("Sparse order summary conflicts with the canonical requested quantity.")
+        if (not math.isfinite(record_obj.filled_amount_float)
+                or abs(record_obj.filled_amount_float) > abs(requested_amount_float) + 1e-9):
+            raise ValueError("Sparse order summary has an invalid reported filled quantity.")
+        if fallback_record_obj is not record_obj and abs(fallback_record_obj.amount_float - requested_amount_float) > 1e-9:
+            raise ValueError("Sparse order summary conflicts with the saved requested quantity.")
+        ack_match_list = [ack_dict for ack_dict in ack_list
+            if ack_dict["broker_order_id_str"] == record_obj.broker_order_id_str
+            or ack_dict["order_request_key_str"] == record_obj.order_request_key_str]
+        if len(ack_match_list) > 1:
+            raise ValueError("Sparse order summary has ambiguous broker ACK identity.")
+        if ack_match_list and any(ack_match_list[0].get(field_str) != getattr(record_obj, field_str)
+                for field_str in identity_field_tuple if field_str not in {"unit_str", "submission_key_str"}):
+            raise ValueError("Sparse order summary conflicts with broker ACK identity.")
+        submitted_timestamp_ts = fallback_record_obj.submitted_timestamp_ts
+        try:
+            ack_timestamp_ts = datetime.fromisoformat(ack_match_list[0]["response_timestamp_str"])
+            valid_ack_bool = (ack_timestamp_ts.tzinfo is not None and submitted_timestamp_ts.tzinfo is not None
+                and as_of_ts.tzinfo is not None and submitted_timestamp_ts <= ack_timestamp_ts <= as_of_ts
+                and ack_match_list[0]["local_submit_ack_bool"] == 1
+                and ack_match_list[0]["broker_response_ack_bool"] == 1
+                and ack_match_list[0]["ack_status_str"] == "broker_acked")
+        except (IndexError, KeyError, TypeError, ValueError):
+            valid_ack_bool = False
+        if not valid_ack_bool:
+            if not preserve_complete_bool and empty_quantity_bool:
+                raise ValueError("Sparse order summary has no positive broker ACK proof.")
+            # Native nonzero quantities retain their existing reporting path.
+            # Missing ACKs may never turn empty quantities into proved fills.
+            normalized_record_list.append(fallback_record_obj if preserve_complete_bool else record_obj)
+            continue
+        execution_id_set = set()
+        matched_fill_list = []
+        proof_complete_bool = True
+        for fill_obj in fill_list:
+            execution_id_str = fill_obj.raw_payload_dict.get("exec_id_str")
+            if fill_obj.broker_order_id_str != record_obj.broker_order_id_str:
+                continue
+            if any(getattr(fill_obj, field_str) != getattr(record_obj, field_str) for field_str in (
+                    "decision_plan_id_int", "vplan_id_int", "account_route_str", "asset_str")):
+                raise ValueError("Sparse order summary conflicts with execution identity.")
+            fill_amount_float = float(fill_obj.fill_amount_float)
+            fill_price_float = float(fill_obj.fill_price_float)
+            # *** CRITICAL *** reporting attribution: executions must occur at or
+            # after this exact order's saved submission and no later than this
+            # report observation. Never attribute prior-session or future fills.
+            if (not math.isfinite(fill_amount_float) or fill_amount_float * requested_amount_float <= 0
+                    or not math.isfinite(fill_price_float) or fill_price_float <= 0
+                    or fill_obj.fill_timestamp_ts.tzinfo is None or submitted_timestamp_ts.tzinfo is None
+                    or as_of_ts.tzinfo is None or not submitted_timestamp_ts <= fill_obj.fill_timestamp_ts <= as_of_ts):
+                raise ValueError("Sparse order summary has invalid execution quantities, prices or timestamps.")
+            if not isinstance(execution_id_str, str) or not execution_id_str.strip():
+                proof_complete_bool = False
+            else:
+                if execution_id_str in execution_id_set or any(
+                        other_fill_obj is not fill_obj and other_fill_obj.broker_order_id_str != record_obj.broker_order_id_str
+                        and other_fill_obj.raw_payload_dict.get("exec_id_str") == execution_id_str for other_fill_obj in fill_list):
+                    raise ValueError("Sparse order summary has a duplicate or conflicting execution ID.")
+                execution_id_set.add(execution_id_str)
+            matched_fill_list.append(fill_obj)
+        filled_amount_float = sum(abs(float(fill_obj.fill_amount_float)) for fill_obj in matched_fill_list)
+        if filled_amount_float > abs(requested_amount_float) + 1e-9:
+            raise ValueError("Sparse order summary executions exceed the canonical requested quantity.")
+        if not matched_fill_list or not proof_complete_bool or abs(filled_amount_float - abs(requested_amount_float)) > 1e-9:
+            if not preserve_complete_bool and empty_quantity_bool:
+                raise ValueError("Sparse order summary has incomplete execution proof.")
+            normalized_record_list.append(fallback_record_obj if preserve_complete_bool else record_obj)
+            continue
+        average_price_float = sum(abs(float(fill_obj.fill_amount_float)) * float(fill_obj.fill_price_float)
+            for fill_obj in matched_fill_list) / filled_amount_float
+        if not math.isfinite(average_price_float):
+            raise ValueError("Sparse order summary has an invalid execution weighted price.")
+        normalized_record_list.append(replace(record_obj, amount_float=requested_amount_float,
+            filled_amount_float=filled_amount_float, remaining_amount_float=0.0, avg_fill_price_float=average_price_float,
+            last_status_timestamp_ts=max(fill_obj.fill_timestamp_ts for fill_obj in matched_fill_list),
+            raw_payload_dict={**record_obj.raw_payload_dict, "order_summary_source_str": "canonical_request_and_executions"}))
+    return normalized_record_list
 
 
 def _session_close_ts(target_execution_ts, session_calendar_id_str):
