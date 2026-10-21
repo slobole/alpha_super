@@ -119,11 +119,13 @@ def test_fill_proof_cannot_hide_a_real_broker_position_gap(daily_case, tmp_path)
     assert broker_obj.sent_request_list == []
 
 
-@pytest.mark.parametrize("failure_str", ["no_ack", "no_execution_id", "duplicate_execution",
-    "early_ack", "future_ack", "invalid_ack_flag"])
-def test_unverified_report_preserves_summary_and_cannot_block_holdings_settlement(daily_case, tmp_path, failure_str):
-    store_obj, release_obj, decision_obj, plan_obj, broker_obj = daily_case
-    request_list, record_list, fill_list = _report_fixture(daily_case)
+QUANTITY_KEY_TUPLE = ("amount_float", "filled_amount_float", "remaining_amount_float", "avg_fill_price_float", "status_str")
+
+
+def _unproved_fixture(case_tuple, failure_str):
+    """A sparse Filled refresh whose proof is missing (never contradicted)."""
+    store_obj, _release_obj, _decision_obj, plan_obj, broker_obj = case_tuple
+    request_list, record_list, fill_list = _report_fixture(case_tuple)
     if failure_str == "no_ack":
         with store_obj._connect() as connection_obj:
             connection_obj.execute("DELETE FROM vplan_broker_ack")
@@ -139,11 +141,52 @@ def test_unverified_report_preserves_summary_and_cannot_block_holdings_settlemen
                 response_ts = (plan_obj.submission_timestamp_ts - timedelta(seconds=1)
                     if failure_str == "early_ack" else CLOSE_TS + timedelta(minutes=1))
                 connection_obj.execute("UPDATE vplan_broker_ack SET response_timestamp_str=?", (response_ts.isoformat(),))
-    before_list = store_obj.get_broker_order_row_dict_list_for_vplan(plan_obj.vplan_id_int, include_evidence_bool=True)
     sparse_list = [replace(record_obj, status_str="Filled", amount_float=0.0,
         remaining_amount_float=0.0) for record_obj in record_list]
     broker_obj.position_dict.update(plan_obj.target_share_map)
     broker_obj.get_recent_order_state_snapshot = lambda **_kwargs_dict: (sparse_list, [], fill_list)
+    return request_list, fill_list
+
+
+@pytest.mark.parametrize("failure_str", ["no_ack", "no_execution_id", "early_ack", "future_ack", "invalid_ack_flag"])
+def test_unproved_report_keeps_the_sent_summary_and_still_writes_the_fills(daily_case, tmp_path, failure_str):
+    store_obj, release_obj, decision_obj, plan_obj, broker_obj = daily_case
+    request_list, fill_list = _unproved_fixture(daily_case, failure_str)
+    before_list = store_obj.get_broker_order_row_dict_list_for_vplan(plan_obj.vplan_id_int)
+
+    assert runner._reconcile_daily_cycles(store_obj, SimpleNamespace(get_adapter=lambda _release_obj: broker_obj),
+        CLOSE_TS, "paper", None, str(tmp_path / "report.log"), False, str(tmp_path / "traces")) == 1
+
+    after_list = store_obj.get_broker_order_row_dict_list_for_vplan(plan_obj.vplan_id_int, include_evidence_bool=True)
+    for index_int, (before_dict, after_dict) in enumerate(zip(before_list, after_list, strict=True)):
+        payload_dict = after_dict["raw_payload_dict"]
+        if failure_str == "no_execution_id" and index_int > 0:
+            # Only the first order lost its proof; the others are repaired.
+            assert after_dict["filled_amount_float"] == abs(after_dict["amount_float"]) > 0
+            assert payload_dict["order_summary_source_str"] == "canonical_request_and_executions"
+            continue
+        assert {key_str: after_dict[key_str] for key_str in QUANTITY_KEY_TUPLE} == {
+            key_str: before_dict[key_str] for key_str in QUANTITY_KEY_TUPLE}
+        assert payload_dict["order_summary_proof_gap_str"] == (
+            "incomplete_executions" if failure_str == "no_execution_id" else "no_broker_ack")
+    assert len(store_obj.get_fill_row_dict_list_for_vplan(plan_obj.vplan_id_int)) == len(fill_list)
+    with store_obj._connect() as connection_obj:
+        report_status_str, error_str = connection_obj.execute(
+            "SELECT status_str,error_str FROM daily_post_close_report WHERE decision_plan_id_int=?",
+            (decision_obj.decision_plan_id_int,)).fetchone()
+    assert report_status_str == "reported" and error_str is None
+    assert store_obj.get_decision_plan_by_id(decision_obj.decision_plan_id_int).status_str == "completed"
+    assert store_obj.get_pod_state(release_obj.pod_id_str).position_amount_map == broker_obj.position_dict
+    assert [asdict(request_obj) for request_obj in build_broker_order_request_list_from_vplan(plan_obj)] == [
+        asdict(request_obj) for request_obj in request_list]
+    assert broker_obj.sent_request_list == [] and broker_obj.cancel_ref_list == []
+    assert broker_obj.refresh_count_int == 2
+
+
+def test_contradicting_report_fails_and_cannot_block_holdings_settlement(daily_case, tmp_path):
+    store_obj, release_obj, decision_obj, plan_obj, broker_obj = daily_case
+    request_list, _fill_list = _unproved_fixture(daily_case, "duplicate_execution")
+    before_list = store_obj.get_broker_order_row_dict_list_for_vplan(plan_obj.vplan_id_int, include_evidence_bool=True)
 
     assert runner._reconcile_daily_cycles(store_obj, SimpleNamespace(get_adapter=lambda _release_obj: broker_obj),
         CLOSE_TS, "paper", None, str(tmp_path / "report.log"), False, str(tmp_path / "traces")) == 1

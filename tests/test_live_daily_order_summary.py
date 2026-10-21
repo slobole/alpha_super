@@ -105,8 +105,9 @@ def test_native_filled_quantities_without_average_keep_legacy_reporting(remainin
     assert result_obj is record_obj
 
 
-@pytest.mark.parametrize("evidence_str", ["no_ack", "negative_ack", "partial", "no_execution_id"])
-def test_incomplete_proof_fails_before_initial_summary_can_appear_complete(evidence_str):
+@pytest.mark.parametrize("evidence_str,gap_str", [("no_ack", "no_broker_ack"), ("negative_ack", "no_broker_ack"),
+    ("partial", "incomplete_executions"), ("no_execution_id", "incomplete_executions")])
+def test_incomplete_proof_keeps_the_saved_summary_and_names_the_gap(evidence_str, gap_str):
     request_obj, known_obj, sparse_obj, fill_obj, ack_dict = summary_case()
     fill_list, ack_list = [fill_obj], [ack_dict]
     if evidence_str == "no_ack":
@@ -119,16 +120,21 @@ def test_incomplete_proof_fails_before_initial_summary_can_appear_complete(evide
         fill_list = [replace(fill_obj, raw_payload_dict={})]
     initial_dict = known_row(known_obj)
     for _attempt_int in range(2):
-        with pytest.raises(ValueError, match="proof"):
-            normalize_daily_order_summary_list([sparse_obj], fill_list,
-                [initial_dict], [request_obj], ack_list, as_of_ts=AS_OF_TS)
+        result_obj, = normalize_daily_order_summary_list([sparse_obj], fill_list,
+            [initial_dict], [request_obj], ack_list, as_of_ts=AS_OF_TS)
+        # The saved (sent) summary stays as it is; the refresh cannot zero it.
+        assert (result_obj.amount_float, result_obj.filled_amount_float, result_obj.remaining_amount_float,
+            result_obj.avg_fill_price_float, result_obj.status_str) == (3.0, 0.0, 3.0, None, "Submitted")
+        assert result_obj.raw_payload_dict == {"original_str": "initial_order",
+            "order_summary_source_str": "unproved_sparse_refresh", "order_summary_proof_gap_str": gap_str}
         assert initial_dict == known_row(known_obj)
 
 
-def test_unproven_sparse_record_without_known_summary_fails_reporting():
+def test_unproven_sparse_record_without_known_summary_is_written_as_is_and_names_the_gap():
     request_obj, _, sparse_obj, fill_obj, _ = summary_case()
-    with pytest.raises(ValueError, match="proof"):
-        normalize_daily_order_summary_list([sparse_obj], [fill_obj], [], [request_obj], [], as_of_ts=AS_OF_TS)
+    result_obj, = normalize_daily_order_summary_list([sparse_obj], [fill_obj], [], [request_obj], [], as_of_ts=AS_OF_TS)
+    assert (result_obj.amount_float, result_obj.filled_amount_float, result_obj.status_str) == (0.0, 0.0, "Filled")
+    assert result_obj.raw_payload_dict["order_summary_proof_gap_str"] == "no_broker_ack"
 
 
 @pytest.mark.parametrize("mutation_dict", [
@@ -191,9 +197,11 @@ def test_same_symbol_opposing_legs_use_exact_order_id_and_request_key():
 
 def test_unknown_canonical_request_never_infers_requested_amount_from_fills():
     _, known_obj, sparse_obj, fill_obj, ack_dict = summary_case()
-    with pytest.raises(ValueError, match="canonical request proof"):
-        normalize_daily_order_summary_list([sparse_obj], [fill_obj],
-            [known_row(known_obj)], [], [ack_dict], as_of_ts=AS_OF_TS)
+    result_obj, = normalize_daily_order_summary_list([sparse_obj], [fill_obj],
+        [known_row(known_obj)], [], [ack_dict], as_of_ts=AS_OF_TS)
+    # The saved request quantity stays; nothing is inferred from the fills.
+    assert (result_obj.amount_float, result_obj.filled_amount_float, result_obj.status_str) == (3.0, 0.0, "Submitted")
+    assert result_obj.raw_payload_dict["order_summary_proof_gap_str"] == "no_canonical_request"
 
 
 def test_already_sparse_known_summary_can_be_repaired_with_complete_proof():
@@ -240,8 +248,9 @@ def test_conflicting_requested_quantity_is_not_silently_replaced(amount_float):
 ])
 def test_invalid_ack_cannot_prove_empty_filled_summary(mutation_dict):
     _, _, _, _, ack_dict = summary_case()
-    with pytest.raises(ValueError, match="ACK proof"):
-        normalize_case(ack_list=[{**ack_dict, **mutation_dict}])
+    result_obj = normalize_case(ack_list=[{**ack_dict, **mutation_dict}])
+    assert (result_obj.filled_amount_float, result_obj.avg_fill_price_float, result_obj.status_str) == (0.0, None, "Submitted")
+    assert result_obj.raw_payload_dict["order_summary_proof_gap_str"] == "no_broker_ack"
 
 
 def test_future_execution_cannot_repair_this_observation():

@@ -16,15 +16,27 @@ REPORT_ATTEMPT_LEASE = timedelta(minutes=30)
 REPORT_RETRY_WINDOW = timedelta(hours=24)
 
 
+UNPROVED_SPARSE_SOURCE_STR = "unproved_sparse_refresh"
+
+
+def _unproved_summary_obj(fallback_record_obj, proof_gap_str):
+    """A sparse Filled refresh without proof keeps the saved summary (or itself) and names the gap."""
+    return replace(fallback_record_obj, raw_payload_dict={**fallback_record_obj.raw_payload_dict,
+        "order_summary_source_str": UNPROVED_SPARSE_SOURCE_STR, "order_summary_proof_gap_str": proof_gap_str})
+
+
 def normalize_daily_order_summary_list(record_list, fill_list, known_order_list, request_list, ack_list, *, as_of_ts):
     """Repair incomplete Filled summaries from exact order and execution proof.
 
     Reporting only: filled = sum(abs(execution shares));
     VWAP = sum(abs(execution shares) * execution price) / filled.
-    Empty quantities require complete proof or a prior complete summary;
-    otherwise reporting fails before orders or fills are written. Native nonzero
-    quantities keep their existing reporting path when optional proof is missing.
-    Daily holdings settlement is independent.
+    A sparse refresh (empty quantities) is repaired only from complete proof: the
+    canonical request, a positive broker ACK and identified executions that add
+    up to the request. Without that proof the saved summary is kept as it is and
+    the gap is named in its payload (``order_summary_proof_gap_str``). A refresh
+    that contradicts saved identity, quantities or executions still fails the
+    report. Native nonzero quantities keep their existing reporting path. The
+    caller writes the fills either way; daily holdings settlement is independent.
     """
     normalized_record_list = []
     identity_field_tuple = ("broker_order_id_str", "decision_plan_id_int", "vplan_id_int",
@@ -77,9 +89,10 @@ def normalize_daily_order_summary_list(record_list, fill_list, known_order_list,
         if len(request_match_list) > 1:
             raise ValueError("Sparse order summary has ambiguous canonical request identity.")
         if not request_match_list:
-            if not preserve_complete_bool and empty_quantity_bool:
-                raise ValueError("Sparse order summary has no canonical request proof.")
-            normalized_record_list.append(fallback_record_obj if preserve_complete_bool else record_obj)
+            if preserve_complete_bool or not empty_quantity_bool:
+                normalized_record_list.append(fallback_record_obj if preserve_complete_bool else record_obj)
+            else:
+                normalized_record_list.append(_unproved_summary_obj(fallback_record_obj, "no_canonical_request"))
             continue
         request_obj = request_match_list[0]
         if (any(getattr(request_obj, field_str) != getattr(record_obj, field_str)
@@ -116,11 +129,12 @@ def normalize_daily_order_summary_list(record_list, fill_list, known_order_list,
         except (IndexError, KeyError, TypeError, ValueError):
             valid_ack_bool = False
         if not valid_ack_bool:
-            if not preserve_complete_bool and empty_quantity_bool:
-                raise ValueError("Sparse order summary has no positive broker ACK proof.")
-            # Native nonzero quantities retain their existing reporting path.
-            # Missing ACKs may never turn empty quantities into proved fills.
-            normalized_record_list.append(fallback_record_obj if preserve_complete_bool else record_obj)
+            if preserve_complete_bool or not empty_quantity_bool:
+                # Native nonzero quantities retain their existing reporting path.
+                normalized_record_list.append(fallback_record_obj if preserve_complete_bool else record_obj)
+            else:
+                # Missing ACKs never turn empty quantities into proved fills.
+                normalized_record_list.append(_unproved_summary_obj(fallback_record_obj, "no_broker_ack"))
             continue
         execution_id_set = set()
         matched_fill_list = []
@@ -155,9 +169,10 @@ def normalize_daily_order_summary_list(record_list, fill_list, known_order_list,
         if filled_amount_float > abs(requested_amount_float) + 1e-9:
             raise ValueError("Sparse order summary executions exceed the canonical requested quantity.")
         if not matched_fill_list or not proof_complete_bool or abs(filled_amount_float - abs(requested_amount_float)) > 1e-9:
-            if not preserve_complete_bool and empty_quantity_bool:
-                raise ValueError("Sparse order summary has incomplete execution proof.")
-            normalized_record_list.append(fallback_record_obj if preserve_complete_bool else record_obj)
+            if preserve_complete_bool or not empty_quantity_bool:
+                normalized_record_list.append(fallback_record_obj if preserve_complete_bool else record_obj)
+            else:
+                normalized_record_list.append(_unproved_summary_obj(fallback_record_obj, "incomplete_executions"))
             continue
         average_price_float = sum(abs(float(fill_obj.fill_amount_float)) * float(fill_obj.fill_price_float)
             for fill_obj in matched_fill_list) / filled_amount_float
