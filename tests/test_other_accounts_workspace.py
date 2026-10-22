@@ -273,3 +273,46 @@ def test_client_report_pdf_and_csv_list_the_other_account(tmp_path, monkeypatch)
     csv_line_list = export_performance_csv_str(report_dict, level_str="pods").splitlines()
     assert [line_str.split(",")[0] for line_str in csv_line_list[1:]][-1] == "Private reserve"
     assert len(csv_line_list) == 4
+
+
+def test_correction_dropping_the_other_account_withholds_totals_instead_of_shrinking_them(tmp_path, monkeypatch):
+    provider_obj, database_path_str, _ = _reserve_fixture(tmp_path, monkeypatch)
+    _, snapshot_obj = load_workspace_snapshot_tuple(provider_obj, database_path_str, as_of_ts=AS_OF_TS)
+    attribute_list = [dict(row_obj.attribute_dict) for row_obj in snapshot_obj.row_tuple if row_obj.account_route_str != "URESERVE"]
+    binding_list = build_live_binding_obj_list(releases_root_path_str=str(tmp_path / "releases"),
+        config_path_str=str(tmp_path / "dashboard.yaml"))
+    # A full-range Flex correction that omits the reserve.
+    PerformanceStore(database_path_str).replace_range(
+        xml_text_str=xml_text_str(attribute_list).replace('queryName="TEST_NAV"', 'queryName="ALPHA_DAILY_TWR"'),
+        query_name_str="ALPHA_DAILY_TWR", request_from_date_str="2026-09-01", request_to_date_str="2026-09-03",
+        binding_obj_list=binding_list, imported_timestamp_str=AS_OF_TS.isoformat())
+    workspace_dict, snapshot_obj = load_workspace_snapshot_tuple(provider_obj, database_path_str, as_of_ts=AS_OF_TS)
+    assert [account_dict["account_route"] for account_dict in workspace_dict["other_account_list"]] == ["URESERVE"]
+    report_dict = build_performance_page_dict(workspace_dict, snapshot_obj, as_of_ts=AS_OF_TS,
+        from_date_str="2026-09-01", to_date_str="2026-09-03")["report_dict"]
+    assert (report_dict["closing_nav_float"], report_dict["pnl_float"], report_dict["twr_float"], report_dict["status_str"]) == (
+        None, None, None, "draft")
+
+
+def test_other_account_handing_over_to_a_pod_keeps_client_history(tmp_path, monkeypatch):
+    provider_obj, database_path_str, _ = _reserve_fixture(tmp_path, monkeypatch, interest_float=2.0)
+    workspace_dict, snapshot_obj = load_workspace_snapshot_tuple(provider_obj, database_path_str, as_of_ts=AS_OF_TS)
+    before_dict = build_performance_page_dict(workspace_dict, snapshot_obj, as_of_ts=AS_OF_TS,
+        from_date_str="2026-09-01", to_date_str="2026-09-03")["report_dict"]
+    # The same money, but URESERVE becomes Pod pod_c from 2026-09-02: an other
+    # account on 09-01, the Pod after. No Flex fact changes.
+    handover_dict = deepcopy(workspace_dict)
+    handover_dict["client_dict"]["accounts"] = [account_dict for account_dict in handover_dict["client_dict"]["accounts"]
+        if account_dict["account_route"] != "URESERVE"] + [
+        {"role": "reserve", "account_route": "URESERVE", "display_name": "Private reserve",
+            "effective_from": "2026-09-01", "effective_to": "2026-09-01"},
+        {"pod_id": "pod_c", "account_route": "URESERVE", "display_name": "Pod C",
+            "effective_from": "2026-09-02", "effective_to": None}]
+    handover_dict["valuation_account_list"] = [account_dict for account_dict in handover_dict["valuation_account_list"]
+        if account_dict["account_route"] != "URESERVE"] + [{"pod_id": "pod_c", "account_route": "URESERVE", "display_name": "Pod C"}]
+    after_dict = build_performance_page_dict(handover_dict, snapshot_obj, as_of_ts=AS_OF_TS,
+        from_date_str="2026-09-01", to_date_str="2026-09-03")["report_dict"]
+    for field_str in ("opening_nav_float", "closing_nav_float", "pnl_float", "twr_float", "scope_movement_float"):
+        assert after_dict[field_str] == pytest.approx(before_dict[field_str]), field_str
+    assert after_dict["status_str"] == before_dict["status_str"] == "ready"
+    assert "pod_c" in {strategy_dict["pod_id_str"] for strategy_dict in after_dict["strategy_list"]}

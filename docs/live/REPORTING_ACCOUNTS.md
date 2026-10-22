@@ -23,9 +23,16 @@ the releases or the database by hand.
   raw Flex XML the sync already keeps (`flex_import`, read-only). Any account
   that is not a strategy account (saved Pod bindings or current LIVE releases)
   is an other account.
-- **Starts on its first money day:** the first saved day with a nonzero
-  starting or ending NAV. Before that it held nothing. An account that never
-  held money is left out and never shown.
+- **Starts on its first active day:** the first saved day with any nonzero
+  money field (NAV, deposits, fees, interest...), so money that came in and
+  went out the same day still counts. An account that never had any activity
+  is left out and never shown, in any currency.
+- **Membership is never taken back.** It is read from every saved import,
+  including ones a later Flex correction replaced. If a correction drops the
+  account, its days become missing (totals withheld), not zero.
+- **Becomes a Pod on the Pod's first day.** If an account gets a LIVE YAML
+  later, it stays an other account up to the day before the Pod's first
+  return day and is the Pod from then on. Client history does not change.
 - **Name:** the IBKR alias (Account Information `acctAlias`) when the query has
   it, else `Other account …` plus the last four characters. Full account IDs
   never reach the screens or the client report.
@@ -36,13 +43,13 @@ the releases or the database by hand.
   PDF, and its own rows in the Pods CSV.
 - **Missing is never zero.** Once counted, a day without its NAV withholds the
   client totals for that day. Pod numbers are not affected.
-- **USD only**, like the strategy accounts. A non-USD other account is named in
-  the financial error instead of being dropped from the totals.
+- **USD only**, like the strategy accounts. An active non-USD other account is
+  named in the financial error instead of being dropped from the totals.
 
 ## Trade-off
 
 An account in the Flex without a YAML used to fail the sync. Now it is counted
 as an other account and shown as a grey row, so a forgotten strategy YAML shows
 up on the screen instead of as a sync error. Add a new Pod's account to the
-Flex after its LIVE YAML is in the releases folder (see the runbook), or its
-first days count as an other account and not as Pod days.
+Flex after its LIVE YAML is in the releases folder (see the runbook); days
+before the Pod's first return day count as an other account.

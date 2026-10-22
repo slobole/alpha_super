@@ -413,6 +413,19 @@ def _daily_bridge_dict(row_obj: BrokerNavRow, bridge_dict: dict | None) -> dict[
     }
 
 
+def _periods_cover_bool(account_list, *, from_date_str, to_date_str):
+    """One account's back-to-back periods (other account, then its Pod) cover the range."""
+    covered_str = from_date_str
+    for account_dict in sorted(account_list, key=lambda account_dict: account_dict["effective_from"]):
+        if account_dict["effective_from"] > covered_str:
+            return False
+        end_str = account_dict.get("effective_to") or "9999-12-31"
+        if end_str >= to_date_str:
+            return True
+        covered_str = max(covered_str, (date.fromisoformat(end_str) + timedelta(days=1)).isoformat())
+    return False
+
+
 def _account_active_bool(account_dict: dict, market_date_str: str) -> bool:
     return account_dict["effective_from"] <= market_date_str <= (account_dict.get("effective_to") or "9999-12-31")
 
@@ -453,7 +466,12 @@ def _valuation_account_list(account_list, performance_account_list):
             identity_dict.update(effective_from=from_str, effective_to=to_str)
         result_list.append(identity_dict)
     pair_set = {(account_dict["account_route"], account_dict.get("pod_id"), account_dict.get("role", "strategy")) for account_dict in result_list}
-    if any((account_dict["account_route"], account_dict.get("pod_id"), account_dict.get("role", "strategy")) not in pair_set for account_dict in performance_account_list):
+    # An other-account period before a strategy's first day is valued by that
+    # account's strategy identity, which covers every date.
+    strategy_route_set = {account_dict["account_route"] for account_dict in result_list if account_dict.get("role", "strategy") == "strategy"}
+    if any((account_dict["account_route"], account_dict.get("pod_id"), account_dict.get("role", "strategy")) not in pair_set
+            and not (account_dict.get("role") == "reserve" and account_dict["account_route"] in strategy_route_set)
+            for account_dict in performance_account_list):
         raise ClientReportingError("Valuation and performance account identities disagree.")
     for identity_dict in result_list:
         if identity_dict.get("role") == "reserve" and any(
@@ -686,12 +704,14 @@ def build_client_report_dict(
         issue_list.extend(f"{account_dict['display_name']}: {issue_str}" for issue_str in dict.fromkeys(account_issue_list))
     if local_valuation_list is not None:
         # NAV-only identities cannot unlock a return calculated on fewer accounts.
-        scope_complete_bool = scope_complete_bool and all(any(
-            account_dict["account_route"] == identity_dict["account_route"] and account_dict.get("pod_id") == identity_dict.get("pod_id")
-            and account_dict.get("role", "strategy") == identity_dict.get("role", "strategy")
-            and (identity_dict.get("role") == "reserve" or (
-                account_dict["effective_from"] <= from_date_str and (account_dict.get("effective_to") or "9999-12-31") >= to_date_str))
-            for account_dict in account_list) for identity_dict in local_valuation_list)
+        scope_complete_bool = scope_complete_bool and all(
+            any(account_dict["account_route"] == identity_dict["account_route"] and account_dict.get("role") == "reserve"
+                for account_dict in account_list) if identity_dict.get("role") == "reserve"
+            else _periods_cover_bool([account_dict for account_dict in account_list
+                if account_dict["account_route"] == identity_dict["account_route"] and (account_dict.get("role") == "reserve"
+                    or (account_dict.get("role", "strategy") == "strategy" and account_dict.get("pod_id") == identity_dict.get("pod_id")))],
+                from_date_str=from_date_str, to_date_str=to_date_str)
+            for identity_dict in local_valuation_list)
     # *** CRITICAL *** Reserve capital participates in every accounting gate.
     # Presentation filtering below must never turn missing reserve NAV into zero.
     all_coverage_bool = scope_complete_bool and bool(financial_result_list) and all(row_dict["coverage_complete_bool"] for row_dict in financial_result_list)

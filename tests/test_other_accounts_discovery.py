@@ -13,11 +13,11 @@ def _binding_list():
     return [PodPerformanceBinding("U100", "pod_strategy", "2026-08-07", None, True)]
 
 
-def _statement_str(route_str, row_list, *, alias_str="", currency_str="USD"):
+def _statement_str(route_str, row_list, *, alias_str="", currency_str="USD", extra_str=""):
     alias_attribute_str = f' acctAlias="{alias_str}"' if alias_str else ""
     return (f'<FlexStatement accountId="{route_str}"><AccountInformation accountId="{route_str}" currency="{currency_str}"{alias_attribute_str} />'
         + "".join(f'<ChangeInNAV accountId="{route_str}" currency="{currency_str}" fromDate="{date_str}" toDate="{date_str}" '
-            f'startingValue="{opening_int}" endingValue="{closing_int}" twr="0" />' for date_str, opening_int, closing_int in row_list)
+            f'startingValue="{opening_int}" endingValue="{closing_int}" twr="0"{extra_str} />' for date_str, opening_int, closing_int in row_list)
         + "</FlexStatement>")
 
 
@@ -30,8 +30,9 @@ def _store_path_str(db_path_obj, *other_statement_str_tuple):
     return str(db_path_obj)
 
 
-def _discover_list(db_path_str):
-    return discover_other_account_list(db_path_str, query_name_str="ALPHA_DAILY_TWR", strategy_account_route_set={"U100"})
+def _discover_list(db_path_str, **scope_kwargs):
+    return discover_other_account_list(db_path_str, query_name_str="ALPHA_DAILY_TWR",
+        **({"strategy_start_by_route_dict": {"U100": "2026-08-07"}} | scope_kwargs))
 
 
 def test_vault_is_found_with_its_alias_and_first_day(tmp_path):
@@ -54,17 +55,49 @@ def test_empty_account_is_left_out_until_it_holds_money(tmp_path):
         ("U800", "2026-08-10")]
 
 
-def test_strategy_accounts_are_never_other_accounts(tmp_path):
+@pytest.mark.parametrize("extra_str", [' depositsWithdrawals="100" commissions="-100"', ' interest="0.01"', ' mtm="abc"'])
+def test_money_moving_through_a_zero_balance_account_is_activity(tmp_path, extra_str):
+    db_path_str = _store_path_str(tmp_path / "performance.sqlite3",
+        _statement_str("U800", [("20260807", 0, 0)], extra_str=extra_str), _statement_str("U801", [("20260810", 0, 0)]))
+    assert [(account_dict["account_route"], account_dict["effective_from"]) for account_dict in _discover_list(db_path_str)] == [
+        ("U800", "2026-08-07")]
+
+
+def test_a_correction_that_drops_the_account_keeps_its_membership(tmp_path):
+    db_path_obj = tmp_path / "performance.sqlite3"
+    _store_path_str(db_path_obj, _statement_str("U900", [("20260807", 5000, 5000), ("20260810", 5000, 5000)]))
+    # The replacement covers the whole range and omits the account entirely:
+    # the account stays a member and its days become missing, never zero.
+    _store_path_str(db_path_obj)
+    assert [(account_dict["account_route"], account_dict["effective_from"]) for account_dict in _discover_list(str(db_path_obj))] == [
+        ("U900", "2026-08-07")]
+
+
+def test_strategy_account_is_an_other_account_only_before_its_first_pod_day(tmp_path):
     db_path_str = _store_path_str(tmp_path / "performance.sqlite3", _statement_str("U900", [("20260807", 5, 5), ("20260810", 5, 5)]))
-    assert discover_other_account_list(db_path_str, query_name_str="ALPHA_DAILY_TWR",
-        strategy_account_route_set={"U100", "U900"}) == []
+    start_dict = {"U100": "2026-08-07"}
+    # Active on 08-07, before the baseline (08-10) of a Pod starting 08-11.
+    assert _discover_list(db_path_str, strategy_start_by_route_dict=start_dict | {"U900": "2026-08-11"}) == [
+        {"role": "reserve", "account_route": "U900", "display_name": "Other account …U900",
+            "effective_from": "2026-08-07", "effective_to": "2026-08-10"}]
+    # A Pod starting 08-10 has its baseline on 08-07: an ordinary Pod, as before.
+    assert _discover_list(db_path_str, strategy_start_by_route_dict=start_dict | {"U900": "2026-08-10"}) == []
+    assert _discover_list(db_path_str, strategy_start_by_route_dict=start_dict | {"U900": "2026-08-07"}) == []
+    assert _discover_list(db_path_str, strategy_start_by_route_dict=start_dict | {"U900": None}) == []
+    assert _discover_list(db_path_str, excluded_route_set={"U900"}) == []
 
 
-def test_non_usd_account_is_reported_by_name_not_dropped(tmp_path):
+def test_active_non_usd_account_is_reported_by_name_not_dropped(tmp_path):
     db_path_str = _store_path_str(tmp_path / "performance.sqlite3", _statement_str("U28444262", [("20260807", 5, 5), ("20260810", 5, 5)],
         alias_str="VAULT", currency_str="EUR"))
     with pytest.raises(ClientReportingError, match="VAULT: only USD accounts"):
         _discover_list(db_path_str)
+
+
+def test_empty_non_usd_account_is_ignored(tmp_path):
+    db_path_str = _store_path_str(tmp_path / "performance.sqlite3",
+        _statement_str("U700", [("20260807", 0, 0), ("20260810", 0, 0)], currency_str="EUR"))
+    assert _discover_list(db_path_str) == []
 
 
 def test_missing_database_and_reads_never_write(tmp_path):
