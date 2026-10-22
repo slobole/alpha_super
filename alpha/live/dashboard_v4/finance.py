@@ -14,6 +14,8 @@ from alpha.live.dashboard_v3.client_presentation import portfolio_allocation_dic
 
 
 POD_COLOR_TUPLE = ("#2a78d6", "#1baf7a", "#4a3aa7", "#e87ba4")
+# The client's other accounts (no strategy): one neutral grey, never a pod colour.
+OTHER_ACCOUNT_COLOR_STR = "#9aa3ae"
 PERIOD_TUPLE = ("1M", "3M", "YTD", "All")
 
 
@@ -107,7 +109,7 @@ def _ring_path_str(start_float, weight_float, inner_float, outer_float):
         f"A {inner_float},{inner_float} 0 0 0 {point_fn(inner_list[2])} Z")
 
 
-def _allocation_dict(source_dict):
+def _allocation_dict(source_dict, *, reserve_account_set=frozenset()):
     """Regroup validated V3 weights. No new valuation or residual cash estimate."""
     result_dict = {"available_bool": bool(source_dict.get("item_list")),
         "empty_str": source_dict.get("reason_str") or "Allocation unavailable", "slice_list": [], "label_list": [], "row_list": [],
@@ -117,15 +119,20 @@ def _allocation_dict(source_dict):
         "basis_str": source_dict.get("basis_str", ""), "source_str": source_dict.get("source_str", ""), "date_str": source_dict.get("date_str", "")}
     if not result_dict["available_bool"]:
         return result_dict
-    complete_bool = result_dict["cash_complete_bool"]
+    reserve_item_list = [item_dict for item_dict in source_dict["item_list"]
+        if item_dict.get("detail_str") in reserve_account_set]
+    # A reserve role proves ownership, not that its full NAV is broker cash.
+    complete_bool = result_dict["cash_complete_bool"] and not reserve_item_list
+    result_dict["cash_complete_bool"] = complete_bool
     cash_weight_float = source_dict["cash_weight_float"] if complete_bool else None
     if complete_bool:
         result_dict.update(cash_percent_str=_share_str(cash_weight_float), total_cash_str=_share_str(cash_weight_float),
             total_invested_str=_share_str(1 - cash_weight_float), empty_str="")
     else:
-        result_dict["basis_str"] += "; cash split unavailable — sectors show total pod value"
+        value_label_str = "account" if reserve_item_list else "pod"
+        result_dict["basis_str"] += f"; cash split unavailable — sectors show total {value_label_str} value"
         result_dict.update(invested_heading_str="Value", total_invested_str="100.0%",
-            ring_caption_str="Pod value · cash split unavailable")
+            ring_caption_str=f"{value_label_str.capitalize()} value · cash split unavailable")
 
     def add_slice_fn(start_float, weight_float, color_str, label_str, *, outer_bool=False):
         if weight_float <= 0:
@@ -137,7 +144,9 @@ def _allocation_dict(source_dict):
         add_slice_fn(0, cash_weight_float, "#dfe3e9", "Cash " + _share_str(cash_weight_float))
     invested_offset_float = cash_weight_float if complete_bool else 0
     cash_owner_list = []
-    for index_int, item_dict in enumerate(source_dict["item_list"]):
+    strategy_item_list = [item_dict for item_dict in source_dict["item_list"]
+        if item_dict.get("detail_str") not in reserve_account_set]
+    for index_int, item_dict in enumerate(strategy_item_list):
         color_str = POD_COLOR_TUPLE[index_int % len(POD_COLOR_TUPLE)]
         name_str = item_dict["label_str"]
         if item_dict.get("show_identity_bool"):
@@ -151,6 +160,13 @@ def _allocation_dict(source_dict):
         invested_offset_float += weight_float
         if complete_bool:
             cash_owner_list.append({"name_str": name_str, "color_str": color_str, "weight_float": item_dict["cash_weight_float"]})
+    for item_dict in reserve_item_list:
+        name_str = item_dict["label_str"] + " (not traded)"
+        result_dict["row_list"].append({"name_str": name_str, "color_str": OTHER_ACCOUNT_COLOR_STR,
+            "invested_str": _share_str(item_dict["weight_float"]), "cash_str": "—"})
+        add_slice_fn(invested_offset_float, item_dict["weight_float"], OTHER_ACCOUNT_COLOR_STR,
+            name_str + " value " + _share_str(item_dict["weight_float"]))
+        invested_offset_float += item_dict["weight_float"]
     cash_offset_float = 0
     for owner_dict in sorted(cash_owner_list, key=lambda owner_dict: -owner_dict["weight_float"]):
         weight_float = owner_dict["weight_float"]
@@ -198,7 +214,10 @@ def build_financial_overview_dict(workspace_dict, snapshot_obj, provider_obj, *,
         "chart_dict": _empty_chart_dict(), "allocation_dict": _allocation_dict({}),
         "financial_error_str": "", "delayed_bool": True, "is_demo_bool": demo_bool}
     account_list = workspace_dict.get("valuation_account_list") or client_dict.get("accounts", [])
-    identity_dict = {(account_dict["account_route"], account_dict.get("pod_id")): account_dict for account_dict in account_list}
+    reserve_account_set = {account_dict["account_route"] for account_dict in account_list
+        if account_dict.get("role") == "reserve"}
+    identity_dict = {(account_dict["account_route"], account_dict.get("pod_id")): account_dict for account_dict in account_list
+        if account_dict.get("role", "strategy") == "strategy"}
     result_dict["allocation_dict"]["row_list"] = [{"name_str": account_dict.get("display_name") or account_dict.get("pod_id") or account_dict["account_route"],
         "color_str": POD_COLOR_TUPLE[index_int % len(POD_COLOR_TUPLE)], "invested_str": "—", "cash_str": "—"}
         for index_int, account_dict in enumerate(identity_dict.values())]
@@ -275,7 +294,8 @@ def build_financial_overview_dict(workspace_dict, snapshot_obj, provider_obj, *,
         cash_list = load_portfolio_cash_list(client_dict, day_dict, provider_obj, operations_dict, as_of_ts=as_of_ts)
     except (ValueError, OSError, KeyError, TypeError, AttributeError):
         cash_list = []
-    allocation_dict = _allocation_dict(portfolio_allocation_dict(day_dict, snapshot_obj, cash_snapshot_list=cash_list))
+    allocation_dict = _allocation_dict(portfolio_allocation_dict(day_dict, snapshot_obj, cash_snapshot_list=cash_list),
+        reserve_account_set=reserve_account_set)
     if not allocation_dict["available_bool"]:
         allocation_dict["row_list"] = result_dict["allocation_dict"]["row_list"]
     result_dict["allocation_dict"] = allocation_dict

@@ -64,7 +64,7 @@ def _scope_tuple(workspace_dict, pod_id_str):
         if row_dict.get("pod_id_str") == pod_id_str]
     if len(row_list) != 1 or (row_list[0].get("mode_str"), row_list[0].get("account_route_str")) != ("live", route_str):
         raise ValueError("Current LIVE identity is not established.")
-    account_list = [account_dict for account_dict in client_dict["accounts"] if account_dict["pod_id"] == pod_id_str]
+    account_list = [account_dict for account_dict in client_dict["accounts"] if account_dict.get("pod_id") == pod_id_str]
     if len(account_list) > 1:
         raise ValueError("Multiple historical periods need an explicit selection.")
     client_dict["accounts"] = account_list
@@ -234,7 +234,9 @@ def _build_report_finance_dict(workspace_dict, snapshot_obj, provider_obj, *, po
                     if current_map_dict != close_map_dict:
                         holdings_dict["holdings_changed_bool"] = current_time_str[:10] > closing_str
                         holdings_note_str = "Holdings changed since this close." if holdings_dict["holdings_changed_bool"] else "Saved holdings differ from this close."
-                color_account_list = workspace_dict.get("valuation_account_list") or workspace_dict["client_dict"]["accounts"]
+                color_account_list = [account_dict for account_dict in (
+                    workspace_dict.get("valuation_account_list") or workspace_dict["client_dict"]["accounts"])
+                    if account_dict.get("role", "strategy") == "strategy"]
                 color_index_int = next((index_int for index_int, account_dict in enumerate(color_account_list)
                     if account_dict["pod_id"] == pod_id_str), 0)
                 result_dict["holdings_allocation_dict"] = build_pod_allocation_dict(holdings_dict,
@@ -279,7 +281,9 @@ def build_pod_finance_dict(workspace_dict, snapshot_obj, provider_obj, *, pod_id
         position_list, cash_float = holdings_dict["position_list"], holdings_dict["cash_float"]
         position_map_dict = {row_dict["symbol_str"]: row_dict["shares_float"] for row_dict in position_list}
         total_decimal = sum((Decimal(str(row_dict["value_float"])) for row_dict in position_list), Decimal(str(cash_float)))
-        color_account_list = workspace_dict.get("valuation_account_list") or client_dict["accounts"]
+        color_account_list = [account_dict for account_dict in (
+            workspace_dict.get("valuation_account_list") or client_dict["accounts"])
+            if account_dict.get("role", "strategy") == "strategy"]
         color_index_int = next((index_int for index_int, account_dict in enumerate(color_account_list)
             if account_dict["pod_id"] == pod_id_str), 0)
         allocation_dict = build_pod_allocation_dict({"available_bool": True,

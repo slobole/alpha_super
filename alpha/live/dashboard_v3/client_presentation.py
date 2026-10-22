@@ -36,10 +36,13 @@ def portfolio_account_list(report_dict):
     """The same end-date ownership scope for NAV and cash display."""
     date_str = report_dict.get("closing_date_str") or ""
     if "valuation_account_list" in report_dict:
-        return report_dict["valuation_account_list"]
+        return [account_dict for account_dict in report_dict["valuation_account_list"]
+            if account_dict.get("role", "strategy") != "reserve"
+            or account_dict["effective_from"] <= date_str <= (account_dict.get("effective_to") or "9999-12-31")]
     return [{"account_route": item_dict["account_route_str"], "pod_id": item_dict.get("pod_id_str"),
              "display_name": item_dict["display_name_str"]}
-        for item_dict in report_dict["strategy_list"] if item_dict["to_date_str"] == date_str]
+        for item_dict in report_dict.get("financial_account_list", report_dict["strategy_list"])
+        if item_dict["to_date_str"] == date_str]
 
 
 def portfolio_allocation_dict(report_dict, snapshot_obj, *, cash_snapshot_list=()):

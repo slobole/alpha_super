@@ -2,7 +2,7 @@
 
 Only saved broker facts enter this projection. It never imports the runner,
 opens a broker connection, updates a ledger or promotes the Shadow composite.
-One configured account period is one independently valued strategy sleeve.
+One configured account period is an independently valued strategy or reserve.
 Dates include the whole broker reporting day: beginning-of-day through EOD.
 """
 
@@ -174,9 +174,17 @@ def validate_client_registry_dict(registry_dict: dict[str, Any], *, allow_empty_
         for account_dict in account_list:
             if not isinstance(account_dict, dict):
                 raise ClientReportingError("Every account period must be a JSON object.")
-            for field_str in ("account_route", "pod_id", "display_name"):
+            for field_str in ("account_route", "display_name"):
                 if not isinstance(account_dict.get(field_str), str) or not account_dict[field_str].strip():
                     raise ClientReportingError(f"Account {field_str} is required.")
+            role_str = account_dict.get("role", "strategy")
+            if not isinstance(role_str, str) or role_str not in {"strategy", "reserve"}:
+                raise ClientReportingError("Account role must be strategy or reserve.")
+            if role_str == "strategy":
+                if not isinstance(account_dict.get("pod_id"), str) or not account_dict["pod_id"].strip():
+                    raise ClientReportingError("Account pod_id is required.")
+            elif account_dict.get("pod_id") is not None or "reference_summary_path" in account_dict:
+                raise ClientReportingError("Reserve accounts cannot have a Pod or strategy reference.")
             if "reference_summary_path" in account_dict and (not isinstance(account_dict["reference_summary_path"], str) or not account_dict["reference_summary_path"].strip()):
                 raise ClientReportingError("reference_summary_path must be an explicit server-configured saved JSON path.")
             from_str = _date_str(account_dict.get("effective_from"))
@@ -185,7 +193,8 @@ def validate_client_registry_dict(registry_dict: dict[str, Any], *, allow_empty_
                 raise ClientReportingError("Account period is reversed or precedes the client mandate.")
             period_tuple = (from_str, to_str, client_id_str)
             ownership_dict.setdefault(account_dict["account_route"], []).append(period_tuple)
-            pod_period_dict.setdefault(account_dict["pod_id"], []).append(period_tuple)
+            if role_str == "strategy":
+                pod_period_dict.setdefault(account_dict["pod_id"], []).append(period_tuple)
         _reject_overlap(pod_period_dict, "strategy")
         bridge_dict = client_dict.get("nav_bridge")
         if bridge_dict is not None:
@@ -420,17 +429,40 @@ def _valuation_account_list(account_list, performance_account_list):
     for account_dict in account_list:
         if not isinstance(account_dict, dict) or any(
             not isinstance(account_dict.get(field_str), str) or not account_dict[field_str].strip()
-            for field_str in ("account_route", "pod_id", "display_name")
+            for field_str in ("account_route", "display_name")
         ):
             raise ClientReportingError("Invalid local valuation account identity.")
-        if account_dict["account_route"] in route_set or account_dict["pod_id"] in pod_set:
+        role_str = account_dict.get("role", "strategy")
+        if not isinstance(role_str, str) or role_str not in {"strategy", "reserve"}:
+            raise ClientReportingError("Invalid local valuation account role.")
+        pod_id_str = account_dict.get("pod_id")
+        if (role_str == "strategy" and (not isinstance(pod_id_str, str) or not pod_id_str.strip())) or (role_str == "reserve" and pod_id_str is not None):
+            raise ClientReportingError("Only strategy valuation accounts can have a Pod.")
+        if account_dict["account_route"] in route_set or (pod_id_str is not None and pod_id_str in pod_set):
             raise ClientReportingError("Duplicate local valuation account or Pod.")
         route_set.add(account_dict["account_route"])
-        pod_set.add(account_dict["pod_id"])
-        result_list.append({field_str: account_dict[field_str] for field_str in ("account_route", "pod_id", "display_name")})
-    pair_set = {(account_dict["account_route"], account_dict["pod_id"]) for account_dict in result_list}
-    if any((account_dict["account_route"], account_dict["pod_id"]) not in pair_set for account_dict in performance_account_list):
+        if pod_id_str is not None:
+            pod_set.add(pod_id_str)
+        identity_dict = {field_str: account_dict[field_str]
+            for field_str in ("account_route", "pod_id", "display_name", "role") if field_str in account_dict}
+        if role_str == "reserve":
+            from_str = _date_str(account_dict.get("effective_from"))
+            to_str = _date_str(account_dict["effective_to"]) if account_dict.get("effective_to") is not None else None
+            if to_str and to_str < from_str:
+                raise ClientReportingError("Reserve valuation window is reversed.")
+            identity_dict.update(effective_from=from_str, effective_to=to_str)
+        result_list.append(identity_dict)
+    pair_set = {(account_dict["account_route"], account_dict.get("pod_id"), account_dict.get("role", "strategy")) for account_dict in result_list}
+    if any((account_dict["account_route"], account_dict.get("pod_id"), account_dict.get("role", "strategy")) not in pair_set for account_dict in performance_account_list):
         raise ClientReportingError("Valuation and performance account identities disagree.")
+    for identity_dict in result_list:
+        if identity_dict.get("role") == "reserve" and any(
+            account_dict["account_route"] == identity_dict["account_route"] and (
+                account_dict["effective_from"] != identity_dict["effective_from"]
+                or account_dict.get("effective_to") != identity_dict["effective_to"])
+            for account_dict in performance_account_list
+        ):
+            raise ClientReportingError("Reserve valuation and performance dates disagree.")
     return sorted(result_list, key=lambda account_dict: account_dict["account_route"])
 
 
@@ -439,25 +471,32 @@ def _local_nav_dict(account_list, row_by_key_dict, session_list, *, from_str, to
 
     *** CRITICAL *** retrospective EOD valuation, not strategy membership:
     no filling missing days, no zero assumed before/after a Pod history window.
+    Reserves are included only within their explicitly owned reporting dates.
     D+1 finalization applies separately to each date, including endpoint values.
     """
     route_set = {account_dict["account_route"] for account_dict in account_list}
     date_list = sorted(set(session_list) | {date_str for account_str, date_str in row_by_key_dict
-        if account_str in route_set and from_str <= date_str <= to_str})
+        if account_str in route_set and from_str <= date_str <= to_str and any(
+            account_dict["account_route"] == account_str and (
+                account_dict.get("role") != "reserve" or _account_active_bool(account_dict, date_str))
+            for account_dict in account_list)})
     daily_list, reason_list, source_row_list = [], [], []
     opening_decimal, closing_decimal = None, None
     for index_int, date_str in enumerate(date_list):
-        missing_list = [account_dict for account_dict in account_list if (account_dict["account_route"], date_str) not in row_by_key_dict]
+        active_account_list = [account_dict for account_dict in account_list
+            if account_dict.get("role") != "reserve" or _account_active_bool(account_dict, date_str)]
+        active_route_set = {account_dict["account_route"] for account_dict in active_account_list}
+        missing_list = [account_dict for account_dict in active_account_list if (account_dict["account_route"], date_str) not in row_by_key_dict]
         complete_bool = not missing_list and date_str < today_str
-        row_list = [row_by_key_dict[(account_str, date_str)] for account_str in sorted(route_set) if (account_str, date_str) in row_by_key_dict]
+        row_list = [row_by_key_dict[(account_str, date_str)] for account_str in sorted(active_route_set) if (account_str, date_str) in row_by_key_dict]
         source_row_list.extend(row_list)
         if index_int == 0 and complete_bool:
             opening_decimal = sum((row_obj.opening_nav_decimal for row_obj in row_list), Decimal(0))
         closing_decimal = sum((row_obj.closing_nav_decimal for row_obj in row_list), Decimal(0)) if complete_bool else None
         daily_list.append({"market_date_str": date_str, "nav_float": _money_float(closing_decimal),
-            "account_count_int": len(route_set), "coverage_complete_bool": complete_bool})
+            "account_count_int": len(active_route_set), "coverage_complete_bool": complete_bool})
         for account_dict in missing_list:
-            reason_list.append(f"{account_dict['pod_id']} / {account_dict['account_route']}: missing IBKR NAV for {date_str}.")
+            reason_list.append(f"{account_dict.get('pod_id') or account_dict['display_name']} / {account_dict['account_route']}: missing IBKR NAV for {date_str}.")
         if date_str >= today_str:
             reason_list.append(f"IBKR NAV for {date_str} is not finalized yet.")
     if not date_list:
@@ -577,7 +616,7 @@ def build_client_report_dict(
         issue_list.append(snapshot_obj.unavailable_reason_str)
     if not report_date_list:
         issue_list.append("No broker reporting days in the selected interval.")
-    strategy_result_list: list[dict[str, Any]] = []
+    financial_result_list: list[dict[str, Any]] = []
     contributing_row_list: list[BrokerNavRow] = []
     bridge_by_key_dict: dict[tuple[str, str], dict] = {}
     for account_dict in account_list:
@@ -627,8 +666,9 @@ def build_client_report_dict(
                 "return_float": float(row_obj.twr_decimal) if row_obj and account_complete_bool else None,
                 "pnl_float": _money_float(bridge_by_key_dict[(row_obj.account_route_str, date_str)]["pnl_decimal"])
                     if row_obj and flows_complete_bool else None})
-        strategy_result_list.append({
-            "account_route_str": account_dict["account_route"], "pod_id_str": account_dict["pod_id"],
+        financial_result_list.append({
+            "account_role_str": account_dict.get("role", "strategy"),
+            "account_route_str": account_dict["account_route"], "pod_id_str": account_dict.get("pod_id"),
             "display_name_str": account_dict["display_name"],
             "from_date_str": expected_date_list[0], "to_date_str": expected_date_list[-1],
             "opening_nav_float": _money_float(opening_row_obj.opening_nav_decimal) if opening_row_obj and opening_row_obj.market_date_str < market_today_str else None,
@@ -647,10 +687,14 @@ def build_client_report_dict(
     if local_valuation_list is not None:
         # NAV-only identities cannot unlock a return calculated on fewer accounts.
         scope_complete_bool = scope_complete_bool and all(any(
-            account_dict["account_route"] == identity_dict["account_route"] and account_dict["pod_id"] == identity_dict["pod_id"]
-            and account_dict["effective_from"] <= from_date_str and (account_dict.get("effective_to") or "9999-12-31") >= to_date_str
+            account_dict["account_route"] == identity_dict["account_route"] and account_dict.get("pod_id") == identity_dict.get("pod_id")
+            and account_dict.get("role", "strategy") == identity_dict.get("role", "strategy")
+            and (identity_dict.get("role") == "reserve" or (
+                account_dict["effective_from"] <= from_date_str and (account_dict.get("effective_to") or "9999-12-31") >= to_date_str))
             for account_dict in account_list) for identity_dict in local_valuation_list)
-    all_coverage_bool = scope_complete_bool and bool(strategy_result_list) and all(row_dict["coverage_complete_bool"] for row_dict in strategy_result_list)
+    # *** CRITICAL *** Reserve capital participates in every accounting gate.
+    # Presentation filtering below must never turn missing reserve NAV into zero.
+    all_coverage_bool = scope_complete_bool and bool(financial_result_list) and all(row_dict["coverage_complete_bool"] for row_dict in financial_result_list)
     if not scope_complete_bool:
         issue_list.append("Strategy history does not prove complete client capital coverage for this period. Profit and client return remain unavailable; account valuations are checked separately.")
     if any((account_dict["account_route"], date_str) not in row_by_key_dict for date_str in report_date_list for account_dict in account_list if _account_active_bool(account_dict, date_str)):
@@ -661,7 +705,7 @@ def build_client_report_dict(
     if any(row_obj.market_date_str >= market_today_str for row_obj in contributing_row_list):
         all_coverage_bool = False
         issue_list.append("Current-day Activity Flex values are not finalized; reporting uses D+1 confirmation.")
-    all_flows_bool = all_coverage_bool and all(row_dict["flows_complete_bool"] for row_dict in strategy_result_list)
+    all_flows_bool = all_coverage_bool and all(row_dict["flows_complete_bool"] for row_dict in financial_result_list)
     daily_book_list: list[dict[str, Any]] = []
     twr_day_list = []
     previous_active_set: set[str] = set()
@@ -725,8 +769,8 @@ def build_client_report_dict(
             daily_dict["cumulative_pnl_float"] = None
     client_twr_float: float | None = None
     client_twr_method_str = "Unavailable: daily account NAV/TWR cannot prove exact consolidated TWR with intraday flows."
-    if len(strategy_result_list) == 1 and all_coverage_bool:
-        strategy_dict = strategy_result_list[0]
+    if len(financial_result_list) == 1 and all_coverage_bool:
+        strategy_dict = financial_result_list[0]
         if report_date_list and strategy_dict["from_date_str"] == report_date_list[0] and strategy_dict["to_date_str"] == report_date_list[-1]:
             client_twr_float = strategy_dict["twr_float"]
             client_twr_method_str = "Official IBKR account TWR (single account covers the whole selected period)"
@@ -759,6 +803,9 @@ def build_client_report_dict(
             and source_dict.get("request_to_date_str", "0001-01-01") >= from_date_str
         )
     ]
+    strategy_result_list = [{field_str: value_obj for field_str, value_obj in account_result_dict.items()
+        if field_str != "account_role_str"} for account_result_dict in financial_result_list
+        if account_result_dict["account_role_str"] == "strategy"]
     for strategy_dict in strategy_result_list:
         strategy_dict["benchmark_dict"] = account_benchmark_dict(strategy_dict, benchmark_snapshot_obj, as_of_date_str=market_today_str)
     result_dict = {
@@ -793,6 +840,9 @@ def build_client_report_dict(
             "Fee coverage is exactly the stated fee basis; unreported external fees are not invented.",
         ],
     }
+    if any(account_dict.get("role") == "reserve" for account_dict in account_list):
+        result_dict["financial_account_list"] = financial_result_list
+        result_dict["valuation_basis_str"] = "IBKR NAV of included strategy and reserve accounts; entries at SOD, exits after last owned EOD"
     if nav_dict is not None:
         # One canonical result for dashboard, JSON and investor PDF. Availability
         # of point-in-time NAV does not unlock flow/TWR coverage or report FINAL.

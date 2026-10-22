@@ -600,9 +600,21 @@ def build_month_page_dict(workspace_dict, snapshot_obj, owned_list, identity_lis
             "other_float": pod_pnl_float - symbol_pnl_float, "average_nav_float": average_nav_float,
             "session_count_int": session_count_int})
 
-    # Book average: every month session, summed NAV of the Pods active that day.
-    book_nav_list = [sum(float(nav_by_key_dict[(account_dict["account_route"], date_str)].closing_nav_decimal)
-        for account_dict, _, date_list in pod_plan_list if date_str in date_list) for date_str in session_list]
+    reserve_result_list = [account_dict for account_dict in report_dict.get("financial_account_list", [])
+        if account_dict["account_role_str"] == "reserve"]
+    if reserve_result_list:
+        # *** CRITICAL *** reporting boundary: reserve membership is already
+        # applied in canonical daily NAV. AvgNAV_book = sum(NAV_book,d) / N_sessions.
+        book_day_dict = {day_dict["market_date_str"]: day_dict for day_dict in report_dict["daily_book_list"]}
+        if any(date_str not in book_day_dict or not book_day_dict[date_str]["coverage_complete_bool"]
+                or book_day_dict[date_str]["nav_float"] is None
+                or not math.isfinite(book_day_dict[date_str]["nav_float"]) for date_str in session_list):
+            return unavailable_month_dict("Month NAV is incomplete.")
+        book_nav_list = [book_day_dict[date_str]["nav_float"] for date_str in session_list]
+    else:
+        # Book average: every month session, summed NAV of the Pods active that day.
+        book_nav_list = [sum(float(nav_by_key_dict[(account_dict["account_route"], date_str)].closing_nav_decimal)
+            for account_dict, _, date_list in pod_plan_list if date_str in date_list) for date_str in session_list]
     book_average_float = sum(book_nav_list) / len(book_nav_list) if book_nav_list else 0.0
     month_short_str = result_dict["short_str"]
 
@@ -661,6 +673,7 @@ def build_month_page_dict(workspace_dict, snapshot_obj, owned_list, identity_lis
         result_dict["map_dict"] = {"available_bool": False, "mode_str": "month", "pod_list": [], "reason_str": "Map data could not be verified."}
     selected_pnl_float = sum(pod_dict["pnl_float"] for pod_dict in selected_pod_list)
     if pod_str == "all":
+        selected_pnl_float = report_dict["pnl_float"]
         twr_float = report_dict["twr_float"]
     else:
         twr_float = selected_pod_list[0]["twr_float"] if selected_pod_list else None
@@ -668,9 +681,16 @@ def build_month_page_dict(workspace_dict, snapshot_obj, owned_list, identity_lis
         "value_float": pod_dict["symbol_pnl_float"], "value_str": compact_money_str(pod_dict["symbol_pnl_float"], signed_bool=True)}
         for pod_dict in selected_pod_list]
     other_float = sum(pod_dict["other_float"] for pod_dict in selected_pod_list)
+    reserve_pnl_float = 0.0
+    if all(account_dict["coverage_complete_bool"] and account_dict["flows_complete_bool"]
+            and account_dict["pnl_float"] is not None for account_dict in reserve_result_list):
+        reserve_pnl_float = sum(account_dict["pnl_float"] for account_dict in reserve_result_list)
+    if pod_str == "all":
+        other_float += reserve_pnl_float
     pod_bar_list.append({"name_str": "Other", "color_str": "", "other_bool": True, "value_float": other_float,
         "value_str": compact_money_str(other_float, signed_bool=True),
-        "title_str": "Interest, dividends and fees: P&L that belongs to no single position. Commissions on rows stay with their position."})
+        "title_str": ("Account P&L not attributed to displayed positions. Commissions on rows stay with their position."
+            if reserve_result_list else "Interest, dividends and fees: P&L that belongs to no single position. Commissions on rows stay with their position.")})
     result_dict["side_dict"] = side_dict(big_value_float=selected_pnl_float,
         big_detail_str="P&L in " + period_label_str + (" · " + signed_percent_str(twr_float) + " TWR" if twr_float is not None else ""),
         pod_bar_list=pod_bar_list, item_list=map_item_all_list)
@@ -702,7 +722,8 @@ def build_month_page_dict(workspace_dict, snapshot_obj, owned_list, identity_lis
             "tone_str": "pos" if book_pnl_float > 0 else "neg" if book_pnl_float < 0 else "",
             "detail_str": (signed_percent_str(report_dict["twr_float"]) + " TWR · " if report_dict["twr_float"] is not None else "")
                 + "positions " + compact_money_str(sum(pod_dict["symbol_pnl_float"] for pod_dict in pod_result_list), signed_bool=True)
-                + ", other " + compact_money_str(sum(pod_dict["other_float"] for pod_dict in pod_result_list), signed_bool=True)},
+                + ", other " + compact_money_str(sum(pod_dict["other_float"] for pod_dict in pod_result_list)
+                    + reserve_pnl_float, signed_bool=True)},
         {"label_str": "Held · " + tile_label_str, "value_str": f"{len(all_item_list)} positions", "tone_str": "",
             "detail_str": f"{sold_count_int} sold during the month · {len(session_list)} sessions"}]
     for label_str, item_dict in (("Best", ranked_list[0] if ranked_list else None), ("Worst", ranked_list[-1] if ranked_list else None)):

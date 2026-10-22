@@ -134,9 +134,9 @@ def parse_flex_change_in_nav_xml(
         if not statement_account_route_str:
             raise PerformanceContractError("FlexStatement is missing accountId.")
         if statement_account_route_str not in binding_by_account_route_dict:
-            raise PerformanceContractError(
-                f"Flex contains unknown LIVE account {statement_account_route_str}."
-            )
+            # Not a strategy account: no Pod row. The raw XML is still saved,
+            # and client reporting counts it as one of the client's other accounts.
+            continue
         account_info_obj = statement_obj.find("AccountInformation")
         if account_info_obj is None:
             raise PerformanceContractError(

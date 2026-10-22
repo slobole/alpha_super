@@ -65,7 +65,9 @@ def export_performance_csv_str(report_dict, *, level_str="portfolio"):
         source_list = [report_dict]
     else:
         header_list += ["Max drawdown (%)", "Period-end drawdown (%)"]
-        source_list = report_dict["strategy_list"]
+        # Pods, then the client's other accounts (no strategy) by their own names.
+        source_list = [*report_dict["strategy_list"], *(account_dict for account_dict in report_dict.get("financial_account_list", [])
+            if account_dict["account_role_str"] == "reserve")]
     header_list += ["Return method", "Coverage complete", "Flow coverage complete"] + common_header_list
     output_obj = StringIO(newline="")
     writer_obj = csv.writer(output_obj, lineterminator="\r\n")

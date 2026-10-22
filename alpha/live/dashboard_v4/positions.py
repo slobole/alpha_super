@@ -56,6 +56,8 @@ def _owned_accounts_tuple(workspace_dict, as_of_ts):
             raise ValueError("Invalid ownership list")
         pair_set = set()
         for account_dict in account_list:
+            if account_dict.get("role") == "reserve":
+                continue
             pod_str, route_str = account_dict.get("pod_id"), account_dict.get("account_route")
             if any(not isinstance(value_str, str) or not value_str.strip() for value_str in (pod_str, route_str)):
                 raise ValueError("Missing account identity")
@@ -100,7 +102,8 @@ def _financial_dict(workspace_dict, snapshot_obj, provider_obj, client_dict, own
     try:
         if workspace_dict.get("financial_error_str") or snapshot_obj.unavailable_reason_str:
             raise ValueError("Financial source unavailable")
-        dates_dict = financial_dates_dict(client_dict, snapshot_obj, as_of_ts=as_of_ts, valuation_account_list=owned_list)
+        valuation_list = workspace_dict.get("valuation_account_list", owned_list)
+        dates_dict = financial_dates_dict(client_dict, snapshot_obj, as_of_ts=as_of_ts, valuation_account_list=valuation_list)
         closing_str = dates_dict["latest_complete_str"]
         if not closing_str:
             raise ValueError("No complete finalized close")
@@ -108,7 +111,7 @@ def _financial_dict(workspace_dict, snapshot_obj, provider_obj, client_dict, own
         report_client_dict["mandate_start_date"] = min(report_client_dict["mandate_start_date"], closing_str)
         report_dict = build_client_report_dict(report_client_dict, snapshot_obj,
             from_date_str=closing_str, to_date_str=closing_str, as_of_ts=as_of_ts,
-            scope_complete_bool=workspace_dict.get("financial_scope_complete_bool", False), valuation_account_list=owned_list)
+            scope_complete_bool=workspace_dict.get("financial_scope_complete_bool", False), valuation_account_list=valuation_list)
         cash_list = load_portfolio_cash_list(report_client_dict, report_dict, provider_obj, operations_dict, as_of_ts=as_of_ts)
         allocation_dict = portfolio_allocation_dict(report_dict, snapshot_obj, cash_snapshot_list=cash_list)
         for item_dict in allocation_dict["item_list"]:

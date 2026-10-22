@@ -62,6 +62,8 @@ def client_navigation_dict():
 
 
 def _operations_dict(client_dict, as_of_ts):
+    client_dict = {**client_dict, "accounts": [account_dict for account_dict in client_dict["accounts"]
+        if account_dict.get("role", "strategy") == "strategy"]}
     if local_workspace_bool():
         workspace_dict = _local_workspace_dict()
         result_dict = build_client_operations_dict(
@@ -113,6 +115,8 @@ def _query_dict():
 
 
 def _activity_dict(client_dict, from_str, to_str):
+    client_dict = {**client_dict, "accounts": [account_dict for account_dict in client_dict["accounts"]
+        if account_dict.get("role", "strategy") == "strategy"]}
     if local_workspace_bool():
         # The selected log window is not an inferred funding/inception date.
         # Existing historical bindings plus current exact release identities
@@ -159,6 +163,8 @@ def local_strategy_name_str(row_dict):
                 if client_dict.get("operations_source") != "local":
                     continue
                 for account_dict in active_account_list(client_dict, as_of_ts):
+                    if account_dict.get("role", "strategy") != "strategy":
+                        continue
                     key_tuple = (account_dict["pod_id"], account_dict["account_route"])
                     name_dict.setdefault(key_tuple, []).append(account_dict["display_name"])
         except (OSError, ValueError, TypeError, KeyError):
@@ -405,7 +411,7 @@ def financial_route_fn(client_id_str, view_str):
         daily_scope_list=daily_history_list(report_dict, movement_key_set=capital_day_key_set(snapshot_obj)) if view_str != "report" else [],
         comparison_list=[saved_comparison_dict(next(
             account_dict for account_dict in client_dict["accounts"]
-            if (account_dict["pod_id"], account_dict["account_route"]) == (strategy_dict["pod_id_str"], strategy_dict["account_route_str"])
+            if (account_dict.get("pod_id"), account_dict["account_route"]) == (strategy_dict["pod_id_str"], strategy_dict["account_route_str"])
             and account_dict["effective_from"] <= strategy_dict["from_date_str"] <= (account_dict.get("effective_to") or "9999-12-31")
         ), from_date_str=from_str, to_date_str=to_str) for strategy_dict in report_dict["strategy_list"]] if view_str == "performance" else [],
     )
@@ -415,8 +421,11 @@ def _financial_notice_list(report_dict, client_dict):
     """Short visible causes; full diagnostic evidence remains in the report."""
     notice_list = list(report_dict.get("nav_issue_list", []))
     if local_workspace_bool() and not report_dict["scope_complete_bool"]:
-        window_dict = {(account_dict["pod_id"], account_dict["account_route"]): account_dict for account_dict in client_dict["accounts"]}
+        window_dict = {(account_dict["pod_id"], account_dict["account_route"]): account_dict for account_dict in client_dict["accounts"]
+            if account_dict.get("role", "strategy") == "strategy"}
         for identity_dict in _local_workspace_dict()["valuation_account_list"]:
+            if identity_dict.get("role", "strategy") != "strategy":
+                continue
             account_dict = window_dict.get((identity_dict["pod_id"], identity_dict["account_route"]))
             prefix_str = f"{identity_dict['pod_id']} / {identity_dict['account_route']}"
             if account_dict is None:

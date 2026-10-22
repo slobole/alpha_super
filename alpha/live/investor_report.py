@@ -41,6 +41,11 @@ def build_investor_snapshot_dict(report_dict):
          "benchmark_dict": {key_str: strategy_dict["benchmark_dict"].get(key_str) for key_str in PUBLIC_BENCHMARK_FIELD_TUPLE}}
         for strategy_dict in report_dict["strategy_list"]
     ]
+    other_account_list = [{key_str: account_dict[key_str] for key_str in PUBLIC_STRATEGY_FIELD_TUPLE}
+        for account_dict in report_dict.get("financial_account_list", []) if account_dict["account_role_str"] == "reserve"]
+    if other_account_list:
+        # The client's accounts without a strategy: in the totals, listed apart.
+        snapshot_dict["other_account_list"] = other_account_list
     snapshot_dict["source_checksum_list"] = sorted({source_dict["checksum_str"] for source_dict in report_dict["source_list"]})
     # Owner-approved policy: finality covers the verified facts displayed, not
     # an unavailable unconfigured consolidated TWR. An explicitly configured
@@ -163,6 +168,23 @@ def render_investor_pdf_bytes(snapshot_dict):
         ("BOTTOMPADDING", (0, 0), (-1, -1), 6), ("VALIGN", (0, 0), (-1, -1), "TOP"),
     ]))
     story_list.append(strategy_table_obj)
+    if snapshot_dict.get("other_account_list"):
+        story_list.extend([Spacer(1, 15), paragraph_obj("Other accounts", heading_style),
+            paragraph_obj("Accounts with no strategy. They are not traded and are included in the totals above.", muted_style)])
+        other_row_list = [[paragraph_obj(label_str, muted_style) for label_str in ("Account / dates", "Ending value", "Profit / loss", "Account return")]]
+        for account_dict in snapshot_dict["other_account_list"]:
+            other_row_list.append([
+                [paragraph_obj(account_dict["display_name_str"]), paragraph_obj(f"{account_dict['from_date_str']} to {account_dict['to_date_str']}", muted_style)],
+                paragraph_obj(_money_str(account_dict["closing_nav_float"]), number_style),
+                paragraph_obj(_money_str(account_dict["pnl_float"]), number_style),
+                paragraph_obj(_return_str(account_dict["twr_float"]), number_style),
+            ])
+        other_table_obj = Table(other_row_list, colWidths=[203.2, 100, 100, 100], repeatRows=1, hAlign="LEFT")
+        other_table_obj.setStyle(TableStyle([
+            ("LINEBELOW", (0, 0), (-1, -1), .3, rule_color), ("TOPPADDING", (0, 0), (-1, -1), 9),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6), ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ]))
+        story_list.append(other_table_obj)
     benchmark_strategy_list = [strategy_dict for strategy_dict in snapshot_dict["strategy_list"] if strategy_dict["benchmark_dict"].get("status_str") == "ready"]
     if benchmark_strategy_list:
         story_list.append(paragraph_obj("How each strategy compared with the market", heading_style))

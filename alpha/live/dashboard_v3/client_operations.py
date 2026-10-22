@@ -78,7 +78,8 @@ def _deduplicated_issue_list(issue_list):
 def active_account_list(client_dict, as_of_ts):
     market_date_str = as_of_ts.astimezone(ZoneInfo("America/New_York")).date().isoformat()
     return [account_dict for account_dict in client_dict["accounts"]
-            if account_dict["effective_from"] <= market_date_str <= (account_dict.get("effective_to") or "9999-12-31")]
+            if account_dict.get("role", "strategy") == "strategy"
+            and account_dict["effective_from"] <= market_date_str <= (account_dict.get("effective_to") or "9999-12-31")]
 
 
 def load_operations_summary_dict(client_dict, provider_obj):
@@ -107,6 +108,7 @@ def build_client_operations_dict(client_dict, summary_dict, *, as_of_ts, local_a
     source_ts = parse_timestamp_ts(source_timestamp_str or "")
     source_fresh_bool = source_ts is not None and 0 <= (as_of_ts - source_ts).total_seconds() <= SOURCE_MAX_AGE_SECONDS_INT
     account_list = active_account_list(client_dict, as_of_ts) if local_account_list is None else local_account_list
+    account_list = [account_dict for account_dict in account_list if account_dict.get("role", "strategy") == "strategy"]
     result_list = []
     for account_dict in account_list:
         matching_list = [row_dict for row_dict in summary_dict.get("pod_row_dict_list", [])
@@ -296,7 +298,8 @@ def load_client_activity_dict(client_dict, provider_obj, *, from_date_str, to_da
     are optional saved exports. Neither source can prove complete log coverage.
     """
     account_list = [account_dict for account_dict in client_dict["accounts"]
-                    if account_dict["effective_from"] <= to_date_str and (account_dict.get("effective_to") or "9999-12-31") >= from_date_str]
+                    if account_dict.get("role", "strategy") == "strategy"
+                    and account_dict["effective_from"] <= to_date_str and (account_dict.get("effective_to") or "9999-12-31") >= from_date_str]
     source_str = client_dict.get("operations_source", "unconfigured")
     result_dict = {
         "source_str": source_str, "coverage_str": "unavailable", "issue_list": [],

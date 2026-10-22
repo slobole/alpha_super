@@ -17,6 +17,7 @@ from alpha.live.ibkr_nav_profile import local_ibkr_reporting_profile_dict
 from alpha.live.client_reporting import ClientReportingError
 from alpha.live.ibkr_performance_sync import build_live_binding_obj_list
 from alpha.live.release_manifest import load_release_list, validate_enabled_deployment_for_mode
+from alpha.live.reporting_accounts import discover_other_account_list
 from alpha.live.dashboard_v3.operator_tools import strategy_display_name_str
 
 
@@ -74,6 +75,11 @@ def validate_local_bindings_unchanged(workspace_dict, database_path_str):
     try:
         if _saved_binding_list(database_path_str) != workspace_dict.get("saved_binding_list", []):
             raise ValueError("Performance bindings changed during this request.")
+        if "other_account_list" in workspace_dict and discover_other_account_list(
+            database_path_str, query_name_str=workspace_dict["client_dict"]["query_name"],
+            strategy_account_route_set=workspace_dict["strategy_account_route_set"],
+        ) != workspace_dict["other_account_list"]:
+            raise ValueError("Other accounts changed during this request.")
     except (OSError, ValueError, sqlite3.Error) as exception_obj:
         raise LocalReportingError("IBKR account mapping changed during this read. Refresh the page before exporting.") from exception_obj
 
@@ -131,12 +137,22 @@ def build_local_workspace_dict(provider_obj, database_path_str, *, today_str):
         ) if live_release_list else []
         saved_list = _saved_binding_list(database_path_str)
         result_dict["saved_binding_list"] = saved_list
+        # Every saved Flex account outside the strategies is one of the client's
+        # other accounts: found, never configured; client totals only.
+        strategy_account_route_set = {binding_obj.account_route_str for binding_obj in [*saved_list, *current_list]
+            } | {account_str for _pod_str, account_str in foreign_pair_set}
+        try:
+            other_account_list = discover_other_account_list(database_path_str,
+                query_name_str=client_dict["query_name"], strategy_account_route_set=strategy_account_route_set)
+        except ClientReportingError as exception_obj:
+            raise LocalReportingError(str(exception_obj)) from exception_obj
+        result_dict.update(other_account_list=other_account_list, strategy_account_route_set=strategy_account_route_set)
         # Excluding another owner's disabled manifest must not erase evidence
         # that this account or Pod used to have a different identity.
         _merged_binding_list(saved_list, current_list)
         binding_list = _merged_binding_list([binding_obj for binding_obj in saved_list
             if (binding_obj.pod_id_str, binding_obj.account_route_str) not in foreign_pair_set], current_list)
-        complete_bool = bool(binding_list)
+        complete_bool = bool(binding_list or other_account_list)
         for binding_obj in binding_list:
             key_tuple = (binding_obj.pod_id_str, binding_obj.account_route_str)
             identity_dict = {
@@ -156,6 +172,8 @@ def build_local_workspace_dict(provider_obj, database_path_str, *, today_str):
                 **identity_dict,
                 "effective_from": start_str, "effective_to": end_str,
             })
+        client_dict["accounts"].extend(dict(account_dict) for account_dict in other_account_list)
+        result_dict["valuation_account_list"].extend(dict(account_dict) for account_dict in other_account_list)
         result_dict["financial_scope_complete_bool"] = complete_bool
         if client_dict["accounts"]:
             client_dict["mandate_start_date"] = min(account_dict["effective_from"] for account_dict in client_dict["accounts"])

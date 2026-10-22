@@ -25,9 +25,10 @@ def financial_dates_dict(client_dict, snapshot_obj, *, as_of_ts, valuation_accou
     # *** CRITICAL *** retrospective D+1 display cutoff only. Local identities
     # include every valued account; strategy coverage is not funding history.
     for date_str, observed_set in route_by_date_dict.items():
-        required_set = route_set if valuation_account_list is not None else {
+        required_set = {
             account_dict["account_route"] for account_dict in account_list
-            if account_dict["effective_from"] <= date_str <= (account_dict.get("effective_to") or "9999-12-31")}
+            if (valuation_account_list is not None and account_dict.get("role", "strategy") == "strategy")
+            or account_dict["effective_from"] <= date_str <= (account_dict.get("effective_to") or "9999-12-31")}
         if required_set and required_set <= observed_set:
             complete_date_list.append(date_str)
         if required_set & observed_set:

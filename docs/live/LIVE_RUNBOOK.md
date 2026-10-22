@@ -997,8 +997,11 @@ MR capsule pod) with exactly these fields:
 - Change in NAV, Mark-to-Market: `Account ID`, `Currency`, `From Date`,
   `To Date`, `Starting Value`, `Ending Value`, `TWR`.
 
-The sync requires the query's accounts to match the LIVE releases exactly, and a
-mismatch fails it for every pod (money stops at the last good day; trading is
+Keep every account of the IBKR login in the query. An account without a LIVE
+YAML (a vault, an unused sub-account) is one of the client's
+[other accounts](REPORTING_ACCOUNTS.md): counted in the client's totals, shown
+as "not traded", never a pod. A LIVE account missing from the query still fails
+the sync for every pod (money stops at the last good day; trading is
 unaffected). When a new LIVE pod gets its own account (for example CORE5 or an
 MR capsule pod): add the account to the query only after its LIVE YAML is in the
 releases folder, and before the second 06:15 run after the pod's first broker

@@ -42,6 +42,10 @@
       <td><i class="dotk" style="background: {{ row_dict.color_str }}"></i>{% if row_dict.url_str %}<a href="{{ row_dict.url_str }}">{{ row_dict.name_str }}</a>{% else %}{{ row_dict.name_str }}{% endif %}<div class="performance-row-date">{{ row_dict.from_date_str }} – {{ row_dict.to_date_str }}</div></td>
       <td class="num" data-column="Start $">{{ row_dict.start_str }}</td><td class="num" data-column="End $">{{ row_dict.end_str }}</td><td class="num {{ row_dict.tone_str }}" data-column="Profit / loss">{{ row_dict.pnl_str }}</td><td class="num" data-column="Return">{{ row_dict.return_str }}</td><td class="num" data-column="Max drawdown">{{ row_dict.drawdown_str }}</td>
     </tr>{% endfor %}
+    {% for row_dict in performance_dict.other_row_list %}<tr>
+      <td><i class="dotk" style="background: {{ row_dict.color_str }}"></i>{{ row_dict.name_str }} <span class="muted">· not traded</span><div class="performance-row-date">{{ row_dict.from_date_str }} – {{ row_dict.to_date_str }}</div></td>
+      <td class="num" data-column="Start $">{{ row_dict.start_str }}</td><td class="num" data-column="End $">{{ row_dict.end_str }}</td><td class="num {{ row_dict.tone_str }}" data-column="Profit / loss">{{ row_dict.pnl_str }}</td><td class="num" data-column="Return">{{ row_dict.return_str }}</td><td class="num" data-column="Max drawdown">{{ row_dict.drawdown_str }}</td>
+    </tr>{% endfor %}
     {% if performance_dict.total_row_dict %}{% set row_dict = performance_dict.total_row_dict %}<tr class="tot"><td>Portfolio</td><td class="num" data-column="Start $">{{ row_dict.start_str }}</td><td class="num" data-column="End $">{{ row_dict.end_str }}</td><td class="num" data-column="Profit / loss">{{ row_dict.pnl_str }}</td><td class="num" data-column="Return">{{ row_dict.return_str }}</td><td class="num" data-column="Max drawdown">{{ row_dict.drawdown_str }}</td></tr>{% endif %}
   </tbody></table>
   {% if not performance_dict.pod_row_list %}<div class="empty-state">No saved pod performance for this period.</div>{% endif %}
