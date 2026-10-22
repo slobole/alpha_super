@@ -316,7 +316,8 @@ class PerformanceStore:
                     request_to_date_str TEXT NOT NULL,
                     query_name_str TEXT NOT NULL,
                     checksum_str TEXT NOT NULL UNIQUE,
-                    raw_xml_str TEXT NOT NULL
+                    raw_xml_str TEXT NOT NULL,
+                    strategy_account_routes_json_str TEXT
                 );
                 CREATE TABLE IF NOT EXISTS pod_binding (
                     account_route_str TEXT PRIMARY KEY,
@@ -351,6 +352,18 @@ class PerformanceStore:
                     detail_str TEXT
                 );
                 """
+            )
+            # Preserve import-time account roles independently of replaceable
+            # daily rows. Upgrade old stores before a new binding is installed.
+            connection_obj.execute("BEGIN IMMEDIATE")
+            column_set = {row_tuple[1] for row_tuple in connection_obj.execute("PRAGMA table_info(flex_import)")}
+            if "strategy_account_routes_json_str" not in column_set:
+                connection_obj.execute("ALTER TABLE flex_import ADD COLUMN strategy_account_routes_json_str TEXT")
+            legacy_route_list = sorted(row_tuple[0] for row_tuple in connection_obj.execute(
+                "SELECT account_route_str FROM pod_binding"))
+            connection_obj.execute(
+                "UPDATE flex_import SET strategy_account_routes_json_str = ? WHERE strategy_account_routes_json_str IS NULL",
+                (json.dumps(legacy_route_list),),
             )
 
     def replace_range(
@@ -400,8 +413,9 @@ class PerformanceStore:
                 """
                 INSERT INTO flex_import (
                     imported_timestamp_str, request_from_date_str,
-                    request_to_date_str, query_name_str, checksum_str, raw_xml_str
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    request_to_date_str, query_name_str, checksum_str, raw_xml_str,
+                    strategy_account_routes_json_str
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     imported_timestamp_str,
@@ -410,6 +424,7 @@ class PerformanceStore:
                     query_name_str,
                     checksum_str,
                     xml_text_str,
+                    json.dumps(sorted(binding_by_account_route_dict)),
                 ),
             )
             import_id_int = int(cursor_obj.lastrowid)

@@ -33,6 +33,18 @@ the releases or the database by hand.
 - **Becomes a Pod on the Pod's first day.** If an account gets a LIVE YAML
   later, it stays an other account up to the day before the Pod's first
   return day and is the Pod from then on. Client history does not change.
+  Each new Flex import automatically saves which accounts were strategies at
+  import time. This internal evidence survives range corrections and duplicate
+  imports; it needs no configuration. An ordinary Pod's first EOD remains only
+  its baseline, while an account already observed as Other keeps that day.
+  Existing stores are upgraded automatically during normal sync, using their
+  saved bindings for legacy imports. Role changes completed before that
+  evidence was recorded cannot be reconstructed from the old XML alone.
+  Reads remain read-only, including against stores not yet upgraded.
+- **Continuous ownership across role changes:** an Other-to-Pod handover does
+  not create a weekend or holiday NAV requirement. Every exchange session,
+  observed non-session movement and real ownership entry/exit is still checked.
+  Missing, empty or non-finite required NAV/TWR never proves an unused account.
 - **Name:** the IBKR alias (Account Information `acctAlias`) when the query has
   it, else `Other account …` plus the last four characters. Full account IDs
   never reach the screens or the client report.

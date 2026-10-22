@@ -9,6 +9,7 @@ routing or authorizes broker actions.
 from contextlib import closing
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+import json
 from pathlib import Path
 import sqlite3
 from threading import Lock
@@ -33,6 +34,14 @@ def other_account_name_str(account_route_str, alias_str=""):
 
 
 def _active_bool(nav_obj):
+    # Missing required NAV is unknown, not proof of an unused account. Keep
+    # the account in scope so the existing broker parser rejects the row.
+    try:
+        if any(not Decimal(nav_obj.get(field_str, "")).is_finite()
+                for field_str in ("startingValue", "endingValue", "twr")):
+            return True
+    except InvalidOperation:
+        return True
     for field_str, value_str in nav_obj.attrib.items():
         if field_str in _IDENTITY_FIELD_SET:
             continue
@@ -95,30 +104,46 @@ def discover_other_account_list(db_path_str, *, query_name_str, strategy_start_b
 
     strategy_start_by_route_dict maps each strategy account to its first Pod
     day (or None). A Pod's baseline session (the last XNYS session before that
-    day) and later belong to the Pod, as before: NAV before the measured start
-    is not a portfolio period. Only an account active before its baseline had a
-    life of its own, so it is an other account until the day before the Pod's
-    first day. Accounts in excluded_route_set (another owner's) are never
-    counted. Read-only.
+    day) and later belong to an ordinary Pod, as before. An account already
+    observed as Other retains even a one-day baseline history. Import-time
+    route snapshots preserve that distinction through corrections and later
+    bindings. Legacy imports without snapshots use the saved bindings; their
+    earlier role changes cannot be reconstructed. Accounts in excluded_route_set
+    (another owner's) are never counted. Read-only.
     """
     db_path_obj = Path(db_path_str).expanduser()
     if not db_path_obj.is_file():
         return []
     try:
         with closing(sqlite3.connect(db_path_obj.resolve().as_uri() + "?mode=ro", uri=True)) as connection_obj:
+            connection_obj.execute("BEGIN")
+            column_set = {row_tuple[1] for row_tuple in connection_obj.execute("PRAGMA table_info(flex_import)")}
+            role_column_str = "strategy_account_routes_json_str" if "strategy_account_routes_json_str" in column_set else "NULL"
             import_row_list = connection_obj.execute(
-                "SELECT checksum_str, raw_xml_str FROM flex_import WHERE query_name_str = ? ORDER BY import_id_int",
+                f"SELECT checksum_str, raw_xml_str, {role_column_str} FROM flex_import WHERE query_name_str = ? ORDER BY import_id_int",
                 (query_name_str,),
             ).fetchall()
+            legacy_route_set = {row_tuple[0] for row_tuple in connection_obj.execute("SELECT account_route_str FROM pod_binding")}
     except sqlite3.Error:
         return []
-    alias_by_account_dict, currency_by_account_dict, first_active_dict = {}, {}, {}
-    for checksum_str, raw_xml_str in import_row_list:
+    alias_by_account_dict, currency_by_account_dict, first_active_dict, first_other_dict = {}, {}, {}, {}
+    for checksum_str, raw_xml_str, strategy_routes_json_str in import_row_list:
         import_currency_dict, import_alias_dict, import_active_dict = _statement_tuple(checksum_str, raw_xml_str)
+        import_strategy_set = legacy_route_set
+        if strategy_routes_json_str is not None:
+            try:
+                strategy_route_list = json.loads(strategy_routes_json_str)
+            except (ValueError, TypeError) as exception_obj:
+                raise ClientReportingError("Saved Flex account-role evidence is invalid.") from exception_obj
+            if not isinstance(strategy_route_list, list) or any(not isinstance(route_str, str) or not route_str for route_str in strategy_route_list):
+                raise ClientReportingError("Saved Flex account-role evidence is invalid.")
+            import_strategy_set = set(strategy_route_list)
         currency_by_account_dict.update(import_currency_dict)
         alias_by_account_dict.update(import_alias_dict)
         for account_str, date_str in import_active_dict.items():
             first_active_dict[account_str] = min(first_active_dict.get(account_str, date_str), date_str)
+            if account_str not in import_strategy_set:
+                first_other_dict[account_str] = min(first_other_dict.get(account_str, date_str), date_str)
     result_list = []
     for account_str, first_str in sorted(first_active_dict.items()):
         if account_str in excluded_route_set:
@@ -126,7 +151,8 @@ def discover_other_account_list(db_path_str, *, query_name_str, strategy_start_b
         effective_to_str = None
         if account_str in strategy_start_by_route_dict:
             start_str = strategy_start_by_route_dict[account_str]
-            if not start_str or first_str >= _baseline_session_str(start_str):
+            if not start_str or first_str >= start_str or (
+                    first_other_dict.get(account_str, start_str) >= start_str and first_str >= _baseline_session_str(start_str)):
                 continue
             effective_to_str = (date.fromisoformat(start_str) - timedelta(days=1)).isoformat()
         result_list.append({

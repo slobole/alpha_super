@@ -426,6 +426,23 @@ def _periods_cover_bool(account_list, *, from_date_str, to_date_str):
     return False
 
 
+def _continuous_boundary_set(account_list):
+    """Dates where only the reporting role changes, with no ownership gap."""
+    period_by_route_dict = {}
+    for account_dict in account_list:
+        period_by_route_dict.setdefault(account_dict["account_route"], []).append(account_dict)
+    boundary_set = set()
+    for route_str, period_list in period_by_route_dict.items():
+        ordered_list = sorted(period_list, key=lambda account_dict: account_dict["effective_from"])
+        for previous_dict, current_dict in zip(ordered_list, ordered_list[1:]):
+            end_str = previous_dict.get("effective_to")
+            if end_str and (date.fromisoformat(end_str) + timedelta(days=1)).isoformat() == current_dict["effective_from"]:
+                boundary_set.update(((route_str, end_str, "end"),
+                    (route_str, current_dict["effective_from"], "start"),
+                    (route_str, current_dict["effective_from"], "exit")))
+    return boundary_set
+
+
 def _account_active_bool(account_dict: dict, market_date_str: str) -> bool:
     return account_dict["effective_from"] <= market_date_str <= (account_dict.get("effective_to") or "9999-12-31")
 
@@ -599,6 +616,7 @@ def build_client_report_dict(
     except ValueError as exception_obj:
         raise ClientReportingError("Reporting range is outside the supported exchange calendar.") from exception_obj
     account_list = client_dict["accounts"]
+    continuous_boundary_set = _continuous_boundary_set(account_list)
     owned_account_set = {account_dict["account_route"] for account_dict in account_list}
     if local_valuation_list is not None:
         owned_account_set.update(account_dict["account_route"] for account_dict in local_valuation_list)
@@ -619,13 +637,18 @@ def build_client_report_dict(
     }
     membership_date_set: set[str] = set()
     for account_dict in account_list:
-        boundary_list = [account_dict["effective_from"]]
+        boundary_list = [(account_dict["effective_from"], "start")]
         if account_dict.get("effective_to") is not None:
             end_date_obj = date.fromisoformat(account_dict["effective_to"])
-            boundary_list.append(end_date_obj.isoformat())
+            boundary_list.append((end_date_obj.isoformat(), "end"))
             if end_date_obj < date.max:
-                boundary_list.append((end_date_obj + timedelta(days=1)).isoformat())
-        membership_date_set.update(boundary_str for boundary_str in boundary_list if from_date_str <= boundary_str <= to_date_str)
+                boundary_list.append(((end_date_obj + timedelta(days=1)).isoformat(), "exit"))
+        # *** CRITICAL *** A role change of the same physical account is not a
+        # capital entry/exit. It creates no synthetic weekend/holiday NAV day;
+        # exchange sessions and every observed non-session row still count.
+        membership_date_set.update(boundary_str for boundary_str, boundary_kind_str in boundary_list
+            if from_date_str <= boundary_str <= to_date_str and (
+                boundary_str in session_list or (account_dict["account_route"], boundary_str, boundary_kind_str) not in continuous_boundary_set))
     # Effective membership is a calendar-date contract, including weekends.
     # A newly scoped account must not disappear because no exchange session ran.
     report_date_list = sorted(set(session_list) | extra_date_set | membership_date_set)
@@ -641,7 +664,10 @@ def build_client_report_dict(
         # Independent account returns do not inherit another account's weekend
         # activity requirement. The client NAV bridge retains the strict union.
         own_extra_set = {row_obj.market_date_str for row_obj in row_by_key_dict.values() if row_obj.account_route_str == account_dict["account_route"] and from_date_str <= row_obj.market_date_str <= to_date_str}
-        own_boundary_set = {date_str for date_str in (account_dict["effective_from"], account_dict.get("effective_to")) if date_str and from_date_str <= date_str <= to_date_str}
+        own_boundary_set = {date_str for date_str, boundary_kind_str in (
+                (account_dict["effective_from"], "start"), (account_dict.get("effective_to"), "end"))
+            if date_str and from_date_str <= date_str <= to_date_str and (
+                date_str in session_list or (account_dict["account_route"], date_str, boundary_kind_str) not in continuous_boundary_set)}
         expected_date_list = [date_str for date_str in sorted(set(session_list) | own_extra_set | own_boundary_set) if _account_active_bool(account_dict, date_str)]
         if not expected_date_list:
             continue

@@ -63,6 +63,15 @@ Earlier raw broker values/returns of that entrant stay in the source archive but
 are excluded from the measured portfolio. ALL begins at the earliest measured
 start, not the latest strategy start or the first raw broker row.
 
+An account already admitted as Other is the exception: changing its role to a
+Pod preserves its earlier client membership, including a single baseline day.
+Import-time strategy-route evidence distinguishes this from an ordinary Pod;
+no user configuration is required. The Pod's own return still starts on its
+first measured session. For adjacent periods of the same physical account,
+only the role changes: the client account set, capital and return are unchanged.
+An internal role boundary adds no unobserved weekend/holiday NAV day. Observed
+non-session rows and the original physical entry/exit boundaries remain required.
+
 A missing day or field inside an admitted strategy's window still blocks the
 selected-period result. A strategy with no verified window does not silently
 disappear: the existing NAV-only, unavailable-return fallback remains. That

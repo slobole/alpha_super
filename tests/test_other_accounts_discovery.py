@@ -80,8 +80,11 @@ def test_strategy_account_is_an_other_account_only_before_its_first_pod_day(tmp_
     assert _discover_list(db_path_str, strategy_start_by_route_dict=start_dict | {"U900": "2026-08-11"}) == [
         {"role": "reserve", "account_route": "U900", "display_name": "Other account …U900",
             "effective_from": "2026-08-07", "effective_to": "2026-08-10"}]
-    # A Pod starting 08-10 has its baseline on 08-07: an ordinary Pod, as before.
-    assert _discover_list(db_path_str, strategy_start_by_route_dict=start_dict | {"U900": "2026-08-10"}) == []
+    # This account was already Other at its first import. Even when that day
+    # becomes the Pod baseline, adding a strategy cannot erase its membership.
+    assert _discover_list(db_path_str, strategy_start_by_route_dict=start_dict | {"U900": "2026-08-10"}) == [
+        {"role": "reserve", "account_route": "U900", "display_name": "Other account …U900",
+            "effective_from": "2026-08-07", "effective_to": "2026-08-09"}]
     assert _discover_list(db_path_str, strategy_start_by_route_dict=start_dict | {"U900": "2026-08-07"}) == []
     assert _discover_list(db_path_str, strategy_start_by_route_dict=start_dict | {"U900": None}) == []
     assert _discover_list(db_path_str, excluded_route_set={"U900"}) == []
