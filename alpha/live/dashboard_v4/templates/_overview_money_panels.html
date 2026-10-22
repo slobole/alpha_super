@@ -1,13 +1,13 @@
 {% if money_placeholder_bool %}<div class="cols c-6-6 finance-panels" id="overview-money-panels" hx-preserve="true"></div>
 {% else %}<div class="cols c-6-6 finance-panels" id="overview-money-panels"{% if money_oob_bool %} hx-swap-oob="outerHTML"{% endif %}>
-          <section class="panel"><div class="panel-h"><span class="panel-t">Portfolio return</span><nav class="seg" aria-label="Portfolio return period">
+          <section class="panel"><div class="panel-h"><span class="panel-t">Strategy return</span><nav class="seg" aria-label="Strategy return period">
             {% for option_dict in overview_dict.period_option_list %}
             <a href="{{ option_dict.url_str }}" class="{{ 'on' if option_dict.selected_bool else '' }}" data-period="{{ option_dict.label_str }}"{% if option_dict.selected_bool %} aria-current="true"{% endif %}>{{ option_dict.label_str }}</a>
             {% endfor %}
           </nav></div>
           <div class="panel-b">
             {% set chart_dict = overview_dict.chart_dict %}
-            {% set chart_label_str = 'Portfolio return · ' + overview_dict.period_str %}{% include '_value_chart.html' %}
+            {% set chart_label_str = 'Strategy return · ' + overview_dict.period_str %}{% include '_value_chart.html' %}
           </div>{% if chart_dict.source_str %}<div class="finance-source" title="{{ chart_dict.detail_str }}">{{ chart_dict.source_str }}</div>{% endif %}</section>
           <section class="panel"><div class="panel-h"><span class="panel-t">Allocation</span></div>
             {% set allocation_dict = overview_dict.allocation_dict %}

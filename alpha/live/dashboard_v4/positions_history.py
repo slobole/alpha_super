@@ -375,7 +375,7 @@ def _last_session_str(first_str, last_str):
 
 
 def report_scope_tuple(workspace_dict, snapshot_obj, *, as_of_ts):
-    """The Performance page's report scope (performance.build_performance_page_dict).
+    """Full-client report scope used by the Positions month view.
 
     A complete saved scope uses the client's dated accounts, so Pods that start
     or retire mid-month keep every month reportable.

@@ -35,11 +35,11 @@ def test_demo_renders_native_d_shell_and_seven_step_rows(fixture_tuple):
     app_obj = create_demo_app()
     html_str = app_obj.test_client().get("/").get_data(as_text=True)
     for label_str in ("ALPHA / OPS", "Overview", "Positions", "Performance", "Activity", "System health", "Tools",
-                      "Account value", "Allocation", "Sample data. Not a real account."):
+                      "Client value", "Allocation", "Sample data. Not a real account."):
         assert label_str in html_str
     assert "READ-ONLY" not in html_str
     assert html_str.count('class="srow"') == 4
-    assert 'aria-label="Portfolio return · All"' in html_str
+    assert 'aria-label="Strategy return · All"' in html_str
     assert 'Calculated TWR · End-of-day cash flows' in html_str
     assert html_str.count('class="tl"') == 28
     # Modes without V4 views are hidden, not shown as dead controls.

@@ -66,7 +66,7 @@ def _correct_import(database_path_str, raw_xml_str, binding_list):
 def _workspace_report_tuple(provider_obj, database_path_str):
     workspace_dict, snapshot_obj = load_workspace_snapshot_tuple(provider_obj, database_path_str, as_of_ts=AS_OF_TS)
     report_dict = build_performance_page_dict(workspace_dict, snapshot_obj, as_of_ts=AS_OF_TS,
-        from_date_str="2026-09-01", to_date_str="2026-09-03")["report_dict"]
+        from_date_str="2026-09-01", to_date_str="2026-09-03")["client_report_dict"]
     return workspace_dict, report_dict
 
 

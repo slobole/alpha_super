@@ -134,7 +134,7 @@ def test_demo_daily_adds_the_daily_pods_beside_the_monthly_ones():
     assert all(name_str in overview_str for name_str in ("DVO2", "CORE5 · Trading", "Capsule · Last close exceptions",
         "CORE5 · Not sent", "Capsule · Unconfirmed", "CORE5 · Open after close"))
     # Daily demo pods have no account report: the money tiles keep the monthly scope.
-    assert "Account value $96,602.02" in overview_str
+    assert "Client value $96,602.02" in overview_str
     for pod_id_str, *_ in DEMO_DAILY_POD_TUPLE:
         _page_text(client_obj, f"/pods/{pod_id_str}")
     orders_str = _page_text(client_obj, "/pods/demo_daily_trading?tab=orders")

@@ -14,9 +14,12 @@ the releases or the database by hand.
 ## How an other account is counted
 
 ```text
-[Release YAMLs] -----------> [Pods, Pod returns, trading]      (unchanged)
-[Flex: every account] -----> [Client NAV / P&L / TWR totals]
-                                 + "Other accounts (not traded)" rows
+[Release YAMLs] -----------> [Pods and trading]               (unchanged)
+                                  |
+                                  v
+                       [Measured Pod performance]
+[Flex: every account] -----> [Client NAV / allocation / client CSV/PDF]
+                                  + "Other accounts" rows
 ```
 
 - **Found from the saved Flex.** `alpha/live/reporting_accounts.py` reads the
@@ -48,15 +51,29 @@ the releases or the database by hand.
 - **Name:** the IBKR alias (Account Information `acctAlias`) when the query has
   it, else `Other account …` plus the last four characters. Full account IDs
   never reach the screens or the client report.
-- **In the totals:** client NAV, P&L and TWR include it. A transfer between it
-  and a strategy account on the same day nets to zero.
+- **In client totals:** Overview total account value and allocation, and the
+  full client CSV/PDF NAV, P&L and TWR include it. A transfer between it and a
+  strategy account on the same day nets to zero in the full client scope.
+- **Separate from strategy measurement:** primary V4 Overview P&L/TWR/chart
+  and Performance results, risk and contributions use dated strategy Pod
+  periods only. All starts at the earliest measured Pod start. Cash-only Pods,
+  Action needed Pods and retired historical periods remain included; current
+  holdings and status never decide which Pod capital counts. Client ownership
+  before a Pod starts is retained in the client report, not rebased into the
+  Pod's measured return.
 - **Shown apart:** a grey "not traded" row on the Overview allocation, the
-  Performance page and in contribution, an "Other accounts" table in the client
-  PDF, and its own rows in the Pods CSV.
+  separate Other client accounts panel on Performance, an "Other accounts"
+  table in the Client PDF, and its own rows in the Client CSV's Pods view.
+  Other accounts are excluded from primary strategy totals and contributions.
+  Client downloads include all client accounts for the exact selected dates
+  shown on Performance.
 - **Missing is never zero.** Once counted, a day without its NAV withholds the
   client totals for that day. Pod numbers are not affected.
 - **USD only**, like the strategy accounts. An active non-USD other account is
   named in the financial error instead of being dropped from the totals.
+
+This operator display separation needs no new settings, sync or reset. It
+changes neither trading nor the existing accounting formulas and validity gates.
 
 ## Trade-off
 

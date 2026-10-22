@@ -26,7 +26,8 @@ Configuration does not prove source authenticity or intraday transfer timing.
 
 ## Mathematics and timing
 
-For each reporting date D, use only the accounts owned on D, including cash:
+For each reporting date D, use only the accounts included in the selected
+reporting scope on D, including their cash:
 
 ```
 B_D = sum(account starting NAV on D)
@@ -50,18 +51,31 @@ There is no intersection-only truncation or average of strategy-period returns.
 
 ### Default single-VPS measured portfolio
 
-Trusted local performance bindings define membership, not the date the physical
-broker account was opened or funded. The first trusted Pod EOD remains the
-baseline; measurement starts on the following exchange session. This rule and
-the saved bindings are unchanged.
+Trusted local performance bindings define strategy-performance membership, not
+the date the physical broker account was opened or funded. The first trusted
+Pod EOD remains the baseline; measurement starts on the following exchange
+session. This rule and the saved bindings are unchanged.
 
-With all windows verified, the default dashboard uses the same dated membership
-for opening/closing NAV, P&L, daily rows, cumulative TWR and investor exports.
+With all windows verified, primary V4 strategy performance uses the same dated
+Pod membership for opening/closing NAV, P&L, daily rows, cumulative TWR and risk.
 For example, a strategy measured from June 1 contributes alone until a second
 strategy joins on June 17. Its June 17 opening NAV is scope capital, not profit.
 Earlier raw broker values/returns of that entrant stay in the source archive but
 are excluded from the measured portfolio. ALL begins at the earliest measured
 start, not the latest strategy start or the first raw broker row.
+
+V4 Overview total account value and allocation include all client accounts.
+Its primary P&L, TWR and chart, and the Performance page's primary results, risk
+and contributions, use only measured strategy Pod periods. A cash-only Pod,
+a Pod marked Action needed and a retired Pod's historical period remain
+included. Current holdings, status and enabled flags do not select performance
+membership.
+
+Client CSV/PDF downloads include the full client ownership scope, including
+Other accounts, for exactly the same selected dates shown on Performance.
+Other accounts appear in a separate panel and do not enter strategy totals or
+contributions. This display separation requires no new settings, sync or reset;
+trading and the accounting formulas and gates are unchanged.
 
 An account already admitted as Other is the exception: changing its role to a
 Pod preserves its earlier client membership, including a single baseline day.
@@ -103,15 +117,21 @@ unavailable; the existing broker parser rejects official daily returns <= -100%.
 The configured method, its availability/reason and all daily return inputs enter
 the report hash. A configured but unavailable client TWR keeps the investor
 report DRAFT. Registries without the new contract retain their existing finality
-policy. The dashboard and investor export consume one common result.
+policy. Each reporting scope uses the same canonical accounting and gates.
+Missing Other-account evidence can withhold full-client totals and returns
+without invalidating complete strategy-period evidence.
 
 ```
-[Saved broker NAV + flows] -> [Scope + bridge checks] -> [Daily client returns]
-                                                       |
-                                                       v
-                                               [Linked period TWR]
-                                                       |
-                                              [Dashboard and PDF]
+                    [Saved broker NAV + flows]
+                         /             \
+                        v               v
+          [Measured Pod periods]   [Full client ownership]
+                        |               |
+              [Scope/bridge checks] [Scope/bridge checks]
+                        |               |
+              [Daily linked TWR]   [Daily linked TWR]
+                        |               |
+           [Primary V4 performance] [Client CSV/PDF: same dates]
 ```
 
 ## Source boundary

@@ -85,7 +85,7 @@ def test_other_account_enters_v4_totals_and_is_listed_apart_from_pods(tmp_path, 
     before_dict = deepcopy(workspace_dict)
     finance_dict = build_financial_overview_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=AS_OF_TS)
     performance_dict = build_performance_page_dict(workspace_dict, snapshot_obj, as_of_ts=AS_OF_TS)
-    report_dict = performance_dict["report_dict"]
+    report_dict = performance_dict["client_report_dict"]
     assert report_dict["closing_nav_float"] == 16180 + interest_float
     assert report_dict["pnl_float"] == 180 + interest_float
     assert report_dict["twr_float"] == pytest.approx((180 + interest_float) / 16000)
@@ -104,8 +104,10 @@ def test_other_account_enters_v4_totals_and_is_listed_apart_from_pods(tmp_path, 
     other_row_dict, = performance_dict["other_row_list"]
     assert (other_row_dict["name_str"], other_row_dict["end_str"]) == ("Private reserve", f"${5000 + interest_float:,.2f}")
     assert performance_dict["contribution_dict"]["available_bool"]
-    assert {row_dict["name_str"] for row_dict in performance_dict["contribution_dict"]["row_list"]} == {"Private reserve", *(
-        row_dict["name_str"] for row_dict in performance_dict["pod_row_list"])}
+    assert {row_dict["name_str"] for row_dict in performance_dict["contribution_dict"]["row_list"]} == {
+        row_dict["name_str"] for row_dict in performance_dict["pod_row_list"]}
+    assert performance_dict["report_dict"]["pnl_float"] == 180
+    assert performance_dict["report_dict"]["twr_float"] == pytest.approx(180 / 11000)
     assert "UUNUSED" not in str(performance_dict) and "UUNUSED" not in str(finance_dict)
     pod_view_dict = build_performance_page_dict(workspace_dict, snapshot_obj, as_of_ts=AS_OF_TS, level_str="pods")
     assert len(pod_view_dict["monthly_row_list"]) == 2
@@ -130,18 +132,19 @@ def test_strategy_account_is_never_an_other_account(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("missing_date_str", ["2026-09-02", "2026-09-03"])
-def test_missing_reserve_day_does_not_unlock_strategy_only_client_return(tmp_path, monkeypatch, missing_date_str):
+def test_missing_reserve_day_withholds_client_return_but_preserves_strategy_return(tmp_path, monkeypatch, missing_date_str):
     provider_obj, database_path_str, _ = _reserve_fixture(tmp_path, monkeypatch)
     workspace_dict, snapshot_obj = load_workspace_snapshot_tuple(provider_obj, database_path_str, as_of_ts=AS_OF_TS)
     snapshot_obj = replace(snapshot_obj, row_tuple=tuple(row_obj for row_obj in snapshot_obj.row_tuple
         if not (row_obj.account_route_str == "URESERVE" and row_obj.market_date_str == missing_date_str)))
     performance_dict = build_performance_page_dict(workspace_dict, snapshot_obj, as_of_ts=AS_OF_TS,
         from_date_str="2026-09-01", to_date_str="2026-09-03")
-    report_dict = performance_dict["report_dict"]
+    report_dict = performance_dict["client_report_dict"]
     assert report_dict["twr_float"] is None
     assert report_dict["pnl_float"] is None
     assert len(report_dict["strategy_list"]) == 2
     assert all(strategy_dict["twr_float"] is not None for strategy_dict in report_dict["strategy_list"])
+    assert performance_dict["report_dict"]["twr_float"] == pytest.approx(180 / 11000)
 
 
 def test_v4_render_has_only_strategy_cards_and_other_account_is_not_order_addressable(tmp_path, monkeypatch):
@@ -242,12 +245,12 @@ def test_month_positions_reserve_interest_uses_client_total_and_existing_other_b
         month_dict = build_positions_page_dict(workspace_dict, source_obj, provider_obj,
             as_of_ts=DEMO_NOW_TS, month_str="2026-09")["month_dict"]
         assert month_dict["available_bool"], month_dict["reason_str"]
-        assert month_dict["total_dict"]["pnl_str"] == "+$" + f"{performance_dict['report_dict']['pnl_float']:,.2f}"
+        assert month_dict["total_dict"]["pnl_str"] == "+$" + f"{performance_dict['client_report_dict']['pnl_float']:,.2f}"
         row_pnl_float = sum(row_dict["sort_dict"]["pnl"] for row_dict in month_dict["row_list"])
         other_float = sum(bar_dict["value_float"] for bar_dict in month_dict["side_dict"]["pod_bar_list"] if bar_dict.get("other_bool"))
-        assert row_pnl_float + other_float == pytest.approx(performance_dict["report_dict"]["pnl_float"], abs=.05)
+        assert row_pnl_float + other_float == pytest.approx(performance_dict["client_report_dict"]["pnl_float"], abs=.05)
         assert other_float == pytest.approx(2, abs=.05)
-        book_day_list = performance_dict["report_dict"]["daily_book_list"]
+        book_day_list = performance_dict["client_report_dict"]["daily_book_list"]
         average_nav_float = sum(day_dict["nav_float"] for day_dict in book_day_list) / len(book_day_list)
         assert month_dict["map_dict"]["book_value_float"] == pytest.approx(average_nav_float)
         assert month_dict["total_dict"]["nav_str"] == "$" + f"{average_nav_float:,.2f}"
@@ -265,7 +268,7 @@ def test_client_report_pdf_and_csv_list_the_other_account(tmp_path, monkeypatch)
 
     provider_obj, database_path_str, _ = _reserve_fixture(tmp_path, monkeypatch, interest_float=2.0)
     workspace_dict, snapshot_obj = load_workspace_snapshot_tuple(provider_obj, database_path_str, as_of_ts=AS_OF_TS)
-    report_dict = build_performance_page_dict(workspace_dict, snapshot_obj, as_of_ts=AS_OF_TS)["report_dict"]
+    report_dict = build_performance_page_dict(workspace_dict, snapshot_obj, as_of_ts=AS_OF_TS)["client_report_dict"]
     other_dict, = build_investor_snapshot_dict(report_dict)["other_account_list"]
     assert (other_dict["display_name_str"], other_dict["closing_nav_float"], other_dict["pnl_float"]) == ("Private reserve", 5002.0, 2.0)
     assert "URESERVE" not in str(build_investor_snapshot_dict(report_dict))
@@ -289,7 +292,7 @@ def test_correction_dropping_the_other_account_withholds_totals_instead_of_shrin
     workspace_dict, snapshot_obj = load_workspace_snapshot_tuple(provider_obj, database_path_str, as_of_ts=AS_OF_TS)
     assert [account_dict["account_route"] for account_dict in workspace_dict["other_account_list"]] == ["URESERVE"]
     report_dict = build_performance_page_dict(workspace_dict, snapshot_obj, as_of_ts=AS_OF_TS,
-        from_date_str="2026-09-01", to_date_str="2026-09-03")["report_dict"]
+        from_date_str="2026-09-01", to_date_str="2026-09-03")["client_report_dict"]
     assert (report_dict["closing_nav_float"], report_dict["pnl_float"], report_dict["twr_float"], report_dict["status_str"]) == (
         None, None, None, "draft")
 
@@ -298,7 +301,7 @@ def test_other_account_handing_over_to_a_pod_keeps_client_history(tmp_path, monk
     provider_obj, database_path_str, _ = _reserve_fixture(tmp_path, monkeypatch, interest_float=2.0)
     workspace_dict, snapshot_obj = load_workspace_snapshot_tuple(provider_obj, database_path_str, as_of_ts=AS_OF_TS)
     before_dict = build_performance_page_dict(workspace_dict, snapshot_obj, as_of_ts=AS_OF_TS,
-        from_date_str="2026-09-01", to_date_str="2026-09-03")["report_dict"]
+        from_date_str="2026-09-01", to_date_str="2026-09-03")["client_report_dict"]
     # The same money, but URESERVE becomes Pod pod_c from 2026-09-02: an other
     # account on 09-01, the Pod after. No Flex fact changes.
     handover_dict = deepcopy(workspace_dict)
@@ -311,7 +314,7 @@ def test_other_account_handing_over_to_a_pod_keeps_client_history(tmp_path, monk
     handover_dict["valuation_account_list"] = [account_dict for account_dict in handover_dict["valuation_account_list"]
         if account_dict["account_route"] != "URESERVE"] + [{"pod_id": "pod_c", "account_route": "URESERVE", "display_name": "Pod C"}]
     after_dict = build_performance_page_dict(handover_dict, snapshot_obj, as_of_ts=AS_OF_TS,
-        from_date_str="2026-09-01", to_date_str="2026-09-03")["report_dict"]
+        from_date_str="2026-09-01", to_date_str="2026-09-03")["client_report_dict"]
     for field_str in ("opening_nav_float", "closing_nav_float", "pnl_float", "twr_float", "scope_movement_float"):
         assert after_dict[field_str] == pytest.approx(before_dict[field_str]), field_str
     assert after_dict["status_str"] == before_dict["status_str"] == "ready"

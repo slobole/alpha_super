@@ -10,9 +10,13 @@ This file is part of the live-first control system. Recording a gap does not mak
 
 ### Dashboard V4 operator display
 
-Performance uses one canonical saved Flex report for the selected interval and
-defaults to All. Portfolio TWR retains the configured daily NAV/end-of-day-flow
-contract; Pod TWR remains IBKR account TWR. Historical membership includes retired
+Performance defaults to All and uses canonical saved Flex reports for the same
+selected interval in two scopes: measured strategy Pod periods for primary
+metrics, and full client ownership for Client CSV/PDF. Overview client value and
+allocation retain Other accounts; its P&L/TWR/chart use measured strategy periods.
+Cash-only, Action needed and retired historical Pod periods remain included.
+No new setting or data reset is needed. Portfolio TWR retains the configured
+daily NAV/end-of-day-flow contract; Pod TWR remains IBKR account TWR. Historical membership includes retired
 Pods. Missing portfolio coverage does not erase independently valid Pod history.
 No live broker, price download, state write or new accounting method is involved.
 
@@ -42,7 +46,7 @@ Pod sum must match canonical portfolio P&L within $0.01 before a decomposition i
 shown. Portfolio endpoints are never sums of mismatched Pod endpoints; membership
 movements retain their own Balance row. Unsupported backtest comparisons stay
 hidden. CSV and the existing investor PDF export saved report facts in memory,
-require the displayed report hash, preserve withholding and exclude private
+require the full-client report hash, preserve withholding and exclude private
 account identifiers. The shared financial loader still replays full saved import
 history; no truncation or alternative performance cache was introduced. On
 Performance, that financial report stays fixed until navigation or Refresh.
@@ -203,7 +207,7 @@ display aid only and never feeds sizing. Table sorting runs in the browser and
 does not change any server order, filter or total.
 
 The month view (`/positions?month=YYYY-MM`) reads only finalized D+1 daily IBKR
-Flex statements. Month P&L and TWR are the Performance page's client report for
+Flex statements. Month P&L and TWR use the full-client report scope for
 the same dates and the same scope rule (dated client accounts when the saved
 scope is complete), so Pods that start or retire mid-month keep months
 reportable. Per-symbol rows need IBKR's "Mark-to-Market Performance Summary in

@@ -718,7 +718,7 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             to_date_str=to_date_str, unit_str=unit_str, level_str="pods" if level_str == "backtest" else level_str)
         if level_str == "backtest":
             performance_page_dict["level_str"] = "backtest"
-        report_dict = performance_page_dict.get("report_dict") or {}
+        report_dict = performance_page_dict.get("client_report_dict") or {}
         if download_str:
             if expected_str != report_dict.get("report_hash_str"):
                 return Response("The report changed. Refresh Performance and download again.", status=409)
@@ -737,6 +737,7 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         def performance_url_str(**override_dict):
             return url_for("performance", **{**selection_dict, **override_dict})
 
+        download_date_dict = {"from": performance_page_dict["from_date_str"], "to": performance_page_dict["to_date_str"]}
         performance_page_dict.update(
             level_option_list=[{"label_str": label_str, "selected_bool": level_str == option_str,
                 "url_str": performance_url_str(level=option_str)} for option_str, label_str in (("portfolio", "Portfolio"), ("pods", "Pods"))]
@@ -750,8 +751,8 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
                 "url_str": performance_url_str(unit=option_str)} for option_str, label_str in (("usd", "$"), ("pct", "%"))],
             date_url_str=url_for("performance", level=level_str, unit=unit_str),
             refresh_report_url_str=performance_url_str(),
-            csv_url_str=performance_url_str(download="csv", expected=report_dict["report_hash_str"]) if report_dict else "",
-            pdf_url_str=performance_url_str(download="pdf", expected=report_dict["report_hash_str"]) if report_dict else "",
+            csv_url_str=performance_url_str(download="csv", expected=report_dict["report_hash_str"], **download_date_dict) if report_dict else "",
+            pdf_url_str=performance_url_str(download="pdf", expected=report_dict["report_hash_str"], **download_date_dict) if report_dict else "",
         )
         active_pod_set = {item_dict["pod_id_str"] for item_dict in overview_dict["pod_list"]}
         if level_str == "backtest":

@@ -11,6 +11,7 @@ from alpha.live.dashboard_v3.client_cash import load_portfolio_cash_list
 from alpha.live.dashboard_v3.client_financial_display import financial_dates_dict
 from alpha.live.dashboard_v3.client_operations import build_client_operations_dict
 from alpha.live.dashboard_v3.client_presentation import portfolio_allocation_dict
+from alpha.live.dashboard_v4.strategy_scope import strategy_workspace_dict
 
 
 POD_COLOR_TUPLE = ("#2a78d6", "#1baf7a", "#4a3aa7", "#e87ba4")
@@ -196,7 +197,7 @@ def _months_before_date(today_obj, months_int):
     return date(year_int, month_int, min(today_obj.day, calendar.monthrange(year_int, month_int)[1]))
 
 
-def build_financial_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, period_str="All", as_of_ts):
+def _build_financial_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, period_str="All", as_of_ts):
     """Read-only presentation of one acquired, scoped LIVE reporting snapshot.
 
     V3 owns NAV, flow-adjusted P&L, TWR and cash validation. Each tile uses its
@@ -230,7 +231,9 @@ def build_financial_overview_dict(workspace_dict, snapshot_obj, provider_obj, *,
     if not scope_complete_bool or client_dict["mandate_start_date"] > today_obj.isoformat():
         valuation_account_list = workspace_dict.get("valuation_account_list", [])
         client_dict["mandate_start_date"] = min(client_dict["mandate_start_date"], today_obj.isoformat())
-        broker_date_list = [row_obj.market_date_str for row_obj in snapshot_obj.row_tuple if row_obj.market_date_str <= today_obj.isoformat()]
+        route_set = {account_dict["account_route"] for account_dict in account_list}
+        broker_date_list = [row_obj.market_date_str for row_obj in snapshot_obj.row_tuple
+            if row_obj.account_route_str in route_set and row_obj.market_date_str <= today_obj.isoformat()]
         if broker_date_list:
             client_dict["mandate_start_date"] = min(client_dict["mandate_start_date"], min(broker_date_list))
     try:
@@ -299,4 +302,31 @@ def build_financial_overview_dict(workspace_dict, snapshot_obj, provider_obj, *,
     if not allocation_dict["available_bool"]:
         allocation_dict["row_list"] = result_dict["allocation_dict"]["row_list"]
     result_dict["allocation_dict"] = allocation_dict
+    return result_dict
+
+
+def build_financial_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, period_str="All", as_of_ts):
+    """Full client value/allocation, with measured strategy P&L and returns.
+
+    Both scopes use the existing NAV bridge and daily EOD return formula.
+    A funding day before Pod measurement remains in client history, without
+    becoming a strategy return day. No zero-capital day inside a Pod is removed.
+    """
+    result_dict = _build_financial_overview_dict(workspace_dict, snapshot_obj, provider_obj,
+        period_str=period_str, as_of_ts=as_of_ts)
+    strategy_view_dict = strategy_workspace_dict(workspace_dict)
+    if (strategy_view_dict["client_dict"] != workspace_dict["client_dict"]
+            or strategy_view_dict.get("valuation_account_list") != workspace_dict.get("valuation_account_list")):
+        strategy_finance_dict = _build_financial_overview_dict(strategy_view_dict, snapshot_obj, provider_obj,
+            period_str=period_str, as_of_ts=as_of_ts)
+        result_dict["tile_list"][1:] = strategy_finance_dict["tile_list"][1:]
+        result_dict["chart_dict"] = strategy_finance_dict["chart_dict"]
+        if strategy_finance_dict["money_asof_str"] != result_dict["money_asof_str"]:
+            for tile_dict in result_dict["tile_list"][1:]:
+                tile_dict["detail_str"] += " · " + strategy_finance_dict["money_asof_str"]
+    for tile_dict, label_str in zip(result_dict["tile_list"],
+            ("Client value", "Strategies · Day", "Strategies · Month", "Strategies · Year")):
+        tile_dict["label_str"] = label_str
+    if result_dict["chart_dict"]["source_str"]:
+        result_dict["chart_dict"]["source_str"] = "Strategies · " + result_dict["chart_dict"]["source_str"]
     return result_dict

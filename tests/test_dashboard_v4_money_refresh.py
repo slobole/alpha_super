@@ -55,7 +55,7 @@ def test_overview_refresh_sends_preserved_placeholders_and_builds_no_finance(cli
     assert element_dict["overview-money-tiles"]["data-own-refresh-ms"] == "300000"
     # Explicit, or htmx inherits the frame's hx-target and replaces the whole frame.
     assert element_dict["overview-money-tiles"]["hx-target"] == "this"
-    assert "data-history-chart" not in refresh_str and "Portfolio return" not in refresh_str
+    assert "data-history-chart" not in refresh_str and "Strategy return" not in refresh_str
     assert len(refresh_str) < 0.4 * len(page_str)
 
 
@@ -74,7 +74,7 @@ def test_overview_money_route_replaces_tiles_and_sends_the_rest_out_of_band(clie
     assert element_dict["overview-money-asof"]["hx-swap-oob"] == "outerHTML"
     assert element_dict["overview-money-panels"]["hx-swap-oob"] == "outerHTML"
     assert all("hx-preserve" not in attribute_dict for attribute_dict in element_dict.values())
-    assert "Portfolio return" in money_str and "overview-shell" not in money_str
+    assert "Strategy return" in money_str and "overview-shell" not in money_str
     assert client_obj.get("/overview/money?period=bad").status_code == 400
     assert client_obj.post("/overview/money").status_code == 403
 

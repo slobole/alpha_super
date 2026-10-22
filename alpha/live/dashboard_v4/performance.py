@@ -13,6 +13,7 @@ from alpha.live.dashboard_v3.client_financial_display import financial_dates_dic
 from alpha.live.dashboard_v4.charts import add_pod_drawing_dict, build_history_chart_dict
 from alpha.live.dashboard_v4.daily_pnl import build_daily_pnl_dict
 from alpha.live.dashboard_v4.finance import OTHER_ACCOUNT_COLOR_STR, POD_COLOR_TUPLE, _money_str, _percent_str, _tone_str
+from alpha.live.dashboard_v4.strategy_scope import strategy_workspace_dict
 from alpha.live.scheduler_utils import get_exchange_calendar_obj
 
 
@@ -23,7 +24,8 @@ MARKET_TIMEZONE_OBJ = ZoneInfo("America/New_York")
 
 def _empty_dict(period_str, level_str, unit_str):
     return {"period_str": period_str, "level_str": level_str, "unit_str": unit_str,
-        "report_dict": None, "from_date_str": "", "to_date_str": "", "min_date_str": "", "max_date_str": "",
+        "report_dict": None, "client_report_dict": None, "client_error_str": "",
+        "from_date_str": "", "to_date_str": "", "min_date_str": "", "max_date_str": "",
         "latest_close_str": "", "source_str": "Financial data unavailable", "verdict_str": "Performance unavailable",
         "verdict_detail_str": "", "error_str": "", "delayed_bool": True, "is_demo_bool": False,
         "tile_list": [{"label_str": label_str, "value_str": "—", "detail_str": "", "tone_str": ""}
@@ -193,7 +195,7 @@ def _pod_chart_dict(pod_list):
     return result_dict
 
 
-def build_performance_page_dict(workspace_dict, snapshot_obj, *, as_of_ts, period_str="All",
+def _build_performance_page_dict(workspace_dict, snapshot_obj, *, as_of_ts, period_str="All",
                                 from_date_str=None, to_date_str=None, unit_str="pct", level_str="portfolio"):
     """Project one report; saved LIVE ownership and accounting stay canonical."""
     if (period_str not in PERIOD_TUPLE or unit_str not in {"usd", "pct"} or level_str not in {"portfolio", "pods"}
@@ -215,7 +217,9 @@ def build_performance_page_dict(workspace_dict, snapshot_obj, *, as_of_ts, perio
     if not scope_complete_bool or client_dict["mandate_start_date"] > today_obj.isoformat():
         valuation_list = workspace_dict.get("valuation_account_list", [])
         client_dict["mandate_start_date"] = min(client_dict["mandate_start_date"], today_obj.isoformat())
-        saved_date_list = [row_obj.market_date_str for row_obj in snapshot_obj.row_tuple if row_obj.market_date_str < today_obj.isoformat()]
+        valuation_route_set = {account_dict["account_route"] for account_dict in [*valuation_list, *client_dict["accounts"]]}
+        saved_date_list = [row_obj.market_date_str for row_obj in snapshot_obj.row_tuple
+            if row_obj.account_route_str in valuation_route_set and row_obj.market_date_str < today_obj.isoformat()]
         if saved_date_list:
             client_dict["mandate_start_date"] = min(client_dict["mandate_start_date"], min(saved_date_list))
     try:
@@ -349,4 +353,32 @@ def build_performance_page_dict(workspace_dict, snapshot_obj, *, as_of_ts, perio
                 to_str=min(to_date_str, account_dict.get("effective_to") or to_date_str)))
         result_dict.update(_pod_verdict_dict(result_dict["pod_row_list"], report_dict, result_dict["contribution_dict"]))
     result_dict["has_multiple_years_bool"] = len({row_dict["year_int"] for row_dict in result_dict["monthly_row_list"]}) > 1
+    return result_dict
+
+
+def build_performance_page_dict(workspace_dict, snapshot_obj, *, as_of_ts, period_str="All",
+                                from_date_str=None, to_date_str=None, unit_str="pct", level_str="portfolio"):
+    """Show strategy performance; retain the full client report for the same dates."""
+    strategy_view_dict = strategy_workspace_dict(workspace_dict)
+    result_dict = _build_performance_page_dict(strategy_view_dict, snapshot_obj,
+        as_of_ts=as_of_ts, period_str=period_str, from_date_str=from_date_str,
+        to_date_str=to_date_str, unit_str=unit_str, level_str=level_str)
+    if (strategy_view_dict["client_dict"] == workspace_dict["client_dict"]
+            and strategy_view_dict.get("valuation_account_list") == workspace_dict.get("valuation_account_list")):
+        result_dict["client_report_dict"] = result_dict["report_dict"]
+        return result_dict
+    # *** CRITICAL *** retrospective display scopes use identical selected dates.
+    # Other accounts never enter the strategy path, risk or contribution totals.
+    client_from_date_str = result_dict["from_date_str"] if result_dict["report_dict"] is not None else from_date_str
+    client_to_date_str = result_dict["to_date_str"] if result_dict["report_dict"] is not None else to_date_str
+    client_page_dict = _build_performance_page_dict(workspace_dict, snapshot_obj,
+        as_of_ts=as_of_ts, period_str=period_str, from_date_str=client_from_date_str,
+        to_date_str=client_to_date_str, unit_str=unit_str, level_str=level_str)
+    result_dict.update(client_report_dict=client_page_dict["report_dict"],
+        client_error_str=client_page_dict["error_str"], other_row_list=client_page_dict["other_row_list"])
+    if result_dict["report_dict"] is None and client_page_dict["report_dict"] is not None:
+        result_dict.update(from_date_str=client_page_dict["from_date_str"], to_date_str=client_page_dict["to_date_str"])
+    for field_str in ("from_date_str", "to_date_str"):
+        if not result_dict[field_str]:
+            result_dict[field_str] = client_page_dict[field_str]
     return result_dict
