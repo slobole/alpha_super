@@ -196,7 +196,8 @@ def _pod_chart_dict(pod_list):
 
 
 def _build_performance_page_dict(workspace_dict, snapshot_obj, *, as_of_ts, period_str="All",
-                                from_date_str=None, to_date_str=None, unit_str="pct", level_str="portfolio"):
+                                from_date_str=None, to_date_str=None, unit_str="pct", level_str="portfolio",
+                                transfer_scope_client_dict=None):
     """Project one report; saved LIVE ownership and accounting stay canonical."""
     if (period_str not in PERIOD_TUPLE or unit_str not in {"usd", "pct"} or level_str not in {"portfolio", "pods"}
             or as_of_ts.tzinfo is None or bool(from_date_str) != bool(to_date_str)):
@@ -241,7 +242,8 @@ def _build_performance_page_dict(workspace_dict, snapshot_obj, *, as_of_ts, peri
             to_date_str = close_str if close_str and close_str >= from_date_str else max(from_date_str, (today_obj - timedelta(days=1)).isoformat())
         result_dict.update(from_date_str=from_date_str, to_date_str=to_date_str)
         report_dict = build_client_report_dict(client_dict, snapshot_obj, from_date_str=from_date_str,
-            to_date_str=to_date_str, as_of_ts=as_of_ts, scope_complete_bool=scope_complete_bool, valuation_account_list=valuation_list)
+            to_date_str=to_date_str, as_of_ts=as_of_ts, scope_complete_bool=scope_complete_bool, valuation_account_list=valuation_list,
+            transfer_scope_client_dict=transfer_scope_client_dict)
         session_set = {session_obj.date().isoformat() for session_obj in get_exchange_calendar_obj("XNYS").sessions_in_range(from_date_str, to_date_str)}
     except (ClientReportingError, ValueError, KeyError, TypeError, OSError):
         result_dict["error_str"] = "Saved financial data could not be verified for this period."
@@ -357,12 +359,14 @@ def _build_performance_page_dict(workspace_dict, snapshot_obj, *, as_of_ts, peri
 
 
 def build_performance_page_dict(workspace_dict, snapshot_obj, *, as_of_ts, period_str="All",
-                                from_date_str=None, to_date_str=None, unit_str="pct", level_str="portfolio"):
+                                from_date_str=None, to_date_str=None, unit_str="pct", level_str="portfolio",
+                                transfer_scope_client_dict=None):
     """Show strategy performance; retain the full client report for the same dates."""
     strategy_view_dict = strategy_workspace_dict(workspace_dict)
     result_dict = _build_performance_page_dict(strategy_view_dict, snapshot_obj,
         as_of_ts=as_of_ts, period_str=period_str, from_date_str=from_date_str,
-        to_date_str=to_date_str, unit_str=unit_str, level_str=level_str)
+        to_date_str=to_date_str, unit_str=unit_str, level_str=level_str,
+        transfer_scope_client_dict=workspace_dict["client_dict"] if transfer_scope_client_dict is None else transfer_scope_client_dict)
     if (strategy_view_dict["client_dict"] == workspace_dict["client_dict"]
             and strategy_view_dict.get("valuation_account_list") == workspace_dict.get("valuation_account_list")):
         result_dict["client_report_dict"] = result_dict["report_dict"]

@@ -10,6 +10,7 @@ html, body { margin: 0; }
 .mr-pick { display: inline-flex; align-items: center; gap: 8px; color: #475569; }
 .mr-pick select { font: inherit; padding: 4px 8px; border: 1px solid #CBD5E1; border-radius: 4px; background: #FFFFFF; }
 .mr-print { font: inherit; font-weight: 600; padding: 6px 14px; border: 1px solid #1D4F91; border-radius: 4px; background: #1D4F91; color: #FFFFFF; cursor: pointer; }
+.mr-print-frame { position: fixed; left: -10000px; top: 0; width: 794px; height: 1123px; border: 0; }
 .mr-status { color: #B45309; font-weight: 600; }
 .mr-tool { font: inherit; font-weight: 600; padding: 6px 14px; border: 1px solid #CBD5E1; border-radius: 4px; background: #FFFFFF; color: #1D4F91; cursor: pointer; }
 /* Programs panel: screen only, under the controls. */
@@ -28,11 +29,12 @@ html, body { margin: 0; }
 .mr-pages { display: flex; flex-direction: column; align-items: center; gap: 24px; padding: 24px 16px 48px; }
 
 /* The page. */
-.pg { width: 794px; min-height: 1123px; background: #FFFFFF; position: relative; display: flex; flex-direction: column; font-size: 13px; line-height: 1.45; box-shadow: 0 1px 3px rgba(15,23,42,.12), 0 12px 32px rgba(15,23,42,.10); }
+.pg { width: 794px; min-height: 1123px; background: #FFFFFF; position: relative; display: flex; flex-direction: column; font-size: 14px; line-height: 1.45; box-shadow: 0 1px 3px rgba(15,23,42,.12), 0 12px 32px rgba(15,23,42,.10); }
 .pg svg text { font-family: 'IBM Plex Sans', 'Segoe UI', Arial, sans-serif; }
-/* A page grows instead of cutting content off; the script keeps the usual case to two sheets. */
-.pg-spill .foot { display: none; }
+/* Sections grow without cutting off content. Large portfolios can use extra sheets. */
 .mr-draft { position: absolute; top: 12px; right: 12px; z-index: 1; padding: 4px 10px; background: #FEF3C7; color: #92400E; border: 1px solid #F59E0B; border-radius: 4px; font-size: 12px; font-weight: 600; }
+.mr-demo { padding: 5px 24px; text-align: center; font-size: 12px; font-weight: 600; background: #E8EFF9; color: #1D4F91; }
+.detail-status { margin: 10px 48px 0; color: #92400E; font-weight: 600; }
 .art { width: 794px; height: 130px; object-fit: cover; object-position: 50% 44%; display: block; flex: none; }
 .mast { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; margin: 20px 56px 0; padding-bottom: 14px; border-bottom: 2px solid #1D4F91; }
 .mast-noart { margin-top: 48px; }
@@ -47,7 +49,17 @@ html, body { margin: 0; }
 .na { margin: 8px 0 0; color: #64748B; font-size: 12px; }
 
 /* Summary: your money + split. */
-.top { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 48px; margin: 26px 56px 0; align-items: start; }
+.top { display: grid; grid-template-columns: minmax(0, 1fr) 230px; gap: 24px; margin: 20px 48px 0; align-items: start; }
+.money th { text-align: right; font-size: 12px; font-weight: 500; color: #475569; }
+.bridge { display: flex; flex-wrap: wrap; gap: 12px 22px; margin: 18px 48px 0; padding: 12px 0; border-bottom: 1px solid #E2E8F0; }
+.bridge div { flex: 1; min-width: 120px; }
+.bridge span { display: block; color: #475569; font-size: 12px; }
+.bridge b { display: block; font-size: 16px; font-variant-numeric: tabular-nums; }
+.scope-note { margin: 10px 48px 0; color: #475569; font-size: 12px; }
+.report-notes { font-size: 12px; color: #475569; padding-bottom: 20px; }
+.report-notes p { margin: 8px 0; }
+.report-notes .data-note { color: #92400E; }
+.holding-detail { display: block; font-size: 11.5px; color: #475569; }
 .money { width: 100%; border-collapse: collapse; margin-top: 8px; font-variant-numeric: tabular-nums; }
 .money td { padding: 8px 0; border-bottom: 1px solid #E2E8F0; }
 .money td.v { text-align: right; font-weight: 600; white-space: nowrap; }
@@ -58,7 +70,7 @@ html, body { margin: 0; }
 .money tr.gap td { border-top: 1px solid #94A3B8; }
 .money tr.total td { font-weight: 700; border-bottom: 0; }
 .split { display: flex; align-items: center; gap: 20px; margin-top: 10px; }
-.split svg { width: 112px; height: 112px; flex: none; display: block; }
+.split svg { width: 90px; height: 90px; flex: none; display: block; }
 .sleg { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
 .sg { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13px; font-weight: 600; padding-bottom: 4px; border-bottom: 1px solid #E2E8F0; }
 .sp + .sg { margin-top: 8px; }
@@ -104,12 +116,12 @@ html, body { margin: 0; }
 
 /* Returns by month. */
 .months { margin: 26px 56px 0; }
-.months table, .block table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; margin-top: 8px; }
+.months table, .block table { width: 100%; border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; margin-top: 8px; }
 .months th, .block th { font-weight: 500; color: #64748B; text-align: right; padding: 5px 6px; border-bottom: 1px solid #0F172A; white-space: nowrap; font-size: 11.5px; }
 .months th:first-child, .months td:first-child, .block th:first-child, .block td:first-child { text-align: left; padding-left: 0; }
 .months td, .block td { text-align: right; padding: 6px 6px; border-bottom: 1px solid #E2E8F0; }
 .mt tr.prog td { font-weight: 600; }
-.mt tr.pod td { color: #475569; font-size: 12px; }
+.mt tr.pod td { color: #475569; font-size: 13px; }
 .mt tr.pod td:first-child { padding-left: 14px; }
 .mt .ss { border-left: 1px solid #E2E8F0; font-weight: 600; }
 
@@ -136,9 +148,11 @@ html, body { margin: 0; }
 @page { size: A4; margin: 0; }
 @media print {
   .mr-body { background: #FFFFFF; }
-  .mr-bar, .mr-programs { display: none !important; }
+  .mr-bar, .mr-programs, .mr-print-frame { display: none !important; }
   .mr-pages { display: block; padding: 0; }
   .pg { box-shadow: none; break-after: page; page-break-after: always; }
   .pg:last-child { break-after: auto; page-break-after: auto; }
   .mr-draft { display: block; }
+  .card, .report-notes, tr { break-inside: avoid; }
+  thead { display: table-header-group; }
 }

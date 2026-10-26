@@ -1,9 +1,8 @@
-"""Monthly client report: one month of the saved Performance numbers on two A4 pages.
+"""Monthly client report: full-client wealth and separate program performance.
 
-Read-only. Every amount and return comes from build_performance_page_dict for the
-same dates as the Performance page (its approved client daily TWR). This module
-picks the month, groups Pods into programs and lays the pages out. Holdings come
-from one saved IBKR source for the report's closing day, or are left out.
+Read-only projection using the canonical accounting and approved daily TWR.
+The horizon includes reserve accounts after strategies close. Holdings need
+saved same-close positions and independently evidenced cash, or are left out.
 """
 
 import calendar
@@ -18,7 +17,9 @@ from xml.etree import ElementTree
 from zoneinfo import ZoneInfo
 
 from alpha.live.client_reporting import CAPITAL_FIELD_TUPLE, ClientReportingError
-from alpha.live.dashboard_v3.client_financial_display import financial_dates_dict
+from alpha.live.client_reporting import content_hash_str
+from alpha.live.dashboard_v3.client_cash import load_portfolio_cash_list
+from alpha.live.dashboard_v3.client_operations import build_client_operations_dict
 from alpha.live.dashboard_v4.performance import build_performance_page_dict
 from alpha.live.dashboard_v4.pod_broker_holdings import load_broker_holdings_dict
 from alpha.live.dashboard_v4.pod_holdings import load_close_holdings_dict
@@ -33,8 +34,6 @@ MONTH_COLUMN_LIMIT_INT = 9
 FLOW_ROW_LIMIT_INT = 12
 HOLDING_ROW_LIMIT_INT = 12
 NAME_XML_BYTE_LIMIT_INT = 32_000_000
-# Cash below zero up to this share of holdings is a fee or rounding debit, not borrowing.
-CASH_DEBIT_TOLERANCE_FLOAT = .005
 BRAND_NAME_STR = "Loren Slobodinsky"
 BRAND_DESC_STR = "Systematic investing"
 DEFAULT_PROGRAM_STR = "Portfolio"
@@ -96,7 +95,7 @@ def _empty_dict():
         "money_row_list": [], "split_dict": {"aria_str": "", "segment_list": [], "group_list": []},
         "single_program_bool": True, "program_list": [], "month_table_dict": {"label_list": [], "row_list": []},
         "flow_dict": {"row_list": [], "pod_name_list": [], "pod_total_list": [], "total_str": "", "reason_str": ""},
-        "activity_list": [], "pod_choice_list": [], "page_one_label_str": "Page 1 of 2", "page_two_label_str": "Page 2 of 2"}
+        "activity_list": [], "pod_choice_list": []}
 
 
 def _rounded_decimal(value_obj, exponent_str):
@@ -391,7 +390,8 @@ def _class_str(symbol_str):
     return SYMBOL_CLASS_DICT.get(symbol_str, "Stocks")
 
 
-def _pod_holdings_dict(pod_dict, *, client_dict, snapshot_obj, provider_obj, as_of_ts, database_path_str):
+def _pod_holdings_dict(pod_dict, *, client_dict, snapshot_obj, provider_obj, as_of_ts, database_path_str,
+                       cash_by_pod_dict=None):
     """Valued holdings at the Pod's close from one saved IBKR source; never values from another day."""
     close_str = pod_dict["close_str"]
     result_dict = {"available_bool": False, "reason_str": f"Holdings on {_short_day_str(close_str)} were not saved.",
@@ -412,7 +412,13 @@ def _pod_holdings_dict(pod_dict, *, client_dict, snapshot_obj, provider_obj, as_
         if close_dict.get("available_bool"):
             position_list = [(item_dict["symbol_str"], item_dict["value_float"]) for item_dict in close_dict["position_list"]
                 if item_dict["shares_float"] != 0]
-            cash_float = float(nav_row_list[0].closing_nav_decimal) - sum(value_float for _, value_float in position_list)
+            # *** CRITICAL *** exact-close accounting: cash must be independently
+            # observed on this date. NAV minus positions includes accruals, not just cash.
+            cash_float = (cash_by_pod_dict or {}).get(pod_dict["pod_id_str"])
+            if client_dict.get("is_demo") and close_dict.get("cash_date_str") == close_str:
+                cash_float = close_dict.get("cash_float")
+            if cash_float is None:
+                result_dict["reason_str"] = f"Holdings on {_short_day_str(close_str)} lack verified same-day cash."
         # 2. The saved IBKR portfolio, only when its end-of-day capture is this close.
         elif not client_dict.get("is_demo") and client_dict.get("operations_source") == "local" and hasattr(provider_obj, "get_target_for_pod"):
             target_obj = provider_obj.get_target_for_pod(pod_dict["pod_id_str"])
@@ -430,8 +436,12 @@ def _pod_holdings_dict(pod_dict, *, client_dict, snapshot_obj, provider_obj, as_
     total_float = sum(value_float for _, value_float in position_list) + cash_float
     if not math.isfinite(total_float) or total_float <= 0:
         return result_dict
+    total_decimal = sum((Decimal(str(value_float)) for _, value_float in position_list), Decimal(str(cash_float)))
+    if abs(total_decimal - nav_row_list[0].closing_nav_decimal) > Decimal(".01"):
+        result_dict["reason_str"] = f"Holdings on {_short_day_str(close_str)} do not reconcile to account NAV."
+        return result_dict
     result_dict.update(available_bool=True, reason_str="", position_list=sorted(position_list, key=lambda pair_tuple: -pair_tuple[1]),
-        cash_float=cash_float, total_float=total_float)
+        cash_float=cash_float, total_float=float(nav_row_list[0].closing_nav_decimal))
     return result_dict
 
 
@@ -453,10 +463,10 @@ def _program_holding_dict(program_name_str, pod_list, holdings_by_pod_dict):
             value_by_class_dict[class_str] = value_by_class_dict.get(class_str, 0.) + value_float
             symbol_by_class_dict.setdefault(class_str, []).append(symbol_str)
         value_by_class_dict["Cash"] = value_by_class_dict.get("Cash", 0.) + holdings_dict["cash_float"]
-    # A short is never netted inside its class; borrowing beyond a fee debit has no donut either.
+    # A short or negative cash is never hidden by netting it inside a class.
     if (any(value_float < 0 for pod_dict in active_list for _, value_float in holdings_by_pod_dict[pod_dict["pod_id_str"]]["position_list"])
-            or value_by_class_dict["Cash"] < -CASH_DEBIT_TOLERANCE_FLOAT * total_float):
-        result_dict["reason_str"] = "Holdings include borrowing or short positions. Page 2 lists them."
+            or any(holdings_by_pod_dict[pod_dict["pod_id_str"]]["cash_float"] < 0 for pod_dict in active_list)):
+        result_dict["reason_str"] = "Holdings include borrowing or short positions. Details lists them."
         return result_dict
     item_list = []
     for class_str, color_str in ASSET_CLASS_TUPLE:
@@ -500,7 +510,7 @@ def _pod_holding_table_dict(pod_dict, color_str, holdings_dict):
     return result_dict
 
 
-def _flow_dict(account_list, snapshot_obj, pod_list, *, from_str, to_str, put_in_float):
+def _flow_dict(account_list, snapshot_obj, pod_list, *, from_str, to_str, put_in_float, display_from_str=None):
     """Page 2: each Pod's value at its start, then every deposit, withdrawal and move.
 
     Rows sum to the money put in (closing value minus gain since start); any gap
@@ -551,18 +561,19 @@ def _flow_dict(account_list, snapshot_obj, pod_list, *, from_str, to_str, put_in
     row_list = []
     for (date_str, kind_int), cell_list in event_list:
         total_decimal = sum(cell_list, Decimal(0))
-        kind_str = ("Start value", "Deposit" if total_decimal > 0 else "Withdrawal" if total_decimal < 0 else "Between pods",
+        kind_str = ("Opening capital", "Net inflow" if total_decimal > 0 else "Net outflow" if total_decimal < 0 else "Offsetting movements",
             "Broker adjustment", "Pod closed, money out")[kind_int]
-        row_list.append({"date_str": f"{_short_day_str(date_str)}, {date_str[:4]}", "kind_str": kind_str, "cell_list": cell_list})
+        if display_from_str is None or date_str >= display_from_str:
+            row_list.append({"date_str": f"{_short_day_str(date_str)}, {date_str[:4]}", "kind_str": kind_str, "cell_list": cell_list})
     if len(row_list) > FLOW_ROW_LIMIT_INT:
         early_list, row_list = row_list[:len(row_list) - FLOW_ROW_LIMIT_INT + 1], row_list[len(row_list) - FLOW_ROW_LIMIT_INT + 1:]
         row_list.insert(0, {"date_str": "Before " + row_list[0]["date_str"], "kind_str": "Earlier, net",
             "cell_list": [sum((row_dict["cell_list"][index_int] for row_dict in early_list), Decimal(0)) for index_int in range(len(pod_list))]})
     for row_dict in row_list:
         total_decimal = sum(row_dict["cell_list"], Decimal(0))
-        row_dict.update(total_str=_money_str(total_decimal, signed_bool=row_dict["kind_str"] != "Start value"),
+        row_dict.update(total_str=_money_str(total_decimal, signed_bool=row_dict["kind_str"] != "Opening capital", cents_bool=True),
             total_tone_str=_money_tone_str(total_decimal),
-            cell_list=[{"value_str": _money_str(cell_decimal, signed_bool=row_dict["kind_str"] != "Start value") if cell_decimal else "",
+            cell_list=[{"value_str": _money_str(cell_decimal, signed_bool=row_dict["kind_str"] != "Opening capital", cents_bool=True) if cell_decimal else "",
                 "tone_str": _money_tone_str(cell_decimal)} for cell_decimal in row_dict["cell_list"]])
     result_dict.update(row_list=row_list, reason_str="", pod_total_list=[_money_str(total_decimal) for total_decimal in total_list],
         total_str=_money_str(sum(total_list, Decimal(0))))
@@ -588,10 +599,11 @@ def _activity_list(account_list, snapshot_obj, *, from_str, to_str):
     if commission_decimal is not None:
         result_list.append({"label_str": "Commissions", "value_str": _money_str(-commission_decimal, cents_bool=True)})
     if dividend_decimal is not None:
-        result_list.append({"label_str": "Dividends" if not tax_decimal else "Dividends, after tax",
-            "value_str": _money_str(dividend_decimal + (tax_decimal or 0), cents_bool=True)})
+        result_list.append({"label_str": "Dividends paid", "value_str": _money_str(dividend_decimal, cents_bool=True)})
+    if tax_decimal:
+        result_list.append({"label_str": "Tax withheld", "value_str": _money_str(-tax_decimal, cents_bool=True)})
     if interest_decimal is not None:
-        result_list.append({"label_str": "Interest", "value_str": _money_str(interest_decimal, cents_bool=True)})
+        result_list.append({"label_str": "Interest posted", "value_str": _money_str(interest_decimal, cents_bool=True)})
     if capital_decimal is not None:
         result_list.append({"label_str": "Added or withdrawn", "value_str": _money_str(capital_decimal, signed_bool=True)})
     return result_list if row_list else []
@@ -633,15 +645,23 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
         return result_dict
     strategy_view_dict = strategy_workspace_dict(workspace_dict)
     account_list = strategy_view_dict["client_dict"]["accounts"]
-    if not account_list:
-        result_dict["error_str"] = "No strategy Pod has saved performance yet."
+    if not workspace_dict["client_dict"]["accounts"]:
+        result_dict["error_str"] = "No account has saved performance yet."
         return result_dict
-    start_str = strategy_view_dict["client_dict"]["mandate_start_date"]
+    start_str = min(account_dict["effective_from"] for account_dict in workspace_dict["client_dict"]["accounts"])
     try:
-        # The Pods' own finalized close, as on the Performance page; Other accounts never hold the month back.
-        client_dict, _, valuation_list = report_scope_tuple(strategy_view_dict, snapshot_obj, as_of_ts=as_of_ts)
-        latest_str = financial_dates_dict(client_dict, snapshot_obj, as_of_ts=as_of_ts,
-            valuation_account_list=valuation_list)["latest_complete_str"] or ""
+        client_dict, _, valuation_list = report_scope_tuple(workspace_dict, snapshot_obj, as_of_ts=as_of_ts)
+        horizon_account_list = client_dict["accounts"] if valuation_list is None else valuation_list
+        today_str = as_of_ts.astimezone(MARKET_TIMEZONE_OBJ).date().isoformat()
+        # *** CRITICAL *** D+1 source horizon, not a last-complete-day fallback.
+        # Any owned account (including VAULT) can establish the requested date;
+        # the canonical report must still prove every active account on every day.
+        latest_str = max((row_obj.market_date_str for row_obj in snapshot_obj.row_tuple
+            if row_obj.market_date_str < today_str and any(
+                account_dict["account_route"] == row_obj.account_route_str
+                and account_dict.get("effective_from", start_str) <= row_obj.market_date_str
+                <= (account_dict.get("effective_to") or "9999-12-31")
+                for account_dict in horizon_account_list)), default="")
     except (ClientReportingError, ValueError, TypeError, KeyError, AttributeError):
         latest_str = ""
     if latest_str < start_str:
@@ -659,7 +679,7 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
     from_str, to_str = max(month_first_str, start_str), min(month_last_str, latest_str)
     month_obj = date.fromisoformat(month_first_str)
     holder_name_str = "" if workspace_dict["client_dict"].get("is_demo") else load_holder_name_str(
-        database_path_str, {account_dict["account_route"] for account_dict in account_list},
+        database_path_str, {account_dict["account_route"] for account_dict in workspace_dict["client_dict"]["accounts"]},
         query_name_str=workspace_dict["client_dict"]["query_name"])
     result_dict.update(month_str=month_str, month_label_str=month_obj.strftime("%B %Y"),
         client_name_str=holder_name_str or result_dict["client_name_str"],
@@ -675,53 +695,66 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
         result_dict["error_str"] = "Saved financial data could not be verified for this month."
         return result_dict
     month_report_dict, since_report_dict = month_page_dict["report_dict"], since_page_dict["report_dict"]
-    pod_source_dict = since_report_dict or month_report_dict
-    if pod_source_dict is None:
+    # Client ownership can begin in VAULT before any strategy is measured. Keep
+    # that earlier client history, but never extend a Pod's measured start back.
+    strategy_start_str = min((account_dict["effective_from"] for account_dict in account_list), default=to_str)
+    if account_list and start_str < strategy_start_str <= to_str:
+        strategy_page_dict = build_performance_page_dict(strategy_view_dict, snapshot_obj, as_of_ts=as_of_ts,
+            from_date_str=strategy_start_str, to_date_str=to_str, level_str="pods",
+            transfer_scope_client_dict=workspace_dict["client_dict"])
+        since_report_dict = strategy_page_dict["report_dict"]
+        if from_str <= strategy_start_str:
+            month_report_dict = since_report_dict
+    client_report_dict = month_page_dict.get("client_report_dict") or {}
+    client_since_dict = since_page_dict.get("client_report_dict") or {}
+    if not (since_report_dict or month_report_dict or client_since_dict or client_report_dict):
         result_dict["error_str"] = month_page_dict["error_str"] or "Saved financial data could not be verified for this month."
         return result_dict
-    close_str = pod_source_dict["closing_date_str"] or to_str
+    pod_source_dict = since_report_dict or month_report_dict or {"strategy_list": []}
     # Partial results stay visible as "—"; the page is then a marked draft.
     month_report_dict = month_report_dict or {}
     since_report_dict = since_report_dict or {}
-    client_report_dict = month_page_dict.get("client_report_dict") or {}
-    reserve_bool = client_report_dict is not month_page_dict["report_dict"] and any(account_dict.get("role") == "reserve"
-        and account_dict["effective_from"] <= close_str <= (account_dict.get("effective_to") or "9999-12-31")
+    reserve_bool = any(account_dict.get("role") == "reserve"
+        and account_dict["effective_from"] <= to_str and (account_dict.get("effective_to") or "9999-12-31") >= start_str
         for account_dict in workspace_dict["client_dict"]["accounts"])
+    summary_month_dict = client_report_dict if reserve_bool else month_report_dict
+    summary_since_dict = client_since_dict if reserve_bool else since_report_dict
+    close_str = summary_month_dict.get("closing_date_str") or summary_since_dict.get("closing_date_str") or to_str
     month_suffix_str = "" if complete_bool else f" · to {_short_day_str(close_str)}"
     result_dict.update(available_bool=True, period_label_str=result_dict["month_label_str"] + month_suffix_str,
         month_name_str=calendar.month_name[month_obj.month] + month_suffix_str)
 
-    # Your money: programs at the close, the month, since start; other accounts apart.
-    # Derived lines use the shown whole dollars, so the printed figures add up.
-    closing_float = since_report_dict.get("closing_nav_float", month_report_dict.get("closing_nav_float"))
-    since_pnl_float = since_report_dict.get("pnl_float")
+    # *** CRITICAL *** headline NAV, P&L and TWR share the full client boundary,
+    # including VAULT. USD-base broker NAV already translates non-USD assets.
+    # Do not translate it twice or label FX gains as deposits/strategy alpha.
+    closing_float = summary_since_dict.get("closing_nav_float", summary_month_dict.get("closing_nav_float"))
+    since_pnl_float = summary_since_dict.get("pnl_float")
     put_in_float = closing_float - since_pnl_float if closing_float is not None and since_pnl_float is not None else None
     put_in_decimal = (_rounded_decimal(closing_float, "1") - _rounded_decimal(since_pnl_float, "1")
         if put_in_float is not None else None)
     money_row_list = [
-        {"class_str": "lead", "label_str": ("Programs, " if reserve_bool else "Value on ") + _long_day_str(close_str),
+        {"class_str": "lead", "label_str": "Value on " + _long_day_str(close_str),
             "value_str": _money_str(closing_float), "tone_str": "", "pct_str": "", "pct_tone_str": ""},
-        {"class_str": "", "label_str": "Change in " + calendar.month_name[month_obj.month],
-            "value_str": _money_str(month_report_dict.get("pnl_float"), signed_bool=True), "tone_str": _money_tone_str(month_report_dict.get("pnl_float")),
-            "pct_str": _percent_str(month_report_dict.get("twr_float")), "pct_tone_str": _percent_tone_str(month_report_dict.get("twr_float"))},
+        {"class_str": "", "label_str": "Investment gain/loss · " + calendar.month_name[month_obj.month],
+            "value_str": _money_str(summary_month_dict.get("pnl_float"), signed_bool=True), "tone_str": _money_tone_str(summary_month_dict.get("pnl_float")),
+            "pct_str": _percent_str(summary_month_dict.get("twr_float")), "pct_tone_str": _percent_tone_str(summary_month_dict.get("twr_float"))},
         {"class_str": "", "label_str": "Gain since start", "value_str": _money_str(since_pnl_float, signed_bool=True),
-            "tone_str": _money_tone_str(since_pnl_float), "pct_str": _percent_str(since_report_dict.get("twr_float")),
-            "pct_tone_str": _percent_tone_str(since_report_dict.get("twr_float"))},
-        {"class_str": "", "label_str": "Money you put in, net", "value_str": _money_str(put_in_decimal), "tone_str": "",
+            "tone_str": _money_tone_str(since_pnl_float), "pct_str": _percent_str(summary_since_dict.get("twr_float")),
+            "pct_tone_str": _percent_tone_str(summary_since_dict.get("twr_float"))},
+        {"class_str": "", "label_str": "Opening capital + net movements", "value_str": _money_str(put_in_decimal), "tone_str": "",
             "pct_str": "", "pct_tone_str": ""},
     ]
-    if reserve_bool:
-        total_float = client_report_dict.get("closing_nav_float")
-        reserve_decimal = (_rounded_decimal(total_float, "1") - _rounded_decimal(closing_float, "1")
-            if total_float is not None and closing_float is not None else None)
-        money_row_list += [{"class_str": "gap", "label_str": "Other accounts", "value_str": _money_str(reserve_decimal),
-                "tone_str": "", "pct_str": "", "pct_tone_str": ""},
-            {"class_str": "total", "label_str": "Total, all accounts", "value_str": _money_str(total_float),
-                "tone_str": "", "pct_str": "", "pct_tone_str": ""}]
     result_dict["money_row_list"] = money_row_list
+    result_dict["summary_scope_str"] = "All your accounts · USD" if reserve_bool else "Your portfolio · USD"
+    result_dict["bridge_row_list"] = [{"label_str": label_str, "value_str": _money_str(summary_month_dict.get(field_str), signed_bool=signed_bool, cents_bool=True)}
+        for label_str, field_str, signed_bool in (("Opening value", "opening_nav_float", False),
+            ("Net capital movements", "capital_movement_float", True), ("Investment gain/loss", "pnl_float", True),
+            ("Closing value", "closing_nav_float", False))]
+    for label_str, field_str in (("Accounts entering/leaving", "scope_movement_float"), ("Broker adjustments", "linking_adjustment_float")):
+        if summary_month_dict.get(field_str):
+            result_dict["bridge_row_list"].insert(-1, {"label_str": label_str, "value_str": _money_str(summary_month_dict[field_str], signed_bool=True, cents_bool=True)})
 
-    # Programs: colour = program, shade = active Pod (account order). A program
-    # with no Pod at this close has no card; its history stays in the flows table.
+    # Programs retain their historical identity even after the last Pod closes.
     # Pod numbers follow the first measured day (then account order, as on Performance), so a Pod keeps
     # its number when others are added or retired.
     pod_number_dict = {pod_id_str: index_int + 1 for index_int, pod_id_str in enumerate(dict.fromkeys(account_dict["pod_id"]
@@ -739,8 +772,7 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
     def program_name_str(pod_dict):
         return display_by_key_dict[(program_by_pod_dict.get(pod_dict["pod_id_str"]) or DEFAULT_PROGRAM_STR).casefold()]
 
-    program_name_list = list(dict.fromkeys(program_name_str(pod_dict) for pod_dict in pod_list if pod_dict["active_bool"])) or [
-        program_name_str(pod_dict) for pod_dict in pod_list][:1]
+    program_name_list = list(dict.fromkeys(program_name_str(pod_dict) for pod_dict in pod_list))
     family_index_dict, free_list = {}, [index_int for index_int in range(len(PROGRAM_FAMILY_TUPLE))
         if index_int not in {PROGRAM_FAMILY_INDEX_DICT.get(name_str) for name_str in program_name_list}]
     for program_index_int, name_str in enumerate(program_name_list):
@@ -754,26 +786,41 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
         for index_int, pod_dict in enumerate(active_member_list):
             pod_color_dict[pod_dict["pod_id_str"]] = family_tuple[min(index_int, len(family_tuple) - 1)]
     single_bool = len(program_name_list) == 1
+    try:
+        operations_dict = build_client_operations_dict(workspace_dict["client_dict"], workspace_dict.get("summary_dict", {}),
+            as_of_ts=as_of_ts, local_account_list=workspace_dict.get("operations_account_list"))
+        cash_list = load_portfolio_cash_list(workspace_dict["client_dict"], pod_source_dict, provider_obj, operations_dict, as_of_ts=as_of_ts)
+    except (ValueError, TypeError, KeyError, AttributeError):
+        cash_list = []
+    cash_by_pod_dict = {row_dict["pod_id_str"]: row_dict["cash_float"] for row_dict in cash_list
+        if row_dict["market_date_str"] == close_str and isinstance(row_dict.get("cash_float"), (int, float))
+        and math.isfinite(row_dict["cash_float"])}
     holdings_by_pod_dict = {pod_dict["pod_id_str"]: _pod_holdings_dict(pod_dict, client_dict=workspace_dict["client_dict"],
-        snapshot_obj=snapshot_obj, provider_obj=provider_obj, as_of_ts=as_of_ts, database_path_str=database_path_str)
+        snapshot_obj=snapshot_obj, provider_obj=provider_obj, as_of_ts=as_of_ts, database_path_str=database_path_str,
+        cash_by_pod_dict=cash_by_pod_dict)
         if pod_dict["active_bool"] else {"available_bool": False, "reason_str": ""} for pod_dict in pod_list}
-    active_total_float = sum(pod_dict["closing_float"] for pod_dict in pod_list if pod_dict["active_bool"] and pod_dict["closing_float"])
+    active_total_float = closing_float or 0.
     month_list = _month_column_list(start_str, month_str)
     program_list, group_list, split_item_list, month_row_list, program_status_list = [], [], [], [], []
+    program_evidence_dict = {}
     for name_str in program_name_list:
-        # One program reports the whole strategy book, so it owns every Pod (retired ones too).
-        member_list = pod_list if single_bool else [pod_dict for pod_dict in pod_list if program_name_str(pod_dict) == name_str]
+        member_list = [pod_dict for pod_dict in pod_list if program_name_str(pod_dict) == name_str]
+        closed_bool = not any(pod_dict["active_bool"] for pod_dict in member_list)
+        program_to_str = min(to_str, max(pod_dict["close_str"] for pod_dict in member_list)) if closed_bool else to_str
         color_str = PROGRAM_FAMILY_TUPLE[family_index_dict[name_str]][0]
-        if single_bool:
+        if single_bool and not closed_bool:
             program_report_dict = since_report_dict
         else:
             program_page_dict = build_performance_page_dict(_program_workspace_dict(workspace_dict, {pod_dict["pod_id_str"] for pod_dict in member_list}),
-                snapshot_obj, as_of_ts=as_of_ts, from_date_str=min(pod_dict["from_str"] for pod_dict in member_list), to_date_str=to_str, level_str="pods")
+                snapshot_obj, as_of_ts=as_of_ts, from_date_str=min(pod_dict["from_str"] for pod_dict in member_list), to_date_str=program_to_str,
+                level_str="pods", transfer_scope_client_dict=workspace_dict["client_dict"])
             program_report_dict = program_page_dict["report_dict"] or {}
-            program_status_list.append(program_report_dict.get("status_str"))
+        program_status_list.append(program_report_dict.get("status_str"))
         path_list, daily_list = _return_series_tuple(program_report_dict) if program_report_dict else ([], [])
+        program_evidence_dict[name_str] = {"report_hash_str": program_report_dict.get("report_hash_str"),
+            "transfer_scope_dict": program_report_dict.get("transfer_scope_dict")}
         program_start_str = min(pod_dict["from_str"] for pod_dict in member_list)
-        program_value_float = program_report_dict.get("closing_nav_float")
+        program_value_float = 0. if closed_bool else program_report_dict.get("closing_nav_float")
         month_return_float = _linked_return_float(daily_list, from_str, to_str)
         month_pnl_float = _window_pnl_float(daily_list, from_str, to_str)
         since_float = program_report_dict.get("twr_float")
@@ -787,11 +834,12 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
         table_list = [_pod_holding_table_dict(pod_dict, pod_color_dict[pod_dict["pod_id_str"]], holdings_by_pod_dict[pod_dict["pod_id_str"]])
             for pod_dict in member_list if pod_dict["active_bool"]]
         program_list.append({"name_str": name_str, "color_str": color_str,
-            "since_str": "since " + date.fromisoformat(program_start_str).strftime("%b %Y"),
+            "since_str": "from " + program_start_str + (" · closed " + program_to_str if closed_bool else ""),
+            "closed_bool": closed_bool,
             "value_str": _money_str(program_value_float),
             "change_str": _money_str(month_pnl_float, signed_bool=True) + " this month", "change_tone_str": _money_tone_str(month_pnl_float),
             "stat_list": stat_list, "chart_dict": _chart_dict(path_list, single_bool=single_bool, wide_bool=not holding_dict["available_bool"]),
-            # Paper shows only Pods with saved holdings; the reason for a gap stays on screen.
+            # Print only evidenced holdings; missing-data reasons also print below.
             "holding_dict": holding_dict, "pod_holding_list": [table_dict for table_dict in table_list if table_dict["row_list"]]})
         share_list = [(pod_dict, pod_dict["closing_float"] / active_total_float) for pod_dict in member_list
             if pod_dict["active_bool"] and pod_dict["closing_float"] and active_total_float > 0]
@@ -806,9 +854,21 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
         month_row_list += [_month_row_dict("pod", pod_dict["name_str"], pod_dict["month_return_dict"],
                 pod_dict["twr_float"] if since_report_dict else None, month_list)
             for pod_dict in member_list if any(month_str in pod_dict["month_return_dict"] for month_str in month_list)]
-    flow_dict = _flow_dict(account_list, snapshot_obj, pod_list, from_str=start_str, to_str=to_str, put_in_float=put_in_float)
-    if flow_dict["row_list"]:
-        flow_dict["total_str"] = _money_str(put_in_decimal)
+    # This is the strategy-capital ledger, separate from the all-account summary.
+    strategy_put_in_float = (since_report_dict["closing_nav_float"] - since_report_dict["pnl_float"]
+        if since_report_dict.get("closing_nav_float") is not None and since_report_dict.get("pnl_float") is not None else None)
+    flow_dict = (_flow_dict(account_list, snapshot_obj, pod_list, from_str=start_str, to_str=to_str,
+        put_in_float=strategy_put_in_float, display_from_str=from_str) if account_list else result_dict["flow_dict"])
+    other_account_list = [row_dict for row_dict in client_report_dict.get("financial_account_list", [])
+        if row_dict["account_role_str"] == "reserve" and row_dict["to_date_str"] == close_str]
+    result_dict["other_account_list"] = [{"name_str": row_dict["display_name_str"],
+        "value_str": _money_str(row_dict["closing_nav_float"]), "pnl_str": _money_str(row_dict["pnl_float"], signed_bool=True),
+        "return_str": _percent_str(row_dict["twr_float"])} for row_dict in other_account_list]
+    for row_dict in other_account_list:
+        if row_dict["closing_nav_float"] is not None and row_dict["closing_nav_float"] > 0 and active_total_float > 0:
+            share_float = row_dict["closing_nav_float"] / active_total_float
+            group_list.append({"name_str": row_dict["display_name_str"], "pct_str": _percent_str(share_float, signed_bool=False), "pod_list": []})
+            split_item_list.append((share_float, "#7D8796", row_dict["display_name_str"], ""))
     result_dict.update(single_program_bool=single_bool, program_list=program_list,
         # The Programs panel lists every Pod in the report with its current program ("" = Portfolio).
         pod_choice_list=[{"pod_id_str": pod_dict["pod_id_str"], "name_str": pod_dict["name_str"],
@@ -820,27 +880,27 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
         month_table_dict={"row_list": month_row_list, "label_list": [
             date.fromisoformat(value_str + "-01").strftime("%b") + (" ’" + value_str[2:4] if len({item_str[:4] for item_str in month_list}) > 1
                 and (index_int == 0 or value_str.endswith("-01")) else "") for index_int, value_str in enumerate(month_list)]},
-        flow_dict=flow_dict, activity_list=_activity_list(account_list, snapshot_obj, from_str=from_str, to_str=to_str))
+        flow_dict=flow_dict, activity_list=_activity_list(workspace_dict["client_dict"]["accounts"], snapshot_obj, from_str=from_str, to_str=to_str))
 
     # Draft: the badge prints a short reason; the screen bar adds the detail.
     detail_str = ""
     if not complete_bool:
         draft_reason_str = ("Final month-end statement not saved yet" if option_dict["sessions_done_bool"]
             else f"Month in progress, through {_short_day_str(close_str)}")
-    elif month_report_dict.get("status_str") != "ready":
-        draft_reason_str, detail_str = "Month data incomplete", next(iter(month_report_dict.get("issue_list") or []), "")
-    elif since_report_dict.get("twr_float") is None:
-        draft_reason_str, detail_str = "Return since start unavailable", since_report_dict.get("twr_reason_str") or next(
-            iter(since_report_dict.get("issue_list") or []), "")
-    elif since_report_dict.get("status_str") != "ready":
-        draft_reason_str, detail_str = "Data since start incomplete", next(iter(since_report_dict.get("issue_list") or []), "")
-    elif reserve_bool and client_report_dict.get("status_str") != "ready":
-        draft_reason_str, detail_str = "Other account data incomplete", next(iter(client_report_dict.get("issue_list") or []), "")
+    elif summary_month_dict.get("status_str") != "ready":
+        draft_reason_str, detail_str = "Month data incomplete", next(iter(summary_month_dict.get("issue_list") or []), "")
+    elif summary_since_dict.get("twr_float") is None:
+        draft_reason_str, detail_str = "Return since start unavailable", summary_since_dict.get("twr_reason_str") or next(
+            iter(summary_since_dict.get("issue_list") or []), "")
+    elif summary_since_dict.get("status_str") != "ready":
+        draft_reason_str, detail_str = "Data since start incomplete", next(iter(summary_since_dict.get("issue_list") or []), "")
     elif any(status_str != "ready" for status_str in program_status_list):
         draft_reason_str = "Program data incomplete"
+    elif flow_dict["reason_str"]:
+        draft_reason_str = "Capital movements do not reconcile"
     else:
         draft_reason_str = ""
-    # Screen-only notes: why the page is a draft and why a section is missing from the printed pages.
+    # The screen and issued copy both retain draft and missing-data explanations.
     note_list = [f"Draft · {draft_reason_str}"] if draft_reason_str else []
     note_list += [detail_str] if detail_str else []
     note_list += list(dict.fromkeys(program_dict["holding_dict"]["reason_str"] for program_dict in program_list
@@ -848,4 +908,25 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
     if flow_dict["reason_str"]:
         note_list.append(flow_dict["reason_str"])
     result_dict.update(draft_bool=bool(draft_reason_str), draft_reason_str=draft_reason_str, status_note_str=" · ".join(note_list))
+    result_dict["note_list"] = note_list
+    result_dict["is_demo_bool"] = workspace_dict["client_dict"].get("is_demo") is True
+    result_dict["method_note_str"] = ("Amounts in USD. Portfolio/program TWR is calculated from daily NAV with end-of-day capital flows; "
+        "it is not official consolidated IBKR or exact intraday TWR. Pod and other-account rows use IBKR account TWR. "
+        "Dollar gains include recorded costs, income and FX; they are not TWR multiplied by net contributions. "
+        "Opening capital is the value at the start of measurement, not lifetime deposits. "
+        "Initial/final months may be partial; each program's measurement dates are shown. "
+        "Posted income/costs are already included in investment gains, together with accrual changes.")
+    result_dict["scope_note_str"] = ("Your total includes other accounts such as VAULT. Programs exclude them. "
+        "Non-USD holdings are included at IBKR's USD valuation; FX changes can affect the total even without trades."
+        if reserve_bool else "All values cover the measured portfolio and its capital movements.")
+    result_dict["fee_note_str"] = str(workspace_dict["client_dict"].get("fee_basis") or "Recorded broker costs are included.")
+    result_dict["generated_at_str"] = as_of_ts.isoformat()
+    result_dict["evidence_dict"] = {"month_report_hash_str": summary_month_dict.get("report_hash_str"),
+        "since_report_hash_str": summary_since_dict.get("report_hash_str"), "program_by_pod_dict": program_by_pod_dict,
+        "source_checksum_list": sorted({source_dict["checksum_str"] for source_dict in summary_since_dict.get("source_list", [])}),
+        "method_version_str": summary_since_dict.get("method_version_str"), "renderer_version_str": "monthly_report_v2",
+        "program_evidence_dict": program_evidence_dict}
+    # Bind save/print to all displayed values, warnings and provenance, not just NAV.
+    result_dict["report_id_str"] = content_hash_str({key_str: value_obj for key_str, value_obj in result_dict.items()
+        if key_str != "generated_at_str"})[:16]
     return result_dict

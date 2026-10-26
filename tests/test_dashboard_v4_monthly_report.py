@@ -111,11 +111,11 @@ def test_month_and_since_start_match_the_performance_page(demo_tuple):
     assert report_dict["available_bool"] and not report_dict["draft_bool"]
     assert _money_value_dict(report_dict) == {
         "Value on August 31": (_money_str(since_dict["closing_nav_float"]), ""),
-        "Change in August": (_money_str(month_dict["pnl_float"], signed_bool=True), _percent_str(month_dict["twr_float"])),
+        "Investment gain/loss · August": (_money_str(month_dict["pnl_float"], signed_bool=True), _percent_str(month_dict["twr_float"])),
         "Gain since start": (_money_str(since_dict["pnl_float"], signed_bool=True), _percent_str(since_dict["twr_float"])),
-        "Money you put in, net": (_money_str(since_dict["closing_nav_float"] - since_dict["pnl_float"]), ""),
+        "Opening capital + net movements": (_money_str(since_dict["closing_nav_float"] - since_dict["pnl_float"]), ""),
     }
-    assert _money_value_dict(report_dict)["Change in August"] == ("+$1,090", "+1.1%")
+    assert _money_value_dict(report_dict)["Investment gain/loss · August"] == ("+$1,090", "+1.1%")
     # The months row links the same daily returns as the Performance grid.
     grid_dict = build_performance_page_dict(workspace_dict, snapshot_obj, as_of_ts=DEMO_NOW_TS, from_date_str="2026-06-01",
         to_date_str="2026-08-31")["monthly_row_list"][0]["cell_list"]
@@ -151,7 +151,7 @@ def test_route_is_read_only_validates_the_month_and_renders_both_pages(demo_tupl
     response_obj = client_obj.get("/monthly-report?month=2026-08")
     text_str = _visible_text_str(response_obj.get_data(as_text=True))
     for expected_str in ("Monthly report", "Value on August 31", "+$1,090", "+1.1%", "Gain since start", "Holdings",
-            "Returns by month, %", "Details", "Money in and out, since start", "Money you put in, net", "Page 1 of 2", "Page 2 of 2"):
+            "TWR by month, %", "Details", "Opening capital + net movements", "August 2026 · Summary", "August 2026 · Details", "About these numbers"):
         assert expected_str in text_str
     assert "Draft" not in text_str
     assert response_obj.headers["Content-Security-Policy"].startswith("default-src 'self'")
@@ -217,9 +217,8 @@ def test_flows_add_up_to_money_put_in_and_withhold_any_gap(demo_tuple):
     workspace_dict, snapshot_obj, provider_obj = demo_tuple
     report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=DEMO_NOW_TS, month_str="2026-08")
     flow_dict = report_dict["flow_dict"]
-    assert [(row_dict["date_str"], row_dict["kind_str"], row_dict["total_str"]) for row_dict in flow_dict["row_list"]] == [
-        ("Jun 1, 2026", "Start value", "$90,000"), ("Jul 15, 2026", "Deposit", "+$2,000")]
-    assert flow_dict["total_str"] == _money_value_dict(report_dict)["Money you put in, net"][0] == "$92,000"
+    assert flow_dict["row_list"] == []  # No August capital movements; prior months are not repeated.
+    assert flow_dict["total_str"] == _money_value_dict(report_dict)["Opening capital + net movements"][0] == "$92,000"
     account_list = [account_dict for account_dict in workspace_dict["client_dict"]["accounts"]]
     pod_list = [{"pod_id_str": account_dict["pod_id"], "name_str": account_dict["display_name"]} for account_dict in account_list]
     wrong_dict = _flow_dict(account_list, snapshot_obj, pod_list, from_str="2026-06-01", to_str="2026-08-31", put_in_float=92100.)
@@ -233,19 +232,20 @@ def test_other_accounts_stay_apart_from_programs_and_activity_reads_the_month(tm
         from_date_str="2026-08-03", to_date_str="2026-08-31")
     assert not report_dict["draft_bool"], report_dict["draft_reason_str"]
     value_dict = _money_value_dict(report_dict)
-    assert value_dict["Programs, August 31"][0] == _money_str(page_dict["report_dict"]["closing_nav_float"])
-    assert value_dict["Total, all accounts"][0] == _money_str(page_dict["client_report_dict"]["closing_nav_float"])
-    assert value_dict["Other accounts"][0] == "$50,100"
+    assert value_dict["Value on August 31"][0] == _money_str(page_dict["client_report_dict"]["closing_nav_float"])
+    assert report_dict["program_list"][0]["value_str"] == _money_str(page_dict["report_dict"]["closing_nav_float"])
+    assert report_dict["other_account_list"][0]["value_str"] == "$50,100"
     # The vault's gain is client money, not program profit.
-    assert value_dict["Gain since start"][0] == _money_str(page_dict["report_dict"]["pnl_float"], signed_bool=True)
-    assert [row_dict["kind_str"] for row_dict in report_dict["flow_dict"]["row_list"]] == ["Start value", "Deposit", "Between pods"]
+    assert value_dict["Gain since start"][0] == _money_str(page_dict["client_report_dict"]["pnl_float"], signed_bool=True)
+    assert [row_dict["kind_str"] for row_dict in report_dict["flow_dict"]["row_list"]] == ["Opening capital", "Net inflow", "Offsetting movements"]
     assert report_dict["flow_dict"]["pod_total_list"] == ["$20,500", "$10,500"] and report_dict["flow_dict"]["total_str"] == "$31,000"
     assert report_dict["activity_list"] == [{"label_str": "Commissions", "value_str": "$1.25"},
-        {"label_str": "Dividends, after tax", "value_str": "$7.50"}, {"label_str": "Interest", "value_str": "$0.30"},
+        {"label_str": "Dividends paid", "value_str": "$10.00"}, {"label_str": "Tax withheld", "value_str": "$2.50"},
+        {"label_str": "Interest posted", "value_str": "$0.30"},
         {"label_str": "Added or withdrawn", "value_str": "+$1,000"}]
     # Production client names come from the account holder; a technical configured id is never a title.
     assert report_dict["client_name_str"] == ""
-    # No saved holdings: the paper leaves the section out and the chart takes the card; the reason stays on screen.
+    # Missing optional holdings remain absent, with their reason also on the printed page.
     program_dict = report_dict["program_list"][0]
     assert program_dict["holding_dict"]["reason_str"] == "Holdings on Aug 31 were not saved."
     assert program_dict["pod_holding_list"] == [] and program_dict["chart_dict"]["width_int"] == 644
@@ -255,7 +255,7 @@ def test_other_accounts_stay_apart_from_programs_and_activity_reads_the_month(tm
     html_str = app_obj.test_client().get("/monthly-report?month=2026-08").get_data(as_text=True)
     page_str = html_str[html_str.index('<main class="mr-pages">'):]
     assert '<h1 class="h1">August 2026</h1>' in page_str and "sample_user" not in html_str
-    assert "not saved" not in page_str and "Holdings" not in _visible_text_str(page_str)
+    assert "Holdings on Aug 31 were not saved." in page_str
     assert "Holdings on Aug 31 were not saved." in html_str[:html_str.index('<main class="mr-pages">')]
 
 
@@ -270,8 +270,10 @@ def test_saved_portfolio_counts_only_when_captured_after_that_close(monkeypatch)
         position_list = ([{"symbol_str": "TQQQ", "value_float": 8000.}, {"symbol_str": "GLD", "value_float": 6000.},
             {"symbol_str": "UUP", "value_float": 4000.}] if target_obj.release_obj.pod_id_str == "pod_taa"
             else [{"symbol_str": symbol_str, "value_float": 900.} for symbol_str in ("MU", "CSCO", "FTNT", "WBD", "SNDK", "AMD")])
+        nav_float = float(next(row_obj.closing_nav_decimal for row_obj in snapshot_obj.row_tuple
+            if row_obj.account_route_str == target_obj.release_obj.account_route_str and row_obj.market_date_str == "2026-08-31"))
         return {"available_bool": True, "observed_timestamp_str": observed_dict["timestamp_str"],
-            "position_list": position_list, "cash_float": 2400. if target_obj.release_obj.pod_id_str == "pod_taa" else 5100.}
+            "position_list": position_list, "cash_float": nav_float - sum(row_dict["value_float"] for row_dict in position_list)}
 
     monkeypatch.setattr(monthly_report, "load_close_holdings_dict", lambda *args, **kwargs: {"available_bool": False})
     monkeypatch.setattr(monthly_report, "load_broker_holdings_dict", saved_portfolio_dict)
@@ -279,9 +281,11 @@ def test_saved_portfolio_counts_only_when_captured_after_that_close(monkeypatch)
         month_str="2026-08", database_path_str="unused.sqlite3")
     holding_dict = report_dict["program_list"][0]["holding_dict"]
     assert holding_dict["available_bool"]
-    # Shares of the two Pods' saved value together: 18,000 + 2,400 cash and 5,400 + 5,100 cash.
+    closing_float = sum(float(row_obj.closing_nav_decimal) for row_obj in snapshot_obj.row_tuple
+        if row_obj.account_route_str in {"U100", "U200"} and row_obj.market_date_str == "2026-08-31")
     assert {item_dict["name_str"]: item_dict["pct_str"] for item_dict in holding_dict["legend_list"]} == {
-        "Nasdaq 100": "25.9%", "Stocks": "17.5%", "Gold": "19.4%", "US dollar": "12.9%", "Cash": "24.3%"}
+        name_str: _percent_str(value_float / closing_float, signed_bool=False) for name_str, value_float in
+        (("Nasdaq 100", 8000.), ("Stocks", 5400.), ("Gold", 6000.), ("US dollar", 4000.), ("Cash", closing_float - 23400.))}
     assert {item_dict["name_str"]: item_dict["detail_str"] for item_dict in holding_dict["legend_list"]}["Stocks"] == "6 stocks"
     # A capture from another day, or before the close, never stands in for this month end.
     for timestamp_str in ("2026-09-01T20:10:00+00:00", "2026-08-31T19:30:00+00:00"):
@@ -358,8 +362,12 @@ def _patch_saved_portfolio(monkeypatch, position_by_pod_dict, cash_by_pod_dict):
     """Saved IBKR end-of-day portfolios captured after the Aug 31 close (no Flex closing positions)."""
     def saved_portfolio_dict(target_obj, *, as_of_ts):
         pod_id_str = target_obj.release_obj.pod_id_str
-        return {"available_bool": True, "observed_timestamp_str": "2026-08-31T20:10:00+00:00", "cash_float": cash_by_pod_dict[pod_id_str],
-            "position_list": [{"symbol_str": symbol_str, "value_float": value_float} for symbol_str, value_float in position_by_pod_dict[pod_id_str]]}
+        _, snapshot_obj = _sample_tuple()
+        nav_float = float(next(row_obj.closing_nav_decimal for row_obj in snapshot_obj.row_tuple
+            if row_obj.account_route_str == target_obj.release_obj.account_route_str and row_obj.market_date_str == "2026-08-31"))
+        scale_float = nav_float / (cash_by_pod_dict[pod_id_str] + sum(value_float for _, value_float in position_by_pod_dict[pod_id_str]))
+        return {"available_bool": True, "observed_timestamp_str": "2026-08-31T20:10:00+00:00", "cash_float": cash_by_pod_dict[pod_id_str] * scale_float,
+            "position_list": [{"symbol_str": symbol_str, "value_float": value_float * scale_float} for symbol_str, value_float in position_by_pod_dict[pod_id_str]]}
 
     monkeypatch.setattr(monthly_report, "load_close_holdings_dict", lambda *args, **kwargs: {"available_bool": False})
     monkeypatch.setattr(monthly_report, "load_broker_holdings_dict", saved_portfolio_dict)
@@ -378,16 +386,16 @@ def test_a_month_is_final_only_once_its_last_calendar_day_is_finalized():
         "2025-11", "2025-12", "2026-01", "2026-02"]
 
 
-def test_the_pods_close_sets_the_month_when_other_accounts_lag():
+def test_a_missing_other_account_blocks_finality_without_backdating_the_month():
     workspace_dict, snapshot_obj = _sample_tuple(last_row_dict={"U900": "2026-08-28"})
     report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS)
     page_dict = build_performance_page_dict(workspace_dict, snapshot_obj, as_of_ts=SAMPLE_AS_OF_TS,
         from_date_str="2026-08-03", to_date_str="2026-08-31")
     assert report_dict["month_str"] == "2026-08"
     value_dict = _money_value_dict(report_dict)
-    assert value_dict["Programs, August 31"][0] == _money_str(page_dict["report_dict"]["closing_nav_float"])
-    assert value_dict["Other accounts"][0] == value_dict["Total, all accounts"][0] == "—"
-    assert report_dict["draft_reason_str"] == "Other account data incomplete"
+    assert report_dict["program_list"][0]["value_str"] == _money_str(page_dict["report_dict"]["closing_nav_float"])
+    assert value_dict["Value on August 31"][0] == "—"
+    assert report_dict["draft_reason_str"] == "Month data incomplete"
     assert build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS,
         month_str="2026-09")["draft_reason_str"] == "Month in progress, through Sep 3"
 
@@ -396,7 +404,7 @@ def test_other_account_lines_need_an_other_account_at_the_close():
     workspace_dict, snapshot_obj = _sample_tuple(effective_to_dict={"U900": "2026-08-13"})
     report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-08")
     assert [row_dict["label_str"] for row_dict in report_dict["money_row_list"]] == [
-        "Value on August 31", "Change in August", "Gain since start", "Money you put in, net"]
+        "Value on August 31", "Investment gain/loss · August", "Gain since start", "Opening capital + net movements"]
 
 
 def test_a_retired_pod_keeps_its_history_but_leaves_the_split():
@@ -406,7 +414,7 @@ def test_a_retired_pod_keeps_its_history_but_leaves_the_split():
     assert [row_dict["name_str"] for row_dict in report_dict["month_table_dict"]["row_list"]] == ["Portfolio", "Pod 1 · U···100", "Pod 2 · U···200"]
     flow_dict = report_dict["flow_dict"]
     assert "Pod closed, money out" in [row_dict["kind_str"] for row_dict in flow_dict["row_list"]]
-    assert flow_dict["total_str"] == _money_value_dict(report_dict)["Money you put in, net"][0] != "—"
+    assert flow_dict["total_str"] != "—" and flow_dict["total_str"] != _money_value_dict(report_dict)["Opening capital + net movements"][0]
     assert build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS,
         month_str="2026-09")["available_bool"]
 
@@ -432,8 +440,8 @@ def test_a_missing_since_start_report_keeps_the_month_and_says_why(demo_tuple, m
     monkeypatch.setattr(monthly_report, "build_performance_page_dict", since_start_missing_dict)
     report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=DEMO_NOW_TS, month_str="2026-08")
     value_dict = _money_value_dict(report_dict)
-    assert value_dict["Change in August"] == ("+$1,090", "+1.1%")
-    assert value_dict["Gain since start"] == ("—", "—") and value_dict["Money you put in, net"] == ("—", "")
+    assert value_dict["Investment gain/loss · August"] == ("+$1,090", "+1.1%")
+    assert value_dict["Gain since start"] == ("—", "—") and value_dict["Opening capital + net movements"] == ("—", "")
     assert report_dict["draft_reason_str"] == "Return since start unavailable"
     assert "Money in and out appears once the account history since start is complete." in report_dict["status_note_str"]
     assert not report_dict["program_list"][0]["chart_dict"]["available_bool"]
@@ -447,13 +455,13 @@ def test_shorts_and_borrowing_get_no_donut_and_long_lists_fold(monkeypatch):
     report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=SAMPLE_AS_OF_TS,
         month_str="2026-08", database_path_str="unused.sqlite3")
     program_dict = report_dict["program_list"][0]
-    assert program_dict["holding_dict"]["reason_str"] == "Holdings include borrowing or short positions. Page 2 lists them."
+    assert program_dict["holding_dict"]["reason_str"] == "Holdings include borrowing or short positions. Details lists them."
     assert {row_dict["symbol_str"]: row_dict["weight_str"] for row_dict in program_dict["pod_holding_list"][1]["row_list"]}["AMD"] == "−30.0%"
     provider_obj = _patch_saved_portfolio(monkeypatch, {"pod_taa": [("TQQQ", 25000.)], "pod_ndx": [("MU", 6000.)]},
         {"pod_taa": -5000., "pod_ndx": 4000.})
     report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=SAMPLE_AS_OF_TS,
         month_str="2026-08", database_path_str="unused.sqlite3")
-    assert report_dict["program_list"][0]["holding_dict"]["reason_str"] == "Holdings include borrowing or short positions. Page 2 lists them."
+    assert report_dict["program_list"][0]["holding_dict"]["reason_str"] == "Holdings include borrowing or short positions. Details lists them."
     provider_obj = _patch_saved_portfolio(monkeypatch, {"pod_taa": [("TQQQ", 9000.)],
         "pod_ndx": [(f"S{index_int:02d}", 500. + index_int) for index_int in range(14)]}, {"pod_taa": 1000., "pod_ndx": 2000.})
     report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=SAMPLE_AS_OF_TS,
@@ -480,7 +488,8 @@ def test_guards_name_the_problem():
     reserve_only_dict["client_dict"]["accounts"] = [account_dict for account_dict in reserve_only_dict["client_dict"]["accounts"]
         if account_dict.get("role") == "reserve"]
     report_dict = build_monthly_report_dict(reserve_only_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS)
-    assert not report_dict["available_bool"] and report_dict["error_str"] == "No strategy Pod has saved performance yet."
+    assert report_dict["available_bool"] and not report_dict["draft_bool"]
+    assert report_dict["program_list"] == [] and report_dict["summary_scope_str"] == "All your accounts · USD"
     early_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=datetime(2026, 8, 3, 13, tzinfo=UTC))
     assert early_dict["error_str"] == "No finalized account value is available yet."
 
@@ -524,10 +533,10 @@ def test_programs_panel_saves_choices_and_the_report_follows(demo_tuple, tmp_pat
     for name_str in ("Steady", "Growth", "Growth Plus"):
         assert f"{name_str} program" in client_obj.get("/monthly-report?month=2026-08").get_data(as_text=True)
     assert "Portfolio since" not in text_str
-    # A cleared choice goes back under Portfolio; the other Pods keep theirs.
-    assert _post_programs(client_obj, {"confirmed_bool": True, "program_by_pod_dict": {"demo_1_3": ""}}, token_str=token_str).status_code == 200
+    # Clearing a saved assignment cannot rewrite already measured history.
+    assert _post_programs(client_obj, {"confirmed_bool": True, "program_by_pod_dict": {"demo_1_3": ""}}, token_str=token_str).status_code == 409
     html_str = client_obj.get("/monthly-report?month=2026-08").get_data(as_text=True)
-    assert 'aria-label="Portfolio program"' in html_str and "Growth Plus program" not in html_str
+    assert 'aria-label="Portfolio program"' not in html_str and "Growth Plus program" in html_str
     assert 'aria-label="Steady program"' in html_str
 
 
@@ -555,17 +564,20 @@ def test_programs_route_refuses_anything_but_a_same_origin_tokened_choice(demo_t
 
 
 def test_program_store_keeps_choices_in_a_file_next_to_the_event_log(tmp_path):
-    from alpha.live.dashboard_v4.report_programs import PROGRAM_BYTE_LIMIT_INT, ReportProgramStore, clean_program_str
+    from alpha.live.dashboard_v4.report_programs import PROGRAM_BYTE_LIMIT_INT, ReportProgramStore, clean_program_str, ReportProgramReadError, ReportProgramConflictError
     provider_obj = SimpleNamespace(event_log_path_str=str(tmp_path / "events.jsonl"))
     ReportProgramStore(provider_obj).save({"pod_taa": "Growth", "pod_ndx": "Growth"})
     assert ReportProgramStore(provider_obj).program_by_pod_dict() == {"pod_taa": "Growth", "pod_ndx": "Growth"}
-    ReportProgramStore(provider_obj).save({"pod_ndx": ""})
-    assert ReportProgramStore(provider_obj).program_by_pod_dict() == {"pod_taa": "Growth"}
+    with pytest.raises(ReportProgramConflictError):
+        ReportProgramStore(provider_obj).save({"pod_ndx": ""})
+    assert ReportProgramStore(provider_obj).program_by_pod_dict() == {"pod_taa": "Growth", "pod_ndx": "Growth"}
     path_obj = tmp_path / "report_programs.json"
     path_obj.write_text('{"program_by_pod_dict": {"pod_taa": "Steady", "pod_bad": "<script>"}}', encoding="utf-8")
-    assert ReportProgramStore(provider_obj).program_by_pod_dict() == {"pod_taa": "Steady"}
+    with pytest.raises(ReportProgramReadError):
+        ReportProgramStore(provider_obj).program_by_pod_dict()
     path_obj.write_text("x" * (PROGRAM_BYTE_LIMIT_INT + 1), encoding="utf-8")
-    assert ReportProgramStore(provider_obj).program_by_pod_dict() == {}
+    with pytest.raises(ReportProgramReadError):
+        ReportProgramStore(provider_obj).program_by_pod_dict()
     assert [clean_program_str(value_obj) for value_obj in ("  Growth  Plus ", "", "Q&A 1/2", None)] == ["Growth Plus", "", "Q&A 1/2", None]
 
 
@@ -580,13 +592,13 @@ def _sample_program_app(tmp_path, *, workspace_dict=None, snapshot_obj=None):
     return app_obj.test_client()
 
 
-def test_one_program_owns_every_pod_including_a_retired_one():
+def test_unassigned_retired_program_keeps_its_own_history():
     workspace_dict, snapshot_obj = _sample_tuple(effective_to_dict={"U200": "2026-08-13"})
     report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS,
         month_str="2026-08", program_by_pod_dict={"pod_taa": "Growth"})
-    assert [program_dict["name_str"] for program_dict in report_dict["program_list"]] == ["Growth"]
-    # The card's return includes the retired Pod's history, so its row stays under the program.
-    assert [row_dict["name_str"] for row_dict in report_dict["month_table_dict"]["row_list"]] == ["Growth", "Pod 1 · U···100", "Pod 2 · U···200"]
+    assert [program_dict["name_str"] for program_dict in report_dict["program_list"]] == ["Growth", "Portfolio"]
+    assert [row_dict["name_str"] for row_dict in report_dict["month_table_dict"]["row_list"]] == ["Growth", "Pod 1 · U···100", "Portfolio", "Pod 2 · U···200"]
+    assert report_dict["program_list"][1]["closed_bool"]
 
 
 def test_program_names_never_split_by_case(demo_tuple, tmp_path):
@@ -607,7 +619,7 @@ def test_program_store_survives_a_foreign_file(tmp_path):
     path_obj = tmp_path / "logs" / "report_programs.json"
     for payload_str in ('{"program_by_pod_dict": ["Growth"]}', '["Growth"]', '{"program_by_pod_dict": "Growth"}'):
         path_obj.write_text(payload_str, encoding="utf-8")
-        assert client_obj.get("/monthly-report?month=2026-08").status_code == 200, payload_str
+        assert client_obj.get("/monthly-report?month=2026-08").status_code == 503, payload_str
     path_obj.write_text('{"program_by_pod_dict": {"pod_taa": "Growth ", "pod_ndx": "growth"}}', encoding="utf-8")
     html_str = client_obj.get("/monthly-report?month=2026-08").get_data(as_text=True)
     assert html_str.count('aria-label="Growth program"') == 1 and 'aria-label="Growth  program"' not in html_str
@@ -656,7 +668,7 @@ def test_program_saves_fail_cleanly(tmp_path, monkeypatch):
 
     monkeypatch.setattr(report_programs.os, "replace", locked_replace)
     monkeypatch.setattr(report_programs.time, "sleep", lambda seconds_float: None)
-    response_obj = _post_programs(client_obj, {"confirmed_bool": True, "program_by_pod_dict": {"pod_taa": "Steady"}}, token_str=token_str)
+    response_obj = _post_programs(client_obj, {"confirmed_bool": True, "program_by_pod_dict": {"pod_ndx": "Steady"}}, token_str=token_str)
     assert response_obj.status_code == 500 and response_obj.get_json()["error"] == "write_failed"
     assert len(calls_list) == report_programs.REPLACE_ATTEMPT_INT and path_obj.read_text(encoding="utf-8") == before_str
     assert not (tmp_path / "logs" / "report_programs.json.tmp").exists()

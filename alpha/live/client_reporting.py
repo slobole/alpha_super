@@ -542,7 +542,7 @@ def _local_nav_dict(account_list, row_by_key_dict, session_list, *, from_str, to
         "complete_bool": bool(daily_list) and all(row_dict["coverage_complete_bool"] for row_dict in daily_list)}
 
 
-def _client_daily_twr_dict(day_list, *, complete_bool, from_date_str):
+def _client_daily_twr_dict(day_list, *, complete_bool, from_date_str, verified_internal_date_set=frozenset()):
     """Daily EOD convention, not official broker or exact intraday TWR.
 
     r_D = independently bridged P&L_D / active-account SOD NAV_D.
@@ -562,7 +562,7 @@ def _client_daily_twr_dict(day_list, *, complete_bool, from_date_str):
         reason_str = None
         if boundary_decimal != 0:
             reason_str = "Broker linking adjustment timing is unresolved."
-        elif internal_decimal != 0:
+        elif internal_decimal != 0 and date_str not in verified_internal_date_set:
             reason_str = "Internal transfer or cash-in-transit evidence is unresolved."
         elif opening_decimal <= 0:
             reason_str = "Positive opening client capital is required on every reporting day."
@@ -579,11 +579,49 @@ def _client_daily_twr_dict(day_list, *, complete_bool, from_date_str):
             "twr_daily_list": daily_list, "twr_reason_str": None}
 
 
+def _transfer_scope_evidence_dict(client_dict, parent_client_dict, snapshot_obj, *,
+                                  from_date_str, to_date_str, as_of_ts, scope_complete_bool):
+    """Verify the containing ownership book before classifying a subset transfer.
+
+    A same-day parent net of zero is the existing daily convention, not proof of
+    intraday event matching. No snapshot values or source capital fields change.
+    """
+    parent_client_dict = validate_client_registry_dict(
+        {"schema_version": 1, "clients": [parent_client_dict]})["clients"][0]
+    if any(client_dict.get(field_str) != parent_client_dict.get(field_str)
+            for field_str in ("client_id", "query_name", "base_currency", "nav_bridge", "client_twr", "is_demo")):
+        raise ClientReportingError("Transfer scope must use the same client, source and reviewed accounting contract.")
+    for account_dict in client_dict["accounts"]:
+        first_str = max(from_date_str, account_dict["effective_from"])
+        last_str = min(to_date_str, account_dict.get("effective_to") or to_date_str)
+        if first_str <= last_str and not _periods_cover_bool(
+                [parent_dict for parent_dict in parent_client_dict["accounts"]
+                    if parent_dict["account_route"] == account_dict["account_route"]],
+                from_date_str=first_str, to_date_str=last_str):
+            raise ClientReportingError("Selected account dates are not covered by the containing client ownership scope.")
+    if snapshot_obj.unavailable_reason_str:
+        raise ClientReportingError("Containing client source is unavailable: " + snapshot_obj.unavailable_reason_str)
+    # *** CRITICAL *** The parent uses the unchanged daily NAV/flow bridge and
+    # internal-net-zero gate for every date in this same interval. It includes
+    # reserve accounts; roles do not change physical ownership. Never recurse
+    # with another transfer scope or use an independently computed subset as proof.
+    parent_report_dict = build_client_report_dict(parent_client_dict, snapshot_obj,
+        from_date_str=from_date_str, to_date_str=to_date_str, as_of_ts=as_of_ts,
+        scope_complete_bool=scope_complete_bool)
+    verified_bool = (parent_report_dict["scope_complete_bool"] and parent_report_dict["coverage_complete_bool"]
+        and parent_report_dict["flows_complete_bool"] and parent_report_dict["twr_float"] is not None)
+    return {"verified_bool": verified_bool,
+        "reason_str": "" if verified_bool else (parent_report_dict["twr_reason_str"] or "Containing client accounting is incomplete."),
+        "scope_hash_str": parent_report_dict["scope_hash_str"], "report_hash_str": parent_report_dict["report_hash_str"],
+        "date_list": [row_dict["market_date_str"] for row_dict in parent_report_dict["twr_daily_list"]] if verified_bool else []}
+
+
 def build_client_report_dict(
     client_dict: dict[str, Any], snapshot_obj: BrokerReportingSnapshot, *,
     from_date_str: str, to_date_str: str, as_of_ts: datetime, benchmark_snapshot_obj=None,
     scope_complete_bool: bool = True,
     valuation_account_list: list[dict[str, str]] | None = None,
+    transfer_scope_client_dict: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """One selected-period projection for screens and immutable report exports.
 
@@ -596,6 +634,13 @@ def build_client_report_dict(
     Account TWR = product(1 + official daily account TWR) - 1.
     No account-TWR average or adjusted-base composite becomes client TWR.
     The date alignment below is an EOD valuation join, never a signal input.
+
+    An optional complete containing client scope can establish that a subset's
+    same-day internal transfer crosses only its reporting boundary. The caller
+    supplies full dated ownership, including reserves, not another subset.
+    Parent NAV/flows must reconcile and pass the unchanged daily internal gate.
+    The subset keeps P_D = E_D - B_D - F_D and r_D = P_D / B_D: crossing flows
+    already belong to F_D and must never be deducted twice or added to B_D.
     """
     client_dict = validate_client_registry_dict({"schema_version": 1, "clients": [client_dict]},
         allow_empty_periods_bool=valuation_account_list is not None)["clients"][0]
@@ -822,8 +867,24 @@ def build_client_report_dict(
             client_twr_method_str = "Official IBKR account TWR (single account covers the whole selected period)"
     twr_result_dict = {"return_path_list": [], "twr_daily_list": [], "twr_reason_str": None}
     client_twr_configured_bool = client_dict.get("client_twr") is not None
+    transfer_scope_dict = None
     if client_twr_configured_bool:
-        twr_result_dict = _client_daily_twr_dict(twr_day_list, complete_bool=all_flows_bool, from_date_str=from_date_str)
+        verified_internal_date_set = set()
+        if transfer_scope_client_dict is not None and all_flows_bool and any(day_tuple[4] != 0 for day_tuple in twr_day_list):
+            try:
+                transfer_scope_dict = _transfer_scope_evidence_dict(client_dict, transfer_scope_client_dict, snapshot_obj,
+                    from_date_str=from_date_str, to_date_str=to_date_str, as_of_ts=as_of_ts, scope_complete_bool=scope_complete_bool)
+            except ClientReportingError as exception_obj:
+                transfer_scope_dict = {"verified_bool": False, "reason_str": str(exception_obj)}
+            if transfer_scope_dict["verified_bool"]:
+                verified_internal_date_set = set(transfer_scope_dict["date_list"])
+        # *** CRITICAL *** EOD flow convention is unchanged: only a verified
+        # containing book permits a subset's nonzero internal balance. Preserve
+        # its actual flow in F_D, P&L and the return denominator exactly once.
+        twr_result_dict = _client_daily_twr_dict(twr_day_list, complete_bool=all_flows_bool,
+            from_date_str=from_date_str, verified_internal_date_set=verified_internal_date_set)
+        if transfer_scope_dict is not None and not transfer_scope_dict["verified_bool"]:
+            twr_result_dict["twr_reason_str"] = "Containing transfer scope: " + transfer_scope_dict["reason_str"]
         client_twr_float = twr_result_dict.pop("twr_float")
         client_twr_method_str = "Calculated client daily TWR; end-of-day flow convention, not official consolidated IBKR TWR."
         if twr_result_dict["twr_reason_str"]:
@@ -904,6 +965,10 @@ def build_client_report_dict(
             "pnl_float": performance_day_dict.get(row_dict["market_date_str"], {}).get("pnl_float") if all_flows_bool else None,
             "cumulative_pnl_float": performance_day_dict.get(row_dict["market_date_str"], {}).get("cumulative_pnl_float") if all_flows_bool else None,
         } for row_dict in nav_dict["daily_list"]]
+    if transfer_scope_dict is not None:
+        result_dict["transfer_scope_dict"] = transfer_scope_dict
+        result_dict["limitations_list"].append(
+            "Subset boundary transfers use reconciled containing-client daily net flows, not matched intraday transfer events.")
     # Source/config/result hash is stable across view refreshes. The frozen
     # export keeps generated_at separately; corrections produce a new hash.
     result_dict["report_hash_str"] = content_hash_str({key_str: value_obj for key_str, value_obj in result_dict.items() if key_str != "generated_at_str"})

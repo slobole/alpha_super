@@ -43,6 +43,9 @@ def attach_demo_holdings(provider_obj):
                 position=str(shares_int), markPrice=str(value_decimal / shares_int), positionValue=str(value_decimal))
         raw_xml_str = ElementTree.tostring(root_obj, encoding="unicode")
         synthetic_nav_obj = replace(nav_row_obj, source_checksum_str=hashlib.sha256(raw_xml_str.encode()).hexdigest())
-        return parse_close_holdings_dict(raw_xml_str, synthetic_nav_obj, query_name_str=query_name_str, as_of_ts=as_of_ts)
+        result_dict = parse_close_holdings_dict(raw_xml_str, synthetic_nav_obj, query_name_str=query_name_str, as_of_ts=as_of_ts)
+        # Explicit synthetic cash, independently supplied by the demo fixture.
+        result_dict.update(cash_float=float(cash_decimal), cash_date_str=nav_row_obj.market_date_str)
+        return result_dict
 
     provider_obj.get_close_holdings_dict = get_close_holdings_dict

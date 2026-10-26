@@ -436,6 +436,24 @@ Every summary (standalone pod, sleeve, and portfolio book) reports Sharpe on two
 
 Live dashboard P&L percentages are computed from broker EOD NetLiq snapshots, which cannot distinguish trading P&L from a deposit or withdrawal. External flows are therefore declared by the operator in `alpha/live/pod_cash_flows.yaml` (override path via `ALPHA_POD_CASH_FLOWS_PATH_STR`), and the dashboard treats a flow dated D as arriving at the END of market date D. Each observed dollar-P&L interval deducts every flow for which `previous_EOD_date < flow_date <= current_EOD_date`, so a missing snapshot on D does not lose the cash movement. When both adjacent snapshots exist, day D's return is `(E_D - F_D) / E_{D-1} - 1`; since-start percent compounds those flow-adjusted returns, while since-start dollars are always `equity - baseline - net contributions`. Exact percentage return is deliberately withheld from the first ambiguous interval onward when a flow date lacks its own EOD snapshot, when observed EODs are not consecutive market sessions, or when the prior equity is zero. Monthly return, volatility, and drawdown are withheld on the same basis rather than silently bridging the gap; dollar P&L remains available. Known gaps: (1) even with adjacent EODs, the end-of-day convention is a daily-resolution approximation — an intraday deposit that was traded the same day slightly misattributes that day's return; (2) an undeclared flow reproduces the old distortion (a deposit reads as a monster up-day) — declaring flows is an operator responsibility; (3) flows dated on the first observed EOD date are treated as part of the starting baseline, not as contributions; (4) no automatic post-zero-capital rebase policy exists yet. With an empty flows file and consecutive non-zero EOD snapshots, the math is identical to the pre-flow behaviour.
 
+## Detailed Note: Monthly client report accounting boundaries
+
+The monthly report distinguishes total client wealth (including VAULT and USD
+valuation of non-USD assets) from each program's measured strategy performance.
+Its daily TWR retains the reviewed end-of-day capital-flow convention; it is not
+exact intraday TWR, official consolidated IBKR TWR, MWR or independent fund
+administration. A subset transfer is accepted only with a complete, reconciled
+containing client book for the same dates. Same-day net zero does not identify
+individual transfer events; cross-day cash in transit remains unsupported.
+
+Historical program assignment is immutable per Pod; dated reassignment is not
+implemented. Same-close positions plus independently saved cash must reconcile
+before showing holdings. Missing optional holdings are disclosed, never inferred
+as NAV minus positions. Issued HTML/evidence snapshots preserve an exact version
+and verify its bytes, but do not prove external authenticity. The program store
+assumes one writing app process. See [Monthly Client Report](docs/live/MONTHLY_CLIENT_REPORT.md)
+for scope, math, issuance and remaining limitations.
+
 ## Interpretation Rule
 
 If a result looks attractive only because one of the known gaps is favorable to the backtest, or because the strategy would be materially harder to trade live than the simulation implies, the result should be treated as overstated until the gap is closed or explicitly bounded.

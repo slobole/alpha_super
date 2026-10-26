@@ -1,16 +1,4 @@
-// Monthly report page: print button, month picker, A4 fitting and the Programs panel.
-const A4_HEIGHT_PX = 1123;
-
-function fitPages() {
-  const pageList = document.querySelectorAll(".pg");
-  if (pageList.length < 2) return;
-  // Page 1 is one A4 sheet: a long month table moves to page 2 instead of spilling.
-  const months = pageList[0].querySelector("[data-months]");
-  const slot = pageList[1].querySelector("[data-months-slot]");
-  if (months && slot && pageList[0].offsetHeight > A4_HEIGHT_PX) slot.replaceWith(months);
-  // A page 2 that would spill only its footer stays on one sheet.
-  if (pageList[1].offsetHeight > A4_HEIGHT_PX) pageList[1].classList.add("pg-spill");
-}
+// Report layout is CSS-only, so the preview and frozen copy paginate identically.
 
 function setupPrograms() {
   const panel = document.querySelector("[data-programs]");
@@ -58,7 +46,51 @@ function setupPrograms() {
 
 document.addEventListener("DOMContentLoaded", () => {
   const printButton = document.querySelector("[data-print]");
-  if (printButton) printButton.addEventListener("click", () => window.print());
+  if (printButton) printButton.addEventListener("click", async () => {
+    if (!printButton.dataset.archiveUrl) { window.print(); return; }
+    const message = document.querySelector("[data-print-message]");
+    let savedLink = null;
+    printButton.disabled = true;
+    message.textContent = "Saving report…";
+    try {
+      const response = await fetch(printButton.dataset.archiveUrl, {method: "POST", credentials: "same-origin",
+        headers: {"Content-Type": "application/json", "X-Alpha-Action-Token": printButton.dataset.token},
+        body: JSON.stringify({confirmed_bool: true, month_str: printButton.dataset.month, report_id_str: printButton.dataset.reportId})});
+      const result = await response.json();
+      if (!response.ok) { message.textContent = result.message || "Report not saved."; return; }
+      const link = document.createElement("a");
+      link.textContent = "Saved copy";
+      link.href = result.archive_url_str;
+      message.replaceChildren(link);
+      savedLink = link;
+      // Print the verified frozen document, never the older interactive preview.
+      // Keep the frame alive after print(): browser print dialogs can be asynchronous.
+      document.querySelector(".mr-print-frame")?.remove();
+      const frame = document.createElement("iframe");
+      frame.className = "mr-print-frame";
+      frame.title = "Saved report for printing";
+      frame.setAttribute("aria-hidden", "true");
+      frame.tabIndex = -1;
+      const loaded = new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("Saved copy did not load.")), 30000);
+        frame.onload = () => { clearTimeout(timer); resolve(); };
+        frame.onerror = () => { clearTimeout(timer); reject(new Error("Saved copy did not load.")); };
+      });
+      frame.src = result.archive_url_str;
+      document.body.append(frame);
+      await loaded;
+      if (!frame.contentDocument.querySelector(".mr-pages") || frame.contentDocument.querySelector(".mr-draft")) {
+        throw new Error("Saved copy could not be verified.");
+      }
+      await frame.contentDocument.fonts.ready;
+      frame.contentWindow.focus();
+      frame.contentWindow.print();
+    } catch (error) {
+      if (savedLink) message.replaceChildren(savedLink, document.createTextNode(" · Open the saved copy to print."));
+      else message.textContent = "Report not saved. Please try again.";
+    }
+    finally { printButton.disabled = false; }
+  });
   const monthSelect = document.querySelector("[data-month-nav]");
   if (monthSelect) {
     monthSelect.addEventListener("change", () => {
@@ -68,5 +100,4 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
   setupPrograms();
-  document.fonts.ready.then(fitPages);
 });

@@ -1,12 +1,15 @@
 """LIVE read-only operator views, with isolated synthetic Tools demonstrations."""
 
 from datetime import UTC, date, datetime, timedelta
+import base64
+from copy import deepcopy
 import hashlib
 import json
 from pathlib import Path
 import re
 import threading
 import time
+from urllib.parse import urlsplit
 
 from flask import Flask, Response, abort, jsonify, render_template, request, send_from_directory, url_for
 
@@ -34,7 +37,9 @@ from alpha.live.dashboard_v4.tools_actions import ToolsActionService, register_t
 from alpha.live.dashboard_v4.tools_execution import SyntheticToolsActionProvider
 from alpha.live.dashboard_v4.missing_trades import load_missing_trades_dict, read_completion_event_list
 from alpha.live.dashboard_v4.monthly_report import build_monthly_report_dict
-from alpha.live.dashboard_v4.report_programs import SUGGESTED_PROGRAM_TUPLE, ReportProgramStore, register_program_route
+from alpha.live.dashboard_v4.report_programs import SUGGESTED_PROGRAM_TUPLE, ReportProgramStore, ReportProgramReadError, register_program_route
+from alpha.live.dashboard_v4.report_archive import ReportArchiveStore, ReportArchiveError, ReportArchiveNotFoundError
+from alpha.live.dashboard_v3.actions import validate_action_request
 from alpha.live.dashboard_v4.orders import OrderTicketService, register_order_routes
 from alpha.live.dashboard_v3.client_operations import SOURCE_MAX_AGE_SECONDS_INT
 from alpha.live.dashboard_v3.local_workspace import build_local_workspace_dict
@@ -120,13 +125,14 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
     review_store_obj = BacktestReviewStore(provider_obj, memory_bool=demo_bool)
     # The program of each Pod in the monthly client report (a local file; display only).
     program_store_obj = ReportProgramStore(provider_obj, memory_bool=demo_bool)
+    archive_store_obj = ReportArchiveStore(provider_obj, memory_bool=demo_bool)
 
     @flask_app_obj.before_request
     def read_only_boundary():
         # Production rejects every write. Only explicitly enabled synthetic
         # demonstrations can accept the fixed Tools preview/confirm/cancel POSTs.
         if request.method not in {"GET", "HEAD", "OPTIONS"}:
-            order_post_bool = request.method == "POST" and (request.endpoint in {"backtest_reviewed", "monthly_report_programs"} or (
+            order_post_bool = request.method == "POST" and (request.endpoint in {"backtest_reviewed", "monthly_report_programs", "monthly_report_archive"} or (
                 orders_enabled_bool and request.endpoint in {"order_check", "order_send"}))
             if not order_post_bool and (not demo_tools_bool or request.method != "POST" or request.endpoint not in {
                     "tools_action_preview", "tools_action_confirm", "tools_action_cancel"}):
@@ -141,11 +147,14 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         response_obj.headers["Cache-Control"] = "no-store"
         response_obj.headers["X-Content-Type-Options"] = "nosniff"
         response_obj.headers["Referrer-Policy"] = "same-origin"
-        response_obj.headers["X-Frame-Options"] = "DENY"
+        saved_report_bool = request.endpoint == "monthly_report_saved"
+        response_obj.headers["X-Frame-Options"] = "SAMEORIGIN" if saved_report_bool else "DENY"
         response_obj.headers["Content-Security-Policy"] = (
             "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-            "font-src 'self'; img-src 'self' data:; connect-src 'self'; "
-            "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
+            + ("font-src 'self' data:; " if saved_report_bool else "font-src 'self'; ")
+            + "img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; "
+            + ("frame-ancestors 'self'; " if saved_report_bool else "frame-ancestors 'none'; ")
+            + "form-action 'none'"
         )
         return response_obj
 
@@ -797,14 +806,10 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
     def performance_refresh():
         return performance_response(refresh_bool=True)
 
-    @flask_app_obj.get("/monthly-report")
-    def monthly_report():
-        # One month of the Performance numbers as a printable client report; no writes.
-        if set(request.args) - {"month"} or any(len(request.args.getlist(key_str)) != 1 for key_str in request.args):
-            abort(400)
-        month_str = request.args.get("month")
-        if month_str is not None and not re.fullmatch(r"20[0-9]{2}-(0[1-9]|1[0-2])", month_str):
-            abort(400)
+    def monthly_report_dict(month_str):
+        # Resolve assignments before financial reads: a corrupt mapping never
+        # silently replaces known programs with a new Portfolio history.
+        program_by_pod_dict = program_store_obj.program_by_pod_dict()
         acquisition_ts = clock_fn()
         if workspace_snapshot_fn is None:
             workspace_dict, snapshot_obj = load_workspace_snapshot_tuple(provider_obj, database_path_str, as_of_ts=acquisition_ts)
@@ -819,14 +824,92 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
 
         report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=acquisition_ts,
             month_str=month_str, database_path_str=database_path_str, alias_by_pod_dict=load_alias_by_pod_dict(database_path_str),
-            program_by_pod_dict=program_store_obj.program_by_pod_dict(),
+            program_by_pod_dict=program_by_pod_dict,
             month_url_fn=lambda value_str: url_for("monthly_report", month=value_str), art_url_fn=art_url_str)
         if report_dict is None:
             abort(404)
         report_dict["back_url_str"] = url_for("performance")
         report_dict["program_panel_dict"] = {"url_str": url_for("monthly_report_programs"), "token_str": program_store_obj.action_token_str,
             "suggestion_list": list(SUGGESTED_PROGRAM_TUPLE), "pod_list": report_dict["pod_choice_list"]}
+        if not report_dict["draft_bool"]:
+            report_dict.update(archive_url_str=url_for("monthly_report_archive"), archive_token_str=program_store_obj.action_token_str)
+        return report_dict
+
+    @flask_app_obj.get("/monthly-report")
+    def monthly_report():
+        if set(request.args) - {"month"} or any(len(request.args.getlist(key_str)) != 1 for key_str in request.args):
+            abort(400)
+        month_str = request.args.get("month")
+        if month_str is not None and not re.fullmatch(r"20[0-9]{2}-(0[1-9]|1[0-2])", month_str):
+            abort(400)
+        try:
+            report_dict = monthly_report_dict(month_str)
+        except ReportProgramReadError as error_obj:
+            return render_template("monthly_report.html", report_dict={"available_bool": False,
+                "back_url_str": url_for("performance"), "error_str": str(error_obj)}), 503
         return render_template("monthly_report.html", report_dict=report_dict)
+
+    @flask_app_obj.post("/monthly-report/archive")
+    def monthly_report_archive():
+        if request.args or request.mimetype != "application/json" or request.content_length is None or request.content_length > 2048:
+            return jsonify(message="Invalid report request."), 400
+        body_dict = request.get_json(silent=True)
+        if not isinstance(body_dict, dict) or set(body_dict) != {"confirmed_bool", "month_str", "report_id_str"}:
+            return jsonify(message="Invalid report request."), 400
+        rejection_tuple = validate_action_request(request.headers, body_dict, program_store_obj.action_token_str)
+        origin_tuple = urlsplit(request.host_url)
+        for header_str in ("Origin", "Referer"):
+            if request.headers.get(header_str):
+                source_tuple = urlsplit(request.headers[header_str])
+                if (source_tuple.scheme, source_tuple.netloc.lower()) != (origin_tuple.scheme, origin_tuple.netloc.lower()):
+                    rejection_tuple = (403, "origin_rejected", "A same-origin request is required.")
+        if rejection_tuple:
+            return jsonify(message=rejection_tuple[2]), rejection_tuple[0]
+        month_str = body_dict["month_str"]
+        if not isinstance(month_str, str) or not re.fullmatch(r"20[0-9]{2}-(0[1-9]|1[0-2])", month_str):
+            return jsonify(message="Choose a report month."), 400
+        try:
+            report_dict = monthly_report_dict(month_str)
+            if not report_dict["available_bool"] or report_dict["draft_bool"]:
+                return jsonify(message="This report is a draft. Complete the financial evidence before saving it."), 409
+            if body_dict["report_id_str"] != report_dict["report_id_str"]:
+                return jsonify(message="The report changed. Refresh and review it before saving."), 409
+            frozen_dict = deepcopy(report_dict)
+            frozen_dict.update(program_panel_dict=None, month_option_list=[], archive_url_str="", archive_token_str="", archived_bool=True)
+            html_str = render_template("monthly_report.html", report_dict=frozen_dict)
+            # Freeze presentation with facts: archived pages do not execute scripts,
+            # carry action tokens or depend on a future version of CSS/font/art.
+            html_str = re.sub(r'<nav class="mr-bar".*?</nav>', "", html_str, flags=re.S)
+            html_str = re.sub(r'<script\b[^>]*>.*?</script>', "", html_str, flags=re.S)
+            static_root_obj = Path(flask_app_obj.static_folder)
+            css_str = (static_root_obj / "monthly_report.css").read_text(encoding="utf-8")
+            html_str = html_str.replace('<link rel="stylesheet" href="' + url_for("static", filename="monthly_report.css") + '">',
+                "<style>" + css_str + "</style>")
+            font_path_obj = Path(__file__).resolve().parent.parent / "dashboard_v3/static/fonts/IBMPlexSans-latin.woff2"
+            html_str = html_str.replace(url_for("assets", filename="fonts/IBMPlexSans-latin.woff2"),
+                "data:font/woff2;base64," + base64.b64encode(font_path_obj.read_bytes()).decode("ascii"))
+            if report_dict["art_url_str"]:
+                art_path_obj = static_root_obj / "report_art" / Path(report_dict["art_url_str"]).name
+                mime_str = {".webp": "image/webp", ".jpg": "image/jpeg", ".png": "image/png"}[art_path_obj.suffix]
+                html_str = html_str.replace(report_dict["art_url_str"], "data:" + mime_str + ";base64," + base64.b64encode(art_path_obj.read_bytes()).decode("ascii"))
+            archive_id_str = archive_store_obj.save(html_str, {**report_dict["evidence_dict"],
+                "generated_at_str": report_dict["generated_at_str"], "report_id_str": report_dict["report_id_str"],
+                "month_str": month_str, "is_demo_bool": report_dict["is_demo_bool"]})
+        except (ReportProgramReadError, ReportArchiveError, OSError) as error_obj:
+            return jsonify(message="Report not saved. " + str(error_obj)), 503
+        return jsonify(archive_url_str=url_for("monthly_report_saved", archive_id_str=archive_id_str))
+
+    @flask_app_obj.get("/monthly-report/saved/<archive_id_str>")
+    def monthly_report_saved(archive_id_str):
+        if request.args:
+            abort(400)
+        try:
+            payload_dict = archive_store_obj.read(archive_id_str)
+        except ReportArchiveNotFoundError:
+            abort(404)
+        except ReportArchiveError:
+            return Response("The saved report could not be verified.", status=503)
+        return Response(payload_dict["html_str"], mimetype="text/html")
 
     @flask_app_obj.get("/performance/status")
     def performance_status():

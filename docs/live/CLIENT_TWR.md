@@ -104,6 +104,24 @@ unknown counterparty must not shrink the return denominator. Transfers carried
 in other source fields require the reviewed field/scope contract to classify
 them correctly. No synthetic cash-in-transit ledger is inferred.
 
+### Program and strategy subsets
+
+An optional `transfer_scope_client_dict` lets a subset use its containing client
+ownership book as evidence for internal transfers. Client/query/currency/NAV
+bridge/TWR contract must match, every selected account date must be owned by the
+parent, and the parent must independently pass the original full-period daily
+TWR and internal-net-zero gates using the same source and interval. The parent
+never recursively borrows proof from another subset. This does not change
+`F_D`, `P_D`, the denominator or official account TWR: it only permits a subset's
+nonzero internal net on verified parent dates. Failed proof withholds the return.
+Parent scope/report hashes are preserved in subset provenance. Existing calls
+without needed context retain their previous result.
+
+The [monthly client report](MONTHLY_CLIENT_REPORT.md) uses full-client headline
+scope, including VAULT, and independently calculated program sections. Its
+date horizon follows the full ownership book, including after all programs
+close. This differs intentionally from the strategy-first Performance page.
+
 ## Availability
 
 Missing/unfinalized account days, failed NAV/flow bridges or continuity, nonzero
