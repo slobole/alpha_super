@@ -33,8 +33,11 @@ from alpha.live.dashboard_v4.tools import build_tools_page_dict, resolve_tools_t
 from alpha.live.dashboard_v4.tools_actions import ToolsActionService, register_tools_action_routes
 from alpha.live.dashboard_v4.tools_execution import SyntheticToolsActionProvider
 from alpha.live.dashboard_v4.missing_trades import load_missing_trades_dict, read_completion_event_list
+from alpha.live.dashboard_v4.monthly_report import build_monthly_report_dict
+from alpha.live.dashboard_v4.report_programs import SUGGESTED_PROGRAM_TUPLE, ReportProgramStore, register_program_route
 from alpha.live.dashboard_v4.orders import OrderTicketService, register_order_routes
 from alpha.live.dashboard_v3.client_operations import SOURCE_MAX_AGE_SECONDS_INT
+from alpha.live.dashboard_v3.local_workspace import build_local_workspace_dict
 from alpha.live.dashboard_v3.filters import MARKET_TIMEZONE_OBJ
 from alpha.live.ops_report import parse_timestamp_ts
 from alpha.live.ibkr_performance import resolve_performance_db_path_str
@@ -115,13 +118,15 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
     flask_app_obj.config["order_service_obj"] = order_service_obj
     # Marks for backtest differences the operator already reviewed (a local file; never orders or pod state).
     review_store_obj = BacktestReviewStore(provider_obj, memory_bool=demo_bool)
+    # The program of each Pod in the monthly client report (a local file; display only).
+    program_store_obj = ReportProgramStore(provider_obj, memory_bool=demo_bool)
 
     @flask_app_obj.before_request
     def read_only_boundary():
         # Production rejects every write. Only explicitly enabled synthetic
         # demonstrations can accept the fixed Tools preview/confirm/cancel POSTs.
         if request.method not in {"GET", "HEAD", "OPTIONS"}:
-            order_post_bool = request.method == "POST" and (request.endpoint == "backtest_reviewed" or (
+            order_post_bool = request.method == "POST" and (request.endpoint in {"backtest_reviewed", "monthly_report_programs"} or (
                 orders_enabled_bool and request.endpoint in {"order_check", "order_send"}))
             if not order_post_bool and (not demo_tools_bool or request.method != "POST" or request.endpoint not in {
                     "tools_action_preview", "tools_action_confirm", "tools_action_cancel"}):
@@ -152,6 +157,20 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         return backtest_check_data.review_key_set(report_dict, pod_id_str)
 
     register_review_route(flask_app_obj, review_store_obj, current_review_key_set, now_fn=clock_fn)
+
+    def report_pod_id_set():
+        # The saved strategy accounts only (no Flex history); unreadable accounts are an empty set.
+        try:
+            workspace_dict = (workspace_snapshot_fn()[0] if workspace_snapshot_fn is not None else build_local_workspace_dict(
+                provider_obj, database_path_str, today_str=clock_fn().astimezone(MARKET_TIMEZONE_OBJ).date().isoformat()))
+            if workspace_dict.get("financial_error_str"):
+                return set()
+            return {account_dict["pod_id"] for account_dict in workspace_dict["client_dict"]["accounts"]
+                if account_dict.get("role", "strategy") == "strategy"}
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            return set()
+
+    register_program_route(flask_app_obj, program_store_obj, report_pod_id_set)
     # Console reads are bounded per request; these caps bound concurrency too.
     console_tail_semaphore_obj = threading.BoundedSemaphore(4)
     console_download_semaphore_obj = threading.BoundedSemaphore(1)
@@ -753,6 +772,7 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             refresh_report_url_str=performance_url_str(),
             csv_url_str=performance_url_str(download="csv", expected=report_dict["report_hash_str"], **download_date_dict) if report_dict else "",
             pdf_url_str=performance_url_str(download="pdf", expected=report_dict["report_hash_str"], **download_date_dict) if report_dict else "",
+            monthly_report_url_str=url_for("monthly_report"),
         )
         active_pod_set = {item_dict["pod_id_str"] for item_dict in overview_dict["pod_list"]}
         if level_str == "backtest":
@@ -776,6 +796,37 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
     @flask_app_obj.get("/performance/refresh")
     def performance_refresh():
         return performance_response(refresh_bool=True)
+
+    @flask_app_obj.get("/monthly-report")
+    def monthly_report():
+        # One month of the Performance numbers as a printable client report; no writes.
+        if set(request.args) - {"month"} or any(len(request.args.getlist(key_str)) != 1 for key_str in request.args):
+            abort(400)
+        month_str = request.args.get("month")
+        if month_str is not None and not re.fullmatch(r"20[0-9]{2}-(0[1-9]|1[0-2])", month_str):
+            abort(400)
+        acquisition_ts = clock_fn()
+        if workspace_snapshot_fn is None:
+            workspace_dict, snapshot_obj = load_workspace_snapshot_tuple(provider_obj, database_path_str, as_of_ts=acquisition_ts)
+        else:
+            workspace_dict, snapshot_obj = workspace_snapshot_fn()
+
+        def art_url_str(value_str):
+            # Optional picture of the month: static/report_art/<YYYY-MM>.webp|jpg|png.
+            art_root_obj = Path(flask_app_obj.static_folder) / "report_art"
+            return next((url_for("static", filename=f"report_art/{value_str}{suffix_str}") for suffix_str in (".webp", ".jpg", ".png")
+                if (art_root_obj / f"{value_str}{suffix_str}").is_file()), "")
+
+        report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=acquisition_ts,
+            month_str=month_str, database_path_str=database_path_str, alias_by_pod_dict=load_alias_by_pod_dict(database_path_str),
+            program_by_pod_dict=program_store_obj.program_by_pod_dict(),
+            month_url_fn=lambda value_str: url_for("monthly_report", month=value_str), art_url_fn=art_url_str)
+        if report_dict is None:
+            abort(404)
+        report_dict["back_url_str"] = url_for("performance")
+        report_dict["program_panel_dict"] = {"url_str": url_for("monthly_report_programs"), "token_str": program_store_obj.action_token_str,
+            "suggestion_list": list(SUGGESTED_PROGRAM_TUPLE), "pod_list": report_dict["pod_choice_list"]}
+        return render_template("monthly_report.html", report_dict=report_dict)
 
     @flask_app_obj.get("/performance/status")
     def performance_status():
