@@ -35,7 +35,7 @@ FLOW_ROW_LIMIT_INT = 12
 HOLDING_ROW_LIMIT_INT = 12
 NAME_XML_BYTE_LIMIT_INT = 32_000_000
 BRAND_NAME_STR = "Loren Slobodinsky"
-BRAND_DESC_STR = "Systematic investing"
+BRAND_DESC_STR = "Quantitative strategies"
 DEFAULT_PROGRAM_STR = "Portfolio"
 # One hue family per program: the program colour, then its Pods' shades in account
 # order (a fourth Pod reuses the last shade). Adjacent shades pass the dataviz
