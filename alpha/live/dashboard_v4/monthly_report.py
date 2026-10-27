@@ -612,6 +612,30 @@ def _activity_list(account_list, snapshot_obj, *, from_str, to_str):
     return result_list if row_list else []
 
 
+def _bridge_tuple(report_dict):
+    """The month's balance lines in cents, and the gain/loss they imply.
+
+    Each IBKR amount is rounded on its own, so independently rounded lines can
+    miss by a cent. As on a statement, gain/loss is the balancing line: closing
+    minus opening minus the movements, all as printed, so the lines always add up.
+    """
+    def cents_decimal(field_str):
+        return None if report_dict.get(field_str) is None else _rounded_decimal(report_dict[field_str], ".01")
+
+    opening_decimal, closing_decimal, pnl_decimal = (cents_decimal(field_str) for field_str in ("opening_nav_float", "closing_nav_float", "pnl_float"))
+    movement_list = [(label_str, cents_decimal(field_str)) for label_str, field_str in (("Net capital movements", "capital_movement_float"),
+        ("Accounts entering/leaving", "scope_movement_float"), ("Broker adjustments", "linking_adjustment_float"))]
+    if None not in (opening_decimal, closing_decimal, pnl_decimal, *(value_decimal for _, value_decimal in movement_list)):
+        pnl_decimal = closing_decimal - opening_decimal - sum((value_decimal for _, value_decimal in movement_list), Decimal(0))
+    row_list = [{"label_str": "Opening value", "value_str": _money_str(opening_decimal, cents_bool=True)},
+        {"label_str": movement_list[0][0], "value_str": _money_str(movement_list[0][1], signed_bool=True, cents_bool=True)},
+        {"label_str": "Investment gain/loss", "value_str": _money_str(pnl_decimal, signed_bool=True, cents_bool=True)}]
+    row_list += [{"label_str": label_str, "value_str": _money_str(value_decimal, signed_bool=True, cents_bool=True)}
+        for label_str, value_decimal in movement_list[1:] if value_decimal]
+    row_list.append({"label_str": "Closing value", "value_str": _money_str(closing_decimal, cents_bool=True)})
+    return row_list, pnl_decimal
+
+
 def _month_column_list(start_str, month_str):
     month_list, cursor_obj = [], date.fromisoformat(month_str + "-01")
     while len(month_list) < MONTH_COLUMN_LIMIT_INT and cursor_obj.isoformat()[:7] >= start_str[:7]:
@@ -729,11 +753,13 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
     put_in_float = closing_float - since_pnl_float if closing_float is not None and since_pnl_float is not None else None
     put_in_decimal = (_rounded_decimal(closing_float, "1") - _rounded_decimal(since_pnl_float, "1")
         if put_in_float is not None else None)
+    # The month's gain is the bridge's balancing line, so both places print the same amount.
+    bridge_row_list, month_pnl_decimal = _bridge_tuple(summary_month_dict)
     money_row_list = [
         {"class_str": "lead", "label_str": "Value on " + _long_day_str(close_str),
             "value_str": _money_str(closing_float), "tone_str": "", "pct_str": "", "pct_tone_str": ""},
         {"class_str": "", "label_str": "Investment gain/loss · " + calendar.month_name[month_obj.month],
-            "value_str": _money_str(summary_month_dict.get("pnl_float"), signed_bool=True), "tone_str": _money_tone_str(summary_month_dict.get("pnl_float")),
+            "value_str": _money_str(month_pnl_decimal, signed_bool=True), "tone_str": _money_tone_str(month_pnl_decimal),
             "pct_str": _percent_str(summary_month_dict.get("twr_float")), "pct_tone_str": _percent_tone_str(summary_month_dict.get("twr_float"))},
         {"class_str": "", "label_str": "Gain since start", "value_str": _money_str(since_pnl_float, signed_bool=True),
             "tone_str": _money_tone_str(since_pnl_float), "pct_str": _percent_str(summary_since_dict.get("twr_float")),
@@ -743,13 +769,7 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
     ]
     result_dict["money_row_list"] = money_row_list
     result_dict["summary_scope_str"] = "Your portfolio · USD"
-    result_dict["bridge_row_list"] = [{"label_str": label_str, "value_str": _money_str(summary_month_dict.get(field_str), signed_bool=signed_bool, cents_bool=True)}
-        for label_str, field_str, signed_bool in (("Opening value", "opening_nav_float", False),
-            ("Net capital movements", "capital_movement_float", True), ("Investment gain/loss", "pnl_float", True),
-            ("Closing value", "closing_nav_float", False))]
-    for label_str, field_str in (("Accounts entering/leaving", "scope_movement_float"), ("Broker adjustments", "linking_adjustment_float")):
-        if summary_month_dict.get(field_str):
-            result_dict["bridge_row_list"].insert(-1, {"label_str": label_str, "value_str": _money_str(summary_month_dict[field_str], signed_bool=True, cents_bool=True)})
+    result_dict["bridge_row_list"] = bridge_row_list
 
     # Programs retain their historical identity even after the last Pod closes.
     # Pod numbers follow the first measured day (then account order, as on Performance), so a Pod keeps
@@ -831,7 +851,8 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
         table_list = [_pod_holding_table_dict(pod_dict, pod_color_dict[pod_dict["pod_id_str"]], holdings_by_pod_dict[pod_dict["pod_id_str"]])
             for pod_dict in member_list if pod_dict["active_bool"]]
         program_list.append({"name_str": name_str, "color_str": color_str,
-            "since_str": "from " + program_start_str + (" · closed " + program_to_str if closed_bool else ""),
+            "since_str": f"since {_short_day_str(program_start_str)}, {program_start_str[:4]}"
+                + (f" · closed {_short_day_str(program_to_str)}, {program_to_str[:4]}" if closed_bool else ""),
             "closed_bool": closed_bool,
             "value_str": _money_str(program_value_float),
             "change_str": _money_str(month_pnl_float, signed_bool=True) + " this month", "change_tone_str": _money_tone_str(month_pnl_float),
@@ -842,7 +863,9 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
             if pod_dict["active_bool"] and pod_dict["closing_float"] and active_total_float > 0]
         if share_list:
             group_list.append({"name_str": name_str, "pct_str": _percent_str(sum(share_float for _, share_float in share_list), signed_bool=False),
+                # The legend column is narrow: the Pod number on one line, its masked account under it.
                 "pod_list": [{"name_str": pod_dict["name_str"], "head_str": pod_dict["head_str"], "alias_str": pod_dict["alias_str"],
+                    "number_str": pod_dict["head_str"].partition(" · ")[0], "account_str": pod_dict["head_str"].partition(" · ")[2],
                     "pct_str": _percent_str(share_float, signed_bool=False), "color_str": pod_color_dict[pod_dict["pod_id_str"]]}
                     for pod_dict, share_float in share_list]})
             split_item_list += [(share_float, pod_color_dict[pod_dict["pod_id_str"]], name_str, pod_dict["name_str"]) for pod_dict, share_float in share_list]

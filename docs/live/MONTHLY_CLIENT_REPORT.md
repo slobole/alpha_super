@@ -178,6 +178,10 @@ are unchanged. This update remains local and does not rewrite older archives.
   the names they were issued with.
 - The report opens on the newest month, to the latest saved day. While that
   month is in progress it is a marked draft; completed months are in the list.
+- The month bridge prints cents with gain/loss as the balancing line, so the
+  printed lines always add up; a cent of rounding goes into gain/loss, so it
+  can differ by a cent from Performance. Program cards say "since Sep 24,
+  2026", and the allocation legend puts the masked account under the Pod number.
 - Engine, archive, holdings rules and the Performance page are unchanged.
 
 Validation: 2,785 Live Ops V4, report and client TWR tests pass. The two golden

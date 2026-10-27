@@ -259,6 +259,8 @@ def test_other_accounts_stay_apart_from_programs_and_activity_reads_the_month(tm
     page_str = html_str[html_str.index('<main class="mr-pages"'):]
     assert '<h1 class="h1">August 2026</h1>' in page_str and "sample_user" not in html_str
     assert "$50,100" not in page_str and "not included: Vault." in page_str
+    # The narrow allocation legend puts the masked account under the Pod number instead of wrapping mid-name.
+    assert '<span>Pod 1<span class="pa">U···100</span></span>' in page_str and "since Aug 3, 2026" in page_str
     assert "Holdings on Aug 31 were not saved." in page_str
     assert "Holdings on Aug 31 were not saved." in html_str[:html_str.index('<main class="mr-pages"')]
 

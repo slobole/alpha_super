@@ -90,7 +90,7 @@
             <div class="sleg">
               {% for group_dict in report_dict.split_dict.group_list %}
               <div class="sg"><span>{{ group_dict.name_str }}</span><span class="n">{{ group_dict.pct_str }}</span></div>
-              {% if report_dict.single_program_bool %}{% for pod_dict in group_dict.pod_list %}<div class="sp"><span class="sw" style="background:{{ pod_dict.color_str }}"></span><span>{{ pod_dict.head_str }}</span><span class="pc">{{ pod_dict.pct_str }}</span></div>{% endfor %}{% endif %}
+              {% if report_dict.single_program_bool %}{% for pod_dict in group_dict.pod_list %}<div class="sp"><span class="sw" style="background:{{ pod_dict.color_str }}"></span><span>{{ pod_dict.number_str }}{% if pod_dict.account_str %}<span class="pa">{{ pod_dict.account_str }}</span>{% endif %}</span><span class="pc">{{ pod_dict.pct_str }}</span></div>{% endfor %}{% endif %}
               {% endfor %}
             </div>
           </div>

@@ -70,7 +70,7 @@ def test_retired_program_keeps_its_own_return_and_zero_closing_allocation():
         assert program_dict[name_str]["change_str"] == _money_str(pnl_float, signed_bool=True) + " this month"
     assert program_dict["Growth"]["value_str"] == _money_str(growth_close_float)
     assert program_dict["Steady"]["value_str"] == "$0" and program_dict["Steady"]["closed_bool"]
-    assert "closed 2026-08-13" in program_dict["Steady"]["since_str"]
+    assert program_dict["Steady"]["since_str"] == "since Aug 3, 2026 · closed Aug 13, 2026"
     assert "Steady" not in [group_dict["name_str"] for group_dict in report_dict["split_dict"]["group_list"]]
     assert [row_dict["name_str"] for row_dict in report_dict["month_table_dict"]["row_list"]] == [
         "Growth", "Pod 1 · U···100", "Steady", "Pod 2 · U···200"]
@@ -217,11 +217,29 @@ def test_printed_flow_cells_still_add_up_when_source_movements_have_cents():
         + _amount_decimal(bridge_dict["Investment gain/loss"]) == _amount_decimal(bridge_dict["Closing value"])
 
 
+def test_bridge_lines_add_up_when_ibkr_amounts_have_fractions_of_a_cent():
+    # ERAN, October 2026: printed independently, 26,303.81 - 1,299.02 = 25,004.79, not 25,004.80.
+    row_list, pnl_decimal = monthly_report._bridge_tuple({"opening_nav_float": 26303.814, "capital_movement_float": 0.,
+        "scope_movement_float": 0., "linking_adjustment_float": 0., "pnl_float": -1299.016, "closing_nav_float": 25004.798})
+    assert [(row_dict["label_str"], row_dict["value_str"]) for row_dict in row_list] == [("Opening value", "$26,303.81"),
+        ("Net capital movements", "$0.00"), ("Investment gain/loss", "−$1,299.01"), ("Closing value", "$25,004.80")]
+    assert pnl_decimal == Decimal("-1299.01")
+    row_list, pnl_decimal = monthly_report._bridge_tuple({"opening_nav_float": 1000.004, "capital_movement_float": 250.006,
+        "scope_movement_float": -100.004, "linking_adjustment_float": .004, "pnl_float": 9.99, "closing_nav_float": 1160.})
+    value_list = [_amount_decimal(row_dict["value_str"]) for row_dict in row_list]
+    assert [row_dict["label_str"] for row_dict in row_list] == ["Opening value", "Net capital movements", "Investment gain/loss",
+        "Accounts entering/leaving", "Closing value"]
+    assert sum(value_list[:-1]) == value_list[-1] and pnl_decimal == Decimal("9.99")
+    # Without complete flows there is no balancing line to print.
+    row_list, pnl_decimal = monthly_report._bridge_tuple({"opening_nav_float": 1000., "closing_nav_float": 1010.})
+    assert pnl_decimal is None and row_list[2]["value_str"] == "—"
+
+
 def test_printed_body_omits_method_section_but_keeps_missing_evidence_and_partial_dates():
     workspace_dict, snapshot_obj = _sample_tuple()
     report_dict = _report_dict(workspace_dict, snapshot_obj)
     body_str = _printed_body_str(report_dict)
-    for text_str in ("Holdings on Aug 31 were not saved.", "from 2026-08-03", "Your portfolio", "USD", "not included: Vault"):
+    for text_str in ("Holdings on Aug 31 were not saved.", "since Aug 3, 2026", "Your portfolio", "USD", "not included: Vault"):
         assert text_str in body_str
     for text_str in ("About these numbers", "end-of-day capital flows", "Prepared ", "Source:"):
         assert text_str not in body_str
@@ -298,5 +316,5 @@ def test_vault_before_first_pod_starts_the_report_with_the_programs():
     # Month and since start both begin on the first Pod day, never on the vault's.
     assert report_dict["money_row_list"][1]["value_str"] == _money_str(expected_pnl_float, signed_bool=True)
     assert report_dict["money_row_list"][1]["pct_str"] == report_dict["money_row_list"][2]["pct_str"] == _percent_str(expected_return_float)
-    assert report_dict["program_list"][0]["since_str"] == "from 2026-08-17"
+    assert report_dict["program_list"][0]["since_str"] == "since Aug 17, 2026"
     assert report_dict["program_list"][0]["stat_list"][-1]["value_str"] == _percent_str(expected_return_float)
