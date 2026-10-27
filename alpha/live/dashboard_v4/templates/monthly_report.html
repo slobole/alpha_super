@@ -54,7 +54,7 @@
     <p>{{ report_dict.error_str }}</p>
   </main>
   {% else %}
-  <main class="mr-pages">
+  <main class="mr-pages" data-report-id="{{ report_dict.report_id_str }}">
     <section class="pg" aria-label="Summary">
       {% if report_dict.draft_bool %}<div class="mr-draft">Draft · {{ report_dict.draft_reason_str }}</div>{% endif %}
       {% if report_dict.is_demo_bool %}<div class="mr-demo">DEMONSTRATION · synthetic data</div>{% endif %}
@@ -143,6 +143,7 @@
             </div>
             {% endif %}
           </div>
+          {% if not holding_dict.available_bool and holding_dict.reason_str %}<p class="na">{{ holding_dict.reason_str }}</p>{% endif %}
         </article>
         {% endfor %}
       </section>
@@ -217,20 +218,14 @@
       </section>
       {% endif %}
 
+      {% if report_dict.flow_dict.reason_str %}<p class="detail-status">{{ report_dict.flow_dict.reason_str }}</p>{% endif %}
+
       {% if report_dict.activity_list %}
       <section class="block" aria-label="Activity">
         <div class="sec-t">All accounts · {{ report_dict.month_name_str }} · posted activity</div>
         <div class="act">{% for item_dict in report_dict.activity_list %}<span>{{ item_dict.label_str }} <b>{{ item_dict.value_str }}</b></span>{% endfor %}</div>
       </section>
       {% endif %}
-
-      <section class="block report-notes" aria-label="Report basis">
-        <div class="sec-t">About these numbers</div>
-        <p>{{ report_dict.method_note_str }}</p>
-        <p>{{ report_dict.fee_note_str }}</p>
-        {% for note_str in report_dict.note_list %}<p class="data-note">{{ note_str }}</p>{% endfor %}
-        <p>Source: {{ 'synthetic demonstration' if report_dict.is_demo_bool else 'saved IBKR statements' }}. Prepared {{ report_dict.generated_at_str }}. Report {{ report_dict.report_id_str }}.</p>
-      </section>
 
       <footer class="foot"><div class="foot-in"><span>{{ report_dict.period_label_str }} · Details</span></div></footer>
     </section>

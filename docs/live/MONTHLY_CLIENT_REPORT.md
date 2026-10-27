@@ -61,7 +61,7 @@ transit remains unsupported and withholds the return.
              /                  \
  [All-client summary]   [Verified program subsets]
              \                  /
-       [Monthly report + printed methodology]
+       [Monthly report + concise data status]
                     |
         [Explicit Save report and print PDF]
                     |
@@ -87,7 +87,7 @@ earlier-movements row within that month.
 ## Issue, store and correct
 
 1. Open Performance, then Monthly report, and select the completed month.
-2. Review scope, balances, program identities and printed data notes.
+2. Review scope, balances, program identities and concise missing-data notices.
 3. `Save report and print PDF` rechecks the displayed report identity, rejects
    drafts/stale previews and freezes HTML, CSS, font, optional picture, timestamp
    and source/method/program evidence.
@@ -145,3 +145,20 @@ Browser and PDF checks are recorded separately from Python tests.
 
 No broker actions, production writes, release/configuration changes, push or
 deployment were performed. The four baseline failures remain separately visible.
+
+## Presentation update - 2026-10-27
+
+At the owner's request, the report no longer renders the "About these numbers"
+section or its methodology, fee and preparation paragraphs. The accounting
+contract remains documented here. Draft labels and short unavailable-holdings
+and capital-history notices stay beside the relevant content. Report identity
+remains in document metadata; frozen archive evidence retains the preparation
+timestamp, source hashes and method version. Previously issued copies remain
+unchanged.
+
+Validation for this presentation update: 116 report/archive tests passed after
+adapting their HTML selectors, and all 144 required live regression tests passed.
+Five browser/PDF variants retain two pages, omit the removed section and print
+the frozen copy. Independent parity/coverage and failure-mode reviews found no
+remaining blocker. Tier 3 by path; accounting, execution and storage formats
+are unchanged. This update remains local and does not rewrite older archives.

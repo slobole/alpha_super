@@ -35,7 +35,7 @@ def _preview_dict(context_dict, month_str="2026-08"):
     assert response_obj.status_code == 200
     html_str = response_obj.get_data(as_text=True)
     token_str = re.search(r'data-token="([^"]+)"', html_str).group(1)
-    report_id_str = re.search(r"Report ([0-9a-f]{16})\.", html_str).group(1)
+    report_id_str = re.search(r'data-report-id="([0-9a-f]{16})"', html_str).group(1)
     return {"html_str": html_str, "header_dict": {"Origin": "http://localhost", "X-Alpha-Action-Token": unescape(token_str)},
         "body_dict": {"confirmed_bool": True, "month_str": month_str, "report_id_str": report_id_str}}
 
@@ -89,6 +89,7 @@ def test_saved_html_is_self_contained_without_controls_tokens_or_internal_identi
     assert response_obj.status_code == 200
     html_str = context_dict["client_obj"].get(response_obj.get_json()["archive_url_str"]).get_data(as_text=True)
     assert "data:font/woff2;base64," in html_str and "@media print" in html_str
+    assert "About these numbers" not in html_str
     for forbidden_str in ("<script", "<link", "<nav", "data-token=", "data-programs", "data-print", "/assets/", "/static/",
             "U100", "U200", "U900", "pod_taa", "pod_ndx", str(context_dict["root_obj"]),
             preview_dict["header_dict"]["X-Alpha-Action-Token"]):

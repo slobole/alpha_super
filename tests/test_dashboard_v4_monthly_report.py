@@ -151,8 +151,9 @@ def test_route_is_read_only_validates_the_month_and_renders_both_pages(demo_tupl
     response_obj = client_obj.get("/monthly-report?month=2026-08")
     text_str = _visible_text_str(response_obj.get_data(as_text=True))
     for expected_str in ("Monthly report", "Value on August 31", "+$1,090", "+1.1%", "Gain since start", "Holdings",
-            "TWR by month, %", "Details", "Opening capital + net movements", "August 2026 · Summary", "August 2026 · Details", "About these numbers"):
+            "TWR by month, %", "Details", "Opening capital + net movements", "August 2026 · Summary", "August 2026 · Details"):
         assert expected_str in text_str
+    assert "About these numbers" not in text_str
     assert "Draft" not in text_str
     assert response_obj.headers["Content-Security-Policy"].startswith("default-src 'self'")
     assert "<script>" not in response_obj.get_data(as_text=True)
@@ -253,10 +254,10 @@ def test_other_accounts_stay_apart_from_programs_and_activity_reads_the_month(tm
     app_obj = create_app(object(), now_fn=lambda: SAMPLE_AS_OF_TS, performance_db_path_str=str(tmp_path / "none.sqlite3"),
         workspace_snapshot_fn=lambda: (workspace_dict, snapshot_obj))
     html_str = app_obj.test_client().get("/monthly-report?month=2026-08").get_data(as_text=True)
-    page_str = html_str[html_str.index('<main class="mr-pages">'):]
+    page_str = html_str[html_str.index('<main class="mr-pages"'):]
     assert '<h1 class="h1">August 2026</h1>' in page_str and "sample_user" not in html_str
     assert "Holdings on Aug 31 were not saved." in page_str
-    assert "Holdings on Aug 31 were not saved." in html_str[:html_str.index('<main class="mr-pages">')]
+    assert "Holdings on Aug 31 were not saved." in html_str[:html_str.index('<main class="mr-pages"')]
 
 
 def test_saved_portfolio_counts_only_when_captured_after_that_close(monkeypatch):

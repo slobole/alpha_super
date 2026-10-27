@@ -56,9 +56,6 @@ html, body { margin: 0; }
 .bridge span { display: block; color: #475569; font-size: 12px; }
 .bridge b { display: block; font-size: 16px; font-variant-numeric: tabular-nums; }
 .scope-note { margin: 10px 48px 0; color: #475569; font-size: 12px; }
-.report-notes { font-size: 12px; color: #475569; padding-bottom: 20px; }
-.report-notes p { margin: 8px 0; }
-.report-notes .data-note { color: #92400E; }
 .holding-detail { display: block; font-size: 11.5px; color: #475569; }
 .money { width: 100%; border-collapse: collapse; margin-top: 8px; font-variant-numeric: tabular-nums; }
 .money td { padding: 8px 0; border-bottom: 1px solid #E2E8F0; }
@@ -153,6 +150,6 @@ html, body { margin: 0; }
   .pg { box-shadow: none; break-after: page; page-break-after: always; }
   .pg:last-child { break-after: auto; page-break-after: auto; }
   .mr-draft { display: block; }
-  .card, .report-notes, tr { break-inside: avoid; }
+  .card, tr { break-inside: avoid; }
   thead { display: table-header-group; }
 }

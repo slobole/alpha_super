@@ -50,7 +50,7 @@ def _printed_body_str(report_dict):
     app_obj.add_url_rule("/assets/<path:filename>", endpoint="assets", view_func=lambda filename: "")
     with app_obj.test_request_context():
         html_str = render_template("monthly_report.html", report_dict=report_dict)
-    return _visible_text_str(html_str.split('<main class="mr-pages">', 1)[1].split("</main>", 1)[0])
+    return _visible_text_str(html_str.split('<main class="mr-pages"', 1)[1].split(">", 1)[1].split("</main>", 1)[0])
 
 
 def _amount_decimal(value_str):
@@ -216,17 +216,17 @@ def test_printed_flow_cells_still_add_up_when_source_movements_have_cents():
         + _amount_decimal(bridge_dict["Investment gain/loss"]) == _amount_decimal(bridge_dict["Closing value"])
 
 
-def test_printed_body_contains_method_limits_missing_evidence_and_partial_dates():
+def test_printed_body_omits_method_section_but_keeps_missing_evidence_and_partial_dates():
     workspace_dict, snapshot_obj = _sample_tuple()
     report_dict = _report_dict(workspace_dict, snapshot_obj)
     body_str = _printed_body_str(report_dict)
-    for text_str in ("end-of-day capital flows", "not official consolidated IBKR", "Pod and other-account rows use IBKR account TWR",
-            "Amounts in USD", "Holdings on Aug 31 were not saved.", "from 2026-08-03", "Initial/final months may be partial",
-            "All your accounts", "VAULT", "Report " + report_dict["report_id_str"]):
+    for text_str in ("Holdings on Aug 31 were not saved.", "from 2026-08-03", "All your accounts", "USD", "VAULT"):
         assert text_str in body_str
+    for text_str in ("About these numbers", "end-of-day capital flows", "Prepared ", "Source:"):
+        assert text_str not in body_str
     partial_dict = _report_dict(workspace_dict, snapshot_obj, month_str="2026-09")
     partial_body_str = _printed_body_str(partial_dict)
-    assert partial_dict["draft_bool"] and partial_body_str.count("Draft · Month in progress, through Sep 3") == 3
+    assert partial_dict["draft_bool"] and partial_body_str.count("Draft · Month in progress, through Sep 3") == 2
     assert "September 2026 · to Sep 3" in partial_body_str
 
 
@@ -235,7 +235,7 @@ def test_printed_demo_cannot_be_mistaken_for_real_broker_report():
     workspace_dict["client_dict"]["is_demo"] = True
     body_str = _printed_body_str(_report_dict(workspace_dict, snapshot_obj))
     assert "DEMONSTRATION · synthetic data" in body_str
-    assert "Source: synthetic demonstration" in body_str
+    assert body_str.count("DEMONSTRATION · synthetic data") == 2
     assert "Source: saved IBKR statements" not in body_str
 
 
