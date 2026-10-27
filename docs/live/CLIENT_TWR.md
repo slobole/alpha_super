@@ -117,10 +117,10 @@ nonzero internal net on verified parent dates. Failed proof withholds the return
 Parent scope/report hashes are preserved in subset provenance. Existing calls
 without needed context retain their previous result.
 
-The [monthly client report](MONTHLY_CLIENT_REPORT.md) uses full-client headline
-scope, including VAULT, and independently calculated program sections. Its
-date horizon follows the full ownership book, including after all programs
-close. This differs intentionally from the strategy-first Performance page.
+The [monthly client report](MONTHLY_CLIENT_REPORT.md) uses the programs' scope,
+like the Performance page, with independently calculated program sections.
+Other accounts such as VAULT are named but not counted, and its months end with
+the last Pod day.
 
 ## Availability
 

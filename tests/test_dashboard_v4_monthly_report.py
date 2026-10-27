@@ -233,11 +233,12 @@ def test_other_accounts_stay_apart_from_programs_and_activity_reads_the_month(tm
         from_date_str="2026-08-03", to_date_str="2026-08-31")
     assert not report_dict["draft_bool"], report_dict["draft_reason_str"]
     value_dict = _money_value_dict(report_dict)
-    assert value_dict["Value on August 31"][0] == _money_str(page_dict["client_report_dict"]["closing_nav_float"])
+    assert value_dict["Value on August 31"][0] == _money_str(page_dict["report_dict"]["closing_nav_float"])
     assert report_dict["program_list"][0]["value_str"] == _money_str(page_dict["report_dict"]["closing_nav_float"])
-    assert report_dict["other_account_list"][0]["value_str"] == "$50,100"
-    # The vault's gain is client money, not program profit.
-    assert value_dict["Gain since start"][0] == _money_str(page_dict["client_report_dict"]["pnl_float"], signed_bool=True)
+    # The vault is named, never counted: its USD change would mostly be the exchange rate.
+    assert value_dict["Gain since start"][0] == _money_str(page_dict["report_dict"]["pnl_float"], signed_bool=True)
+    assert report_dict["scope_note_str"] == "All values cover your programs. Your other IBKR accounts are not included: Vault."
+    assert [group_dict["name_str"] for group_dict in report_dict["split_dict"]["group_list"]] == ["Portfolio"]
     assert [row_dict["kind_str"] for row_dict in report_dict["flow_dict"]["row_list"]] == ["Opening capital", "Net inflow", "Offsetting movements"]
     assert report_dict["flow_dict"]["pod_total_list"] == ["$20,500", "$10,500"] and report_dict["flow_dict"]["total_str"] == "$31,000"
     assert report_dict["activity_list"] == [{"label_str": "Commissions", "value_str": "$1.25"},
@@ -256,6 +257,7 @@ def test_other_accounts_stay_apart_from_programs_and_activity_reads_the_month(tm
     html_str = app_obj.test_client().get("/monthly-report?month=2026-08").get_data(as_text=True)
     page_str = html_str[html_str.index('<main class="mr-pages"'):]
     assert '<h1 class="h1">August 2026</h1>' in page_str and "sample_user" not in html_str
+    assert "$50,100" not in page_str and "not included: Vault." in page_str
     assert "Holdings on Aug 31 were not saved." in page_str
     assert "Holdings on Aug 31 were not saved." in html_str[:html_str.index('<main class="mr-pages"')]
 
@@ -387,16 +389,15 @@ def test_a_month_is_final_only_once_its_last_calendar_day_is_finalized():
         "2025-11", "2025-12", "2026-01", "2026-02"]
 
 
-def test_a_missing_other_account_blocks_finality_without_backdating_the_month():
+def test_a_missing_other_account_does_not_hold_back_the_programs_report():
     workspace_dict, snapshot_obj = _sample_tuple(last_row_dict={"U900": "2026-08-28"})
     report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS)
     page_dict = build_performance_page_dict(workspace_dict, snapshot_obj, as_of_ts=SAMPLE_AS_OF_TS,
         from_date_str="2026-08-03", to_date_str="2026-08-31")
-    assert report_dict["month_str"] == "2026-08"
+    assert report_dict["month_str"] == "2026-08" and not report_dict["draft_bool"], report_dict["draft_reason_str"]
     value_dict = _money_value_dict(report_dict)
     assert report_dict["program_list"][0]["value_str"] == _money_str(page_dict["report_dict"]["closing_nav_float"])
-    assert value_dict["Value on August 31"][0] == "—"
-    assert report_dict["draft_reason_str"] == "Month data incomplete"
+    assert value_dict["Value on August 31"][0] == _money_str(page_dict["report_dict"]["closing_nav_float"])
     assert build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS,
         month_str="2026-09")["draft_reason_str"] == "Month in progress, through Sep 3"
 
@@ -489,8 +490,7 @@ def test_guards_name_the_problem():
     reserve_only_dict["client_dict"]["accounts"] = [account_dict for account_dict in reserve_only_dict["client_dict"]["accounts"]
         if account_dict.get("role") == "reserve"]
     report_dict = build_monthly_report_dict(reserve_only_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS)
-    assert report_dict["available_bool"] and not report_dict["draft_bool"]
-    assert report_dict["program_list"] == [] and report_dict["summary_scope_str"] == "All your accounts · USD"
+    assert not report_dict["available_bool"] and report_dict["error_str"] == "No program has started yet."
     early_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=datetime(2026, 8, 3, 13, tzinfo=UTC))
     assert early_dict["error_str"] == "No finalized account value is available yet."
 
@@ -534,10 +534,10 @@ def test_programs_panel_saves_choices_and_the_report_follows(demo_tuple, tmp_pat
     for name_str in ("Steady", "Growth", "Growth Plus"):
         assert f"{name_str} program" in client_obj.get("/monthly-report?month=2026-08").get_data(as_text=True)
     assert "Portfolio since" not in text_str
-    # Clearing a saved assignment cannot rewrite already measured history.
-    assert _post_programs(client_obj, {"confirmed_bool": True, "program_by_pod_dict": {"demo_1_3": ""}}, token_str=token_str).status_code == 409
+    # Clearing a saved assignment moves that Pod back to Portfolio; the others keep theirs.
+    assert _post_programs(client_obj, {"confirmed_bool": True, "program_by_pod_dict": {"demo_1_3": ""}}, token_str=token_str).status_code == 200
     html_str = client_obj.get("/monthly-report?month=2026-08").get_data(as_text=True)
-    assert 'aria-label="Portfolio program"' not in html_str and "Growth Plus program" in html_str
+    assert 'aria-label="Portfolio program"' in html_str and "Growth Plus program" not in html_str
     assert 'aria-label="Steady program"' in html_str
 
 
@@ -565,13 +565,12 @@ def test_programs_route_refuses_anything_but_a_same_origin_tokened_choice(demo_t
 
 
 def test_program_store_keeps_choices_in_a_file_next_to_the_event_log(tmp_path):
-    from alpha.live.dashboard_v4.report_programs import PROGRAM_BYTE_LIMIT_INT, ReportProgramStore, clean_program_str, ReportProgramReadError, ReportProgramConflictError
+    from alpha.live.dashboard_v4.report_programs import PROGRAM_BYTE_LIMIT_INT, ReportProgramStore, clean_program_str, ReportProgramReadError
     provider_obj = SimpleNamespace(event_log_path_str=str(tmp_path / "events.jsonl"))
     ReportProgramStore(provider_obj).save({"pod_taa": "Growth", "pod_ndx": "Growth"})
     assert ReportProgramStore(provider_obj).program_by_pod_dict() == {"pod_taa": "Growth", "pod_ndx": "Growth"}
-    with pytest.raises(ReportProgramConflictError):
-        ReportProgramStore(provider_obj).save({"pod_ndx": ""})
-    assert ReportProgramStore(provider_obj).program_by_pod_dict() == {"pod_taa": "Growth", "pod_ndx": "Growth"}
+    ReportProgramStore(provider_obj).save({"pod_ndx": ""})
+    assert ReportProgramStore(provider_obj).program_by_pod_dict() == {"pod_taa": "Growth"}
     path_obj = tmp_path / "report_programs.json"
     path_obj.write_text('{"program_by_pod_dict": {"pod_taa": "Steady", "pod_bad": "<script>"}}', encoding="utf-8")
     with pytest.raises(ReportProgramReadError):
@@ -693,3 +692,10 @@ def test_programs_panel_shows_the_saved_choice(tmp_path):
     assert '<option value="Growth" selected>' in taa_str and 'data-program-name maxlength="30" placeholder="Program name" value=""' in taa_str
     assert '<option value="__other__" selected>' in ndx_str and 'value="Q&amp;A 1/2"' in ndx_str and " hidden>" not in ndx_str
     assert 'aria-label="Q&amp;A 1/2 program"' in html_str
+    # A saved choice stays editable: renaming or clearing it is a normal save.
+    assert " disabled" not in taa_str + ndx_str and " readonly" not in taa_str + ndx_str
+    assert _post_programs(client_obj, {"confirmed_bool": True, "program_by_pod_dict": {"pod_taa": "Steady", "pod_ndx": ""}},
+        token_str=token_str).status_code == 200
+    html_str = client_obj.get("/monthly-report?month=2026-08").get_data(as_text=True)
+    assert 'aria-label="Steady program"' in html_str and 'aria-label="Portfolio program"' in html_str
+    assert 'aria-label="Q&amp;A 1/2 program"' not in html_str

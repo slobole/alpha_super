@@ -438,17 +438,17 @@ Live dashboard P&L percentages are computed from broker EOD NetLiq snapshots, wh
 
 ## Detailed Note: Monthly client report accounting boundaries
 
-The monthly report distinguishes total client wealth (including VAULT and USD
-valuation of non-USD assets) from each program's measured strategy performance.
+The monthly report covers the client's programs only. Other accounts such as
+VAULT (often shekel cash that IBKR translates to USD) are named, never counted.
 Its daily TWR retains the reviewed end-of-day capital-flow convention; it is not
 exact intraday TWR, official consolidated IBKR TWR, MWR or independent fund
 administration. A subset transfer is accepted only with a complete, reconciled
 containing client book for the same dates. Same-day net zero does not identify
 individual transfer events; cross-day cash in transit remains unsupported.
 
-Historical program assignment is immutable per Pod; dated reassignment is not
-implemented. Same-close positions plus independently saved cash must reconcile
-before showing holdings. Missing optional holdings are disclosed, never inferred
+A Pod's program covers its whole history (editable; saved reports keep their
+names); dated reassignment is not implemented. Same-close positions plus
+independently saved cash must reconcile before showing holdings. Missing optional holdings are disclosed, never inferred
 as NAV minus positions. Issued HTML/evidence snapshots preserve an exact version
 and verify its bytes, but do not prove external authenticity. The program store
 assumes one writing app process. See [Monthly Client Report](docs/live/MONTHLY_CLIENT_REPORT.md)

@@ -1,9 +1,10 @@
 """Programs for the monthly client report: the program each Pod belongs to.
 
 One small JSON file next to the Live Ops event log, written only from the
-report's Programs panel. A saved assignment stays with its Pod so later choices
-cannot relabel historical returns. Display only: nothing here touches orders,
-releases or pod state. A Pod without a program shows under "Portfolio".
+report's Programs panel. A Pod's program covers its whole history, so a change
+shows in every report built afterwards; saved reports keep their own copy.
+Display only: nothing here touches orders, releases or pod state. A Pod
+without a program shows under "Portfolio".
 """
 
 import json
@@ -28,10 +29,6 @@ REPLACE_ATTEMPT_INT = 5
 
 class ReportProgramReadError(ValueError):
     """An existing saved mapping is unreadable; callers must withhold the report."""
-
-
-class ReportProgramConflictError(ValueError):
-    """Changing a saved assignment would relabel the Pod's historical returns."""
 
 
 class ReportProgramLimitError(ValueError):
@@ -116,10 +113,10 @@ class ReportProgramStore:
         return clean_dict
 
     def save(self, update_dict):
-        """Assign previously unassigned Pods; preserve every existing assignment.
+        """Set or clear the program of each given Pod; other Pods keep theirs.
 
-        Case/spacing equivalents are idempotent. A clear or different program is
-        rejected atomically because this format has no dated reassignment ledger.
+        All or nothing: an invalid entry or a limit leaves the file unchanged.
+        There is no dated reassignment: a Pod's program covers its whole history.
         """
         with self._lock_obj:
             program_dict = self.program_by_pod_dict()
@@ -127,11 +124,10 @@ class ReportProgramStore:
                 clean_str = clean_program_str(program_str)
                 if not isinstance(pod_id_str, str) or not pod_id_str.strip() or pod_id_str != pod_id_str.strip() or clean_str is None:
                     raise ValueError("Invalid Pod or program name")
-                existing_str = program_dict.get(pod_id_str)
-                if existing_str is not None and existing_str.casefold() != clean_str.casefold():
-                    raise ReportProgramConflictError("A saved program stays with its Pod to preserve past reports. It cannot be changed or cleared here.")
-                if clean_str and existing_str is None:
+                if clean_str:
                     program_dict[pod_id_str] = clean_str
+                else:
+                    program_dict.pop(pod_id_str, None)
             if len(program_dict) > PROGRAM_LIMIT_INT:
                 raise ReportProgramLimitError("The saved program limit has been reached. No assignments were changed.")
             path_obj = self._path_obj()
@@ -196,8 +192,6 @@ def register_program_route(app_obj, store_obj, current_pod_set_fn):
             store_obj.save(clean_dict)
         except ReportProgramReadError as error_obj:
             return jsonify(error="programs_unreadable", message=str(error_obj)), 503
-        except ReportProgramConflictError as error_obj:
-            return jsonify(error="program_locked", message=str(error_obj)), 409
         except ReportProgramLimitError as error_obj:
             return jsonify(error="program_limit", message=str(error_obj)), 409
         except FileNotFoundError:

@@ -107,20 +107,21 @@ def test_cross_program_transfer_resolves_without_changing_broker_rows_or_account
     assert snapshot_obj == original_obj and workspace_dict == original_workspace_dict
 
 
-def test_usd_vault_fx_gain_changes_investor_headline_but_not_program_performance():
+def test_vault_fx_gain_never_enters_the_programs_report():
     base_workspace_dict, base_snapshot_obj = _sample_tuple(extra_event_dict={("U900", "2026-08-31"): {"mtm": "0"}})
     fx_workspace_dict, fx_snapshot_obj = _sample_tuple(extra_event_dict={("U900", "2026-08-31"): {"mtm": "300"}})
     base_dict = _report_dict(base_workspace_dict, base_snapshot_obj)
     fx_dict = _report_dict(fx_workspace_dict, fx_snapshot_obj)
-    expected_return_float, expected_pnl_float, expected_close_float = _expected_tuple(fx_snapshot_obj, {"U100", "U200", "U900"})
-    assert fx_dict["summary_scope_str"] == "All your accounts · USD"
+    expected_return_float, expected_pnl_float, expected_close_float = _expected_tuple(fx_snapshot_obj, {"U100", "U200"})
+    assert fx_dict["summary_scope_str"] == "Your portfolio · USD"
     assert fx_dict["money_row_list"][0]["value_str"] == _money_str(expected_close_float)
     assert fx_dict["money_row_list"][1]["value_str"] == _money_str(expected_pnl_float, signed_bool=True)
     assert fx_dict["money_row_list"][1]["pct_str"] == _percent_str(expected_return_float)
-    assert _amount_decimal(fx_dict["money_row_list"][0]["value_str"]) - _amount_decimal(base_dict["money_row_list"][0]["value_str"]) == 300
-    assert fx_dict["program_list"] == base_dict["program_list"]
-    assert fx_dict["other_account_list"][0]["pnl_str"] == "+$300"
-    assert "Non-USD holdings" in fx_dict["scope_note_str"] and "FX" in fx_dict["scope_note_str"]
+    # Cash held in shekels is translated by IBKR; its USD change is the exchange rate, not the programs.
+    for key_str in ("money_row_list", "bridge_row_list", "program_list", "split_dict", "activity_list", "month_table_dict"):
+        assert fx_dict[key_str] == base_dict[key_str], key_str
+    assert fx_dict["scope_note_str"] == "All values cover your programs. Your other IBKR accounts are not included: Vault."
+    assert "+$300" not in _printed_body_str(fx_dict) and "$50,300" not in _printed_body_str(fx_dict)
     assert sum(float(group_dict["pct_str"].rstrip("%")) for group_dict in fx_dict["split_dict"]["group_list"]) == pytest.approx(100, abs=.15)
 
 
@@ -204,10 +205,10 @@ def test_printed_flow_cells_still_add_up_when_source_movements_have_cents():
     assert row_dict["total_str"] == "+$1.00"
     assert [cell_dict["value_str"] for cell_dict in row_dict["cell_list"]] == ["+$0.50", "+$0.50"]
     assert sum(_amount_decimal(cell_dict["value_str"]) for cell_dict in row_dict["cell_list"]) == _amount_decimal(row_dict["total_str"])
-    _, expected_pnl_float, expected_close_float = _expected_tuple(snapshot_obj, {"U100", "U200", "U900"},
+    _, expected_pnl_float, expected_close_float = _expected_tuple(snapshot_obj, {"U100", "U200"},
         first_str="2026-09-01", last_str="2026-09-03")
     expected_open_float = float(sum((row_obj.opening_nav_decimal for row_obj in snapshot_obj.row_tuple
-        if row_obj.market_date_str == "2026-09-01"), Decimal(0)))
+        if row_obj.market_date_str == "2026-09-01" and row_obj.account_route_str != "U900"), Decimal(0)))
     bridge_dict = {item_dict["label_str"]: item_dict["value_str"] for item_dict in report_dict["bridge_row_list"]}
     assert bridge_dict == {"Opening value": _money_str(expected_open_float, cents_bool=True),
         "Net capital movements": "+$1.00", "Investment gain/loss": _money_str(expected_pnl_float, signed_bool=True, cents_bool=True),
@@ -220,7 +221,7 @@ def test_printed_body_omits_method_section_but_keeps_missing_evidence_and_partia
     workspace_dict, snapshot_obj = _sample_tuple()
     report_dict = _report_dict(workspace_dict, snapshot_obj)
     body_str = _printed_body_str(report_dict)
-    for text_str in ("Holdings on Aug 31 were not saved.", "from 2026-08-03", "All your accounts", "USD", "VAULT"):
+    for text_str in ("Holdings on Aug 31 were not saved.", "from 2026-08-03", "Your portfolio", "USD", "not included: Vault"):
         assert text_str in body_str
     for text_str in ("About these numbers", "end-of-day capital flows", "Prepared ", "Source:"):
         assert text_str not in body_str
@@ -239,34 +240,27 @@ def test_printed_demo_cannot_be_mistaken_for_real_broker_report():
     assert "Source: saved IBKR statements" not in body_str
 
 
-def test_vault_horizon_continues_after_every_program_retires_without_inventing_returns():
+@pytest.mark.parametrize("vault_bool", [True, False])
+def test_closed_book_ends_with_the_last_pod_day(vault_bool):
     closing_date_dict = {"U100": "2026-08-13", "U200": "2026-08-13"}
     workspace_dict, snapshot_obj = _sample_tuple(effective_to_dict=closing_date_dict, last_row_dict=closing_date_dict)
+    if not vault_bool:
+        for key_list in (workspace_dict["client_dict"]["accounts"], workspace_dict["valuation_account_list"]):
+            key_list[:] = [account_dict for account_dict in key_list if account_dict.get("role") != "reserve"]
     program_map_dict = {"pod_taa": "Growth", "pod_ndx": "Steady"}
     august_dict = _report_dict(workspace_dict, snapshot_obj, program_dict=program_map_dict)
     expected_return_float, expected_pnl_float, expected_close_float = _expected_tuple(snapshot_obj,
-        {"U100", "U200", "U900"}, last_by_route_dict=closing_date_dict)
-    assert august_dict["available_bool"] and not august_dict["draft_bool"]
+        {"U100", "U200"}, last_str="2026-08-13")
+    # The last month is final once statements reach the last Pod day, with or without a vault.
+    assert august_dict["available_bool"] and not august_dict["draft_bool"], august_dict["draft_reason_str"]
     assert august_dict["period_label_str"] == "August 2026"
-    assert august_dict["money_row_list"][0]["label_str"] == "Value on August 31"
-    assert august_dict["money_row_list"][0]["value_str"] == _money_str(expected_close_float) == "$50,100"
+    assert august_dict["money_row_list"][0]["label_str"] == "Value on August 13"
+    assert august_dict["money_row_list"][0]["value_str"] == _money_str(expected_close_float)
     assert august_dict["money_row_list"][1]["value_str"] == _money_str(expected_pnl_float, signed_bool=True)
     assert august_dict["money_row_list"][1]["pct_str"] == _percent_str(expected_return_float)
-    september_dict = _report_dict(workspace_dict, snapshot_obj, month_str="2026-09", program_dict=program_map_dict)
-    assert september_dict is not None and september_dict["available_bool"] and september_dict["draft_bool"]
-    assert september_dict["period_label_str"] == "September 2026 · to Sep 3"
-    assert september_dict["money_row_list"][0]["value_str"] == "$50,100"
-    assert september_dict["money_row_list"][1]["value_str"] == "$0"
-    assert september_dict["money_row_list"][1]["pct_str"] == "0.0%"
-    august_program_dict = {card_dict["name_str"]: card_dict for card_dict in august_dict["program_list"]}
-    for card_dict in september_dict["program_list"]:
-        assert card_dict["value_str"] == "$0" and card_dict["closed_bool"]
-        assert card_dict["since_str"].endswith("closed 2026-08-13")
-        assert card_dict["stat_list"][-1] == august_program_dict[card_dict["name_str"]]["stat_list"][-1]
-        assert card_dict["chart_dict"]["end_label_str"] == august_program_dict[card_dict["name_str"]]["chart_dict"]["end_label_str"]
-        assert card_dict["stat_list"][0]["value_str"] == "—"
-    assert [group_dict["name_str"] for group_dict in september_dict["split_dict"]["group_list"]] == ["Vault"]
-    assert september_dict["flow_dict"]["row_list"] == []
+    # No month after the last Pod day: a vault alone is not a programs report.
+    assert [option_dict["label_str"] for option_dict in august_dict["month_option_list"]] == ["August 2026"]
+    assert _report_dict(workspace_dict, snapshot_obj, month_str="2026-09", program_dict=program_map_dict) is None
 
 
 def test_newer_owned_source_does_not_hide_missing_required_month_end_account():
@@ -281,7 +275,7 @@ def test_newer_owned_source_does_not_hide_missing_required_month_end_account():
     assert any(option_dict["label_str"] == "September 2026 · to date" for option_dict in report_dict["month_option_list"])
 
 
-def test_reserve_only_client_has_monthly_summary_without_synthetic_program():
+def test_reserve_only_client_gets_no_programs_report():
     workspace_dict, snapshot_obj = _sample_tuple()
     workspace_dict["client_dict"]["accounts"] = [account_dict for account_dict in workspace_dict["client_dict"]["accounts"]
         if account_dict.get("role") == "reserve"]
@@ -289,26 +283,20 @@ def test_reserve_only_client_has_monthly_summary_without_synthetic_program():
         if account_dict.get("role") == "reserve"]
     workspace_dict["operations_account_list"] = []
     report_dict = _report_dict(workspace_dict, snapshot_obj)
-    assert report_dict["available_bool"] and not report_dict["draft_bool"]
-    assert report_dict["money_row_list"][0]["value_str"] == "$50,100"
-    assert report_dict["money_row_list"][1]["value_str"] == "+$100"
-    assert report_dict["money_row_list"][1]["pct_str"] == _percent_str(float(Decimal(100) / Decimal(50000)))
-    assert report_dict["program_list"] == [] and report_dict["flow_dict"]["reason_str"] == ""
-    assert report_dict["other_account_list"][0]["value_str"] == "$50,100"
-    assert report_dict["split_dict"]["group_list"][0]["pct_str"] == "100.0%"
+    assert not report_dict["available_bool"] and report_dict["error_str"] == "No program has started yet."
+    assert report_dict["money_row_list"] == [] and report_dict["program_list"] == []
 
 
-def test_vault_before_first_pod_keeps_full_client_start_and_actual_program_start():
+def test_vault_before_first_pod_starts_the_report_with_the_programs():
     workspace_dict, snapshot_obj = _sample_tuple()
     for account_dict in workspace_dict["client_dict"]["accounts"]:
         if account_dict.get("role", "strategy") == "strategy":
             account_dict["effective_from"] = "2026-08-17"
     report_dict = _report_dict(workspace_dict, snapshot_obj)
-    expected_return_float, expected_pnl_float, _ = _expected_tuple(snapshot_obj, {"U100", "U200", "U900"},
-        first_by_route_dict={"U100": "2026-08-17", "U200": "2026-08-17"})
-    assert report_dict["available_bool"] and not report_dict["draft_bool"]
+    expected_return_float, expected_pnl_float, _ = _expected_tuple(snapshot_obj, {"U100", "U200"}, first_str="2026-08-17")
+    assert report_dict["available_bool"] and not report_dict["draft_bool"], report_dict["draft_reason_str"]
+    # Month and since start both begin on the first Pod day, never on the vault's.
     assert report_dict["money_row_list"][1]["value_str"] == _money_str(expected_pnl_float, signed_bool=True)
-    assert report_dict["money_row_list"][1]["pct_str"] == _percent_str(expected_return_float)
+    assert report_dict["money_row_list"][1]["pct_str"] == report_dict["money_row_list"][2]["pct_str"] == _percent_str(expected_return_float)
     assert report_dict["program_list"][0]["since_str"] == "from 2026-08-17"
-    expected_program_return_float, _, _ = _expected_tuple(snapshot_obj, {"U100", "U200"}, first_str="2026-08-17")
-    assert report_dict["program_list"][0]["stat_list"][-1]["value_str"] == _percent_str(expected_program_return_float)
+    assert report_dict["program_list"][0]["stat_list"][-1]["value_str"] == _percent_str(expected_return_float)

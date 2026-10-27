@@ -8,15 +8,17 @@ pages; larger books may continue onto additional pages without hiding rows.
 
 ## Meaning and scope
 
-- Headline NAV, dollar profit and TWR cover the **full client ownership scope**,
-  including VAULT/other reserves, over the same dates. Program cards cover only
-  their measured strategy Pods. Reserve gains are not assigned to Steady/Growth.
-- Reporting continues when programs close and money remains in VAULT. A missing
-  required account still blocks finality; it is not silently dropped.
-- Values use the approved USD-base statement contract. ILS cash in a USD-base
-  account is already translated in broker NAV. Do not convert that NAV again.
-  A statement actually denominated in ILS is unsupported. FX can change total
-  USD wealth without trades.
+- Headline NAV, dollar profit and TWR cover the **programs only**: the strategy
+  Pods, the same scope as the Performance page. Program cards cover their own
+  Pods. Other accounts such as VAULT are named on page 1 but never counted:
+  IBKR translates their shekel cash to USD, so their USD change is mostly the
+  exchange rate, not a result (owner decision 2026-10-27).
+- "Since start" is the first Pod day. Once every Pod has closed, the months end
+  with the last Pod day, and that month is final once statements reach it. A
+  Pod missing a required day still blocks finality; it is not silently dropped.
+- Values use the approved USD-base statement contract. A statement actually
+  denominated in ILS is unsupported. Showing VAULT in shekels would need IBKR's
+  cash report by currency in the Flex query, which is not configured.
 - `Opening capital + net movements` includes the initial measured value and
   subsequent capital/scope movements. It is not a lifetime deposit total.
 - Dollar profit includes recorded costs, income and FX. It is not TWR multiplied
@@ -57,9 +59,9 @@ transit remains unsupported and withholds the return.
 ```
 [Saved USD NAV + flows + dated ownership]
                     |
-        [Full-client daily reconciliation]
+        [Full-client daily reconciliation]  (proves transfers between accounts)
              /                  \
- [All-client summary]   [Verified program subsets]
+   [Programs summary]   [Verified program subsets]
              \                  /
        [Monthly report + concise data status]
                     |
@@ -70,11 +72,12 @@ transit remains unsupported and withholds the return.
 
 ## History, holdings and presentation
 
-Saved program assignments stay with a Pod's full measured history. Closed
-programs retain their own returns through closure and zero current allocation;
-they are not folded into a surviving program. Initial assignment applies to an
-unassigned Pod's history. Reassignment/clearing is rejected because this format
-has no dated reassignment ledger. Corrupt mappings withhold the report.
+A Pod's program covers its full measured history. Closed programs retain their
+own returns through closure and zero current allocation; they are not folded
+into a surviving program. The Programs panel can change or clear a Pod's
+program: the change shows in every report built afterwards, while saved reports
+keep the names they were issued with. There is no dated reassignment. Corrupt
+mappings withhold the report.
 
 Holdings require same-close positions **and independently saved cash**, summing
 to broker NAV within one cent. NAV minus positions is not proof of cash.
@@ -162,3 +165,20 @@ Five browser/PDF variants retain two pages, omit the removed section and print
 the frozen copy. Independent parity/coverage and failure-mode reviews found no
 remaining blocker. Tier 3 by path; accounting, execution and storage formats
 are unchanged. This update remains local and does not rewrite older archives.
+
+## Owner update - 2026-10-27: programs only, editable programs
+
+- The headline, allocation, month bridge and posted activity cover the programs
+  only. Other accounts are named in the line under the bridge ("not included").
+  Reason: VAULT is mostly shekel cash, so its USD change is the exchange rate.
+- Months start on the first Pod day and, once every Pod has closed, end with
+  the last one. A client with only other accounts gets no report.
+- The Programs panel can change or clear a saved program. Saved reports keep
+  the names they were issued with.
+- Engine, archive, holdings rules and the Performance page are unchanged.
+
+Validation: 2,785 Live Ops V4, report and client TWR tests pass. The two golden
+Overview tests still fail as before; they also fail at `a4e810c`. Real Flex
+numbers for September and October are unchanged. A two-Pod sample with a Vault
+prints on two pages with no Vault amount, and a program change through the
+panel was checked in the demo browser.

@@ -30,17 +30,17 @@
   <section class="mr-programs" id="mr-programs" data-programs data-url="{{ panel_dict.url_str }}" data-token="{{ panel_dict.token_str }}" aria-label="Programs" hidden>
     <div class="mr-programs-in">
       <h2>Programs</h2>
-      <p>Assign each Pod to a program. Saved assignments stay with the Pod's full history. Unassigned Pods appear as Portfolio.</p>
+      <p>Pick each Pod's program. A change shows in every report from now on; saved copies keep their names. A Pod without one shows as Portfolio.</p>
       {% for pod_dict in panel_dict.pod_list %}
       {% set custom_bool = pod_dict.program_str and pod_dict.program_str not in panel_dict.suggestion_list %}
       <div class="mr-prow" data-pod-id="{{ pod_dict.pod_id_str }}">
         <span class="mr-pname">{{ pod_dict.name_str }}</span>
-        <select data-program-select aria-label="Program for {{ pod_dict.name_str }}"{% if pod_dict.program_str %} disabled{% endif %}>
+        <select data-program-select aria-label="Program for {{ pod_dict.name_str }}">
           <option value=""{% if not pod_dict.program_str %} selected{% endif %}>Portfolio (none)</option>
           {% for name_str in panel_dict.suggestion_list %}<option value="{{ name_str }}"{% if pod_dict.program_str == name_str %} selected{% endif %}>{{ name_str }}</option>{% endfor %}
           <option value="__other__"{% if custom_bool %} selected{% endif %}>Other name…</option>
         </select>
-        <input type="text" data-program-name maxlength="30" placeholder="Program name" value="{{ pod_dict.program_str if custom_bool else '' }}" aria-label="Program name for {{ pod_dict.name_str }}"{% if pod_dict.program_str %} readonly{% endif %}{% if not custom_bool %} hidden{% endif %}>
+        <input type="text" data-program-name maxlength="30" placeholder="Program name" value="{{ pod_dict.program_str if custom_bool else '' }}" aria-label="Program name for {{ pod_dict.name_str }}"{% if not custom_bool %} hidden{% endif %}>
       </div>
       {% endfor %}
       <div class="mr-pact"><button type="button" class="mr-print" data-programs-save>Save</button><button type="button" class="mr-tool" data-programs-toggle>Cancel</button><span class="mr-pmsg" data-programs-message role="status"></span></div>
@@ -165,15 +165,6 @@
       </section>
       {% endif %}
 
-      {% if report_dict.other_account_list %}
-      <section class="block" aria-label="Other accounts">
-        <div class="sec-t">Other accounts · outside the programs · USD</div>
-        <table><thead><tr><th>Account</th><th>Closing value</th><th>Month gain/loss</th><th>Account TWR</th></tr></thead>
-          <tbody>{% for account_dict in report_dict.other_account_list %}<tr><td>{{ account_dict.name_str }}</td><td>{{ account_dict.value_str }}</td><td>{{ account_dict.pnl_str }}</td><td>{{ account_dict.return_str }}</td></tr>{% endfor %}</tbody>
-        </table>
-      </section>
-      {% endif %}
-
       {% if not report_dict.single_program_bool and report_dict.program_list | selectattr('holding_dict.available_bool') | list %}
       <section class="block" aria-label="Holdings by program">
         <div class="sec-t">Holdings by program · verified closing values</div>
@@ -222,7 +213,7 @@
 
       {% if report_dict.activity_list %}
       <section class="block" aria-label="Activity">
-        <div class="sec-t">All accounts · {{ report_dict.month_name_str }} · posted activity</div>
+        <div class="sec-t">{{ report_dict.month_name_str }} · posted activity</div>
         <div class="act">{% for item_dict in report_dict.activity_list %}<span>{{ item_dict.label_str }} <b>{{ item_dict.value_str }}</b></span>{% endfor %}</div>
       </section>
       {% endif %}

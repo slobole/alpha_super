@@ -1,8 +1,8 @@
-"""Monthly client report: full-client wealth and separate program performance.
+"""Monthly client report: the client's programs, from the canonical accounting and daily TWR.
 
-Read-only projection using the canonical accounting and approved daily TWR.
-The horizon includes reserve accounts after strategies close. Holdings need
-saved same-close positions and independently evidenced cash, or are left out.
+Read-only. Other accounts (such as VAULT, often cash in shekels) are named but
+never converted into the report's USD numbers. Holdings need saved same-close
+positions and independently evidenced cash, or are left out.
 """
 
 import calendar
@@ -164,19 +164,22 @@ def _next_month_obj(month_obj):
     return date(month_obj.year + month_obj.month // 12, month_obj.month % 12 + 1, 1)
 
 
-def _month_option_list(start_str, latest_str):
+def _month_option_list(start_str, latest_str, end_str=None):
     """Months from the first measured day to the latest finalized close, newest first.
 
     A month is final once a finalized statement reaches its last calendar day:
     IBKR can still report weekend or holiday activity after the last session.
+    When every Pod has closed (end_str), the months stop there and the last one
+    is final once statements reach the last Pod session.
     """
     option_list, cursor_obj = [], date.fromisoformat(start_str[:7] + "-01")
-    while cursor_obj.isoformat()[:7] <= latest_str[:7]:
+    while cursor_obj.isoformat()[:7] <= (min(latest_str, end_str) if end_str else latest_str)[:7]:
         month_str = cursor_obj.isoformat()[:7]
         first_str, last_str = _month_bounds_tuple(month_str)
-        complete_bool = latest_str >= last_str
+        session_str = _last_session_str(first_str, min(last_str, end_str or last_str)) or last_str
+        complete_bool = latest_str >= (session_str if end_str and end_str <= last_str else last_str)
         option_list.append({"month_str": month_str, "complete_bool": complete_bool,
-            "sessions_done_bool": latest_str >= (_last_session_str(first_str, last_str) or last_str),
+            "sessions_done_bool": latest_str >= session_str,
             "label_str": cursor_obj.strftime("%B %Y") + ("" if complete_bool else " · to date")})
         cursor_obj = _next_month_obj(cursor_obj)
     return option_list[::-1][:MONTH_OPTION_LIMIT_INT]
@@ -645,10 +648,15 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
         return result_dict
     strategy_view_dict = strategy_workspace_dict(workspace_dict)
     account_list = strategy_view_dict["client_dict"]["accounts"]
-    if not workspace_dict["client_dict"]["accounts"]:
-        result_dict["error_str"] = "No account has saved performance yet."
+    if not account_list:
+        # The report covers programs; other accounts alone (such as VAULT) are not a report.
+        result_dict["error_str"] = ("No program has started yet." if workspace_dict["client_dict"]["accounts"]
+            else "No account has saved performance yet.")
         return result_dict
-    start_str = min(account_dict["effective_from"] for account_dict in workspace_dict["client_dict"]["accounts"])
+    # "Since start" is the first Pod day. Once every Pod has closed, the report ends with the last one.
+    start_str = min(account_dict["effective_from"] for account_dict in account_list)
+    end_str = (max(account_dict["effective_to"] for account_dict in account_list)
+        if all(account_dict.get("effective_to") for account_dict in account_list) else None)
     try:
         client_dict, _, valuation_list = report_scope_tuple(workspace_dict, snapshot_obj, as_of_ts=as_of_ts)
         horizon_account_list = client_dict["accounts"] if valuation_list is None else valuation_list
@@ -667,7 +675,7 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
     if latest_str < start_str:
         result_dict["error_str"] = "No finalized account value is available yet."
         return result_dict
-    option_list = _month_option_list(start_str, latest_str)
+    option_list = _month_option_list(start_str, latest_str, end_str)
     if month_str is None:
         option_dict = next((item_dict for item_dict in option_list if item_dict["complete_bool"]), option_list[0])
     else:
@@ -676,7 +684,7 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
             return None
     month_str, complete_bool = option_dict["month_str"], option_dict["complete_bool"]
     month_first_str, month_last_str = _month_bounds_tuple(month_str)
-    from_str, to_str = max(month_first_str, start_str), min(month_last_str, latest_str)
+    from_str, to_str = max(month_first_str, start_str), min(month_last_str, latest_str, end_str or month_last_str)
     month_obj = date.fromisoformat(month_first_str)
     holder_name_str = "" if workspace_dict["client_dict"].get("is_demo") else load_holder_name_str(
         database_path_str, {account_dict["account_route"] for account_dict in workspace_dict["client_dict"]["accounts"]},
@@ -695,38 +703,26 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
         result_dict["error_str"] = "Saved financial data could not be verified for this month."
         return result_dict
     month_report_dict, since_report_dict = month_page_dict["report_dict"], since_page_dict["report_dict"]
-    # Client ownership can begin in VAULT before any strategy is measured. Keep
-    # that earlier client history, but never extend a Pod's measured start back.
-    strategy_start_str = min((account_dict["effective_from"] for account_dict in account_list), default=to_str)
-    if account_list and start_str < strategy_start_str <= to_str:
-        strategy_page_dict = build_performance_page_dict(strategy_view_dict, snapshot_obj, as_of_ts=as_of_ts,
-            from_date_str=strategy_start_str, to_date_str=to_str, level_str="pods",
-            transfer_scope_client_dict=workspace_dict["client_dict"])
-        since_report_dict = strategy_page_dict["report_dict"]
-        if from_str <= strategy_start_str:
-            month_report_dict = since_report_dict
-    client_report_dict = month_page_dict.get("client_report_dict") or {}
-    client_since_dict = since_page_dict.get("client_report_dict") or {}
-    if not (since_report_dict or month_report_dict or client_since_dict or client_report_dict):
+    if not (since_report_dict or month_report_dict):
         result_dict["error_str"] = month_page_dict["error_str"] or "Saved financial data could not be verified for this month."
         return result_dict
-    pod_source_dict = since_report_dict or month_report_dict or {"strategy_list": []}
+    pod_source_dict = since_report_dict or month_report_dict
     # Partial results stay visible as "—"; the page is then a marked draft.
     month_report_dict = month_report_dict or {}
     since_report_dict = since_report_dict or {}
-    reserve_bool = any(account_dict.get("role") == "reserve"
-        and account_dict["effective_from"] <= to_str and (account_dict.get("effective_to") or "9999-12-31") >= start_str
-        for account_dict in workspace_dict["client_dict"]["accounts"])
-    summary_month_dict = client_report_dict if reserve_bool else month_report_dict
-    summary_since_dict = client_since_dict if reserve_bool else since_report_dict
+    summary_month_dict, summary_since_dict = month_report_dict, since_report_dict
+    # Other accounts are named only: their USD value would mostly be the shekel rate, not the programs.
+    other_name_list = list(dict.fromkeys(account_dict["display_name"] for account_dict in workspace_dict["client_dict"]["accounts"]
+        if account_dict.get("role") == "reserve" and account_dict["effective_from"] <= to_str
+        and (account_dict.get("effective_to") or "9999-12-31") >= from_str))
     close_str = summary_month_dict.get("closing_date_str") or summary_since_dict.get("closing_date_str") or to_str
     month_suffix_str = "" if complete_bool else f" · to {_short_day_str(close_str)}"
     result_dict.update(available_bool=True, period_label_str=result_dict["month_label_str"] + month_suffix_str,
         month_name_str=calendar.month_name[month_obj.month] + month_suffix_str)
 
-    # *** CRITICAL *** headline NAV, P&L and TWR share the full client boundary,
-    # including VAULT. USD-base broker NAV already translates non-USD assets.
-    # Do not translate it twice or label FX gains as deposits/strategy alpha.
+    # *** CRITICAL *** headline NAV, P&L and TWR cover the programs only, the
+    # same scope as the Performance page. Never add other accounts here: IBKR
+    # translates their non-USD cash, so their USD change is mostly FX.
     closing_float = summary_since_dict.get("closing_nav_float", summary_month_dict.get("closing_nav_float"))
     since_pnl_float = summary_since_dict.get("pnl_float")
     put_in_float = closing_float - since_pnl_float if closing_float is not None and since_pnl_float is not None else None
@@ -745,7 +741,7 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
             "pct_str": "", "pct_tone_str": ""},
     ]
     result_dict["money_row_list"] = money_row_list
-    result_dict["summary_scope_str"] = "All your accounts · USD" if reserve_bool else "Your portfolio · USD"
+    result_dict["summary_scope_str"] = "Your portfolio · USD"
     result_dict["bridge_row_list"] = [{"label_str": label_str, "value_str": _money_str(summary_month_dict.get(field_str), signed_bool=signed_bool, cents_bool=True)}
         for label_str, field_str, signed_bool in (("Opening value", "opening_nav_float", False),
             ("Net capital movements", "capital_movement_float", True), ("Investment gain/loss", "pnl_float", True),
@@ -859,16 +855,6 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
         if since_report_dict.get("closing_nav_float") is not None and since_report_dict.get("pnl_float") is not None else None)
     flow_dict = (_flow_dict(account_list, snapshot_obj, pod_list, from_str=start_str, to_str=to_str,
         put_in_float=strategy_put_in_float, display_from_str=from_str) if account_list else result_dict["flow_dict"])
-    other_account_list = [row_dict for row_dict in client_report_dict.get("financial_account_list", [])
-        if row_dict["account_role_str"] == "reserve" and row_dict["to_date_str"] == close_str]
-    result_dict["other_account_list"] = [{"name_str": row_dict["display_name_str"],
-        "value_str": _money_str(row_dict["closing_nav_float"]), "pnl_str": _money_str(row_dict["pnl_float"], signed_bool=True),
-        "return_str": _percent_str(row_dict["twr_float"])} for row_dict in other_account_list]
-    for row_dict in other_account_list:
-        if row_dict["closing_nav_float"] is not None and row_dict["closing_nav_float"] > 0 and active_total_float > 0:
-            share_float = row_dict["closing_nav_float"] / active_total_float
-            group_list.append({"name_str": row_dict["display_name_str"], "pct_str": _percent_str(share_float, signed_bool=False), "pod_list": []})
-            split_item_list.append((share_float, "#7D8796", row_dict["display_name_str"], ""))
     result_dict.update(single_program_bool=single_bool, program_list=program_list,
         # The Programs panel lists every Pod in the report with its current program ("" = Portfolio).
         pod_choice_list=[{"pod_id_str": pod_dict["pod_id_str"], "name_str": pod_dict["name_str"],
@@ -880,7 +866,7 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
         month_table_dict={"row_list": month_row_list, "label_list": [
             date.fromisoformat(value_str + "-01").strftime("%b") + (" ’" + value_str[2:4] if len({item_str[:4] for item_str in month_list}) > 1
                 and (index_int == 0 or value_str.endswith("-01")) else "") for index_int, value_str in enumerate(month_list)]},
-        flow_dict=flow_dict, activity_list=_activity_list(workspace_dict["client_dict"]["accounts"], snapshot_obj, from_str=from_str, to_str=to_str))
+        flow_dict=flow_dict, activity_list=_activity_list(account_list, snapshot_obj, from_str=from_str, to_str=to_str))
 
     # Draft: the badge prints a short reason; the screen bar adds the detail.
     detail_str = ""
@@ -911,14 +897,13 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
     result_dict["note_list"] = note_list
     result_dict["is_demo_bool"] = workspace_dict["client_dict"].get("is_demo") is True
     result_dict["method_note_str"] = ("Amounts in USD. Portfolio/program TWR is calculated from daily NAV with end-of-day capital flows; "
-        "it is not official consolidated IBKR or exact intraday TWR. Pod and other-account rows use IBKR account TWR. "
+        "it is not official consolidated IBKR or exact intraday TWR. Pod rows use IBKR account TWR. "
         "Dollar gains include recorded costs, income and FX; they are not TWR multiplied by net contributions. "
         "Opening capital is the value at the start of measurement, not lifetime deposits. "
         "Initial/final months may be partial; each program's measurement dates are shown. "
         "Posted income/costs are already included in investment gains, together with accrual changes.")
-    result_dict["scope_note_str"] = ("Your total includes other accounts such as VAULT. Programs exclude them. "
-        "Non-USD holdings are included at IBKR's USD valuation; FX changes can affect the total even without trades."
-        if reserve_bool else "All values cover the measured portfolio and its capital movements.")
+    result_dict["scope_note_str"] = ("All values cover your programs. Your other IBKR accounts are not included: "
+        + ", ".join(other_name_list) + "." if other_name_list else "All values cover the measured portfolio and its capital movements.")
     result_dict["fee_note_str"] = str(workspace_dict["client_dict"].get("fee_basis") or "Recorded broker costs are included.")
     result_dict["generated_at_str"] = as_of_ts.isoformat()
     result_dict["evidence_dict"] = {"month_report_hash_str": summary_month_dict.get("report_hash_str"),

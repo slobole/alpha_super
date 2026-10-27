@@ -1,4 +1,4 @@
-"""Saved report assignments are historical evidence, not editable display labels."""
+"""Saved program assignments: unreadable evidence never becomes empty, saves are all or nothing."""
 
 from concurrent.futures import ThreadPoolExecutor
 import json
@@ -12,7 +12,6 @@ from alpha.live.dashboard_v4 import report_programs
 from alpha.live.dashboard_v4.report_programs import (
     PROGRAM_BYTE_LIMIT_INT,
     PROGRAM_LIMIT_INT,
-    ReportProgramConflictError,
     ReportProgramLimitError,
     ReportProgramReadError,
     ReportProgramStore,
@@ -103,26 +102,28 @@ def test_read_permission_failure_never_becomes_an_empty_mapping(tmp_path, monkey
 
 
 @pytest.mark.parametrize("memory_bool", [False, True])
-def test_assignment_is_immutable_but_case_and_spacing_are_idempotent(tmp_path, memory_bool):
+def test_assignment_can_be_changed_or_cleared_and_suggested_names_keep_their_spelling(tmp_path, memory_bool):
     store_obj = _store_obj(tmp_path, memory_bool=memory_bool)
-    store_obj.save({"pod_taa": "gROWTH", "pod_ndx": "  Growth   Plus  ", "pod_empty": "Portfolio"})
-    expected_dict = {"pod_taa": "Growth", "pod_ndx": "Growth Plus"}
-    assert store_obj.program_by_pod_dict() == expected_dict
-    store_obj.save({"pod_taa": " GROWTH ", "pod_ndx": "growth   plus"})
-    assert store_obj.program_by_pod_dict() == expected_dict
-    for replacement_str in ("", "Portfolio", "Steady"):
-        with pytest.raises(ReportProgramConflictError):
-            store_obj.save({"pod_taa": replacement_str})
-        assert store_obj.program_by_pod_dict() == expected_dict
+    store_obj.save({"pod_taa": "gROWTH", "pod_ndx": "  Growht   Plus  ", "pod_empty": "Portfolio"})
+    assert store_obj.program_by_pod_dict() == {"pod_taa": "Growth", "pod_ndx": "Growht Plus"}
+    # A typo is fixed by saving again; another Pod keeps its program.
+    store_obj.save({"pod_ndx": "Growth Plus"})
+    assert store_obj.program_by_pod_dict() == {"pod_taa": "Growth", "pod_ndx": "Growth Plus"}
+    store_obj.save({"pod_taa": "steady"})
+    assert store_obj.program_by_pod_dict() == {"pod_taa": "Steady", "pod_ndx": "Growth Plus"}
+    for clear_str in ("", "portfolio"):
+        store_obj.save({"pod_ndx": "Growth Plus"})
+        store_obj.save({"pod_ndx": clear_str})
+        assert store_obj.program_by_pod_dict() == {"pod_taa": "Steady"}
 
 
-def test_batch_conflict_does_not_partly_save_new_assignments(tmp_path):
+def test_invalid_batch_does_not_partly_save(tmp_path):
     store_obj = _store_obj(tmp_path)
     store_obj.save({"pod_old": "Steady"})
     path_obj = tmp_path / "report_programs.json"
     before_bytes = path_obj.read_bytes()
-    with pytest.raises(ReportProgramConflictError):
-        store_obj.save({"pod_new": "Growth", "pod_old": ""})
+    with pytest.raises(ValueError, match="Invalid Pod or program name"):
+        store_obj.save({"pod_new": "Growth", "pod_old": "", "pod_bad": "<script>"})
     assert path_obj.read_bytes() == before_bytes
     assert store_obj.program_by_pod_dict() == {"pod_old": "Steady"}
 
@@ -181,12 +182,13 @@ def test_failed_replace_preserves_original_mapping_and_removes_temporary_file(tm
     assert not (tmp_path / "report_programs.json.tmp").exists()
 
 
-def test_route_reports_locked_program_and_bad_saved_evidence(tmp_path):
+def test_route_changes_and_clears_programs_and_reports_bad_saved_evidence(tmp_path):
     client_obj, store_obj = _route_tuple(tmp_path, {"pod_old", "pod_new"})
     assert _post_obj(client_obj, store_obj, {"pod_old": "Growth"}).status_code == 200
-    response_obj = _post_obj(client_obj, store_obj, {"pod_old": ""})
-    assert response_obj.status_code == 409 and response_obj.get_json()["error"] == "program_locked"
-    assert "past reports" in response_obj.get_json()["message"]
+    assert _post_obj(client_obj, store_obj, {"pod_old": "Steady", "pod_new": "Growth"}).status_code == 200
+    assert store_obj.program_by_pod_dict() == {"pod_old": "Steady", "pod_new": "Growth"}
+    assert _post_obj(client_obj, store_obj, {"pod_old": ""}).status_code == 200
+    assert store_obj.program_by_pod_dict() == {"pod_new": "Growth"}
     path_obj = tmp_path / "report_programs.json"
     path_obj.write_text("broken saved evidence", encoding="utf-8")
     response_obj = _post_obj(client_obj, store_obj, {"pod_new": "Steady"})
