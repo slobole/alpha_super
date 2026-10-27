@@ -677,7 +677,8 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
         return result_dict
     option_list = _month_option_list(start_str, latest_str, end_str)
     if month_str is None:
-        option_dict = next((item_dict for item_dict in option_list if item_dict["complete_bool"]), option_list[0])
+        # The newest month opens first, to the latest saved day; a month in progress is a marked draft.
+        option_dict = option_list[0]
     else:
         option_dict = next((item_dict for item_dict in option_list if item_dict["month_str"] == month_str), None)
         if option_dict is None:

@@ -126,14 +126,15 @@ def test_month_and_since_start_match_the_performance_page(demo_tuple):
     assert program_row_dict["since_str"] == _percent_str(since_dict["twr_float"], suffix_str="")
 
 
-def test_default_is_the_latest_full_month_and_a_month_in_progress_is_a_draft(demo_tuple):
+def test_default_is_the_current_month_to_date_and_a_month_in_progress_is_a_draft(demo_tuple):
     workspace_dict, snapshot_obj, provider_obj = demo_tuple
     default_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=DEMO_NOW_TS)
-    assert default_dict["month_str"] == "2026-08"
+    assert default_dict["month_str"] == "2026-09"
     assert [option_dict["label_str"] for option_dict in default_dict["month_option_list"]] == [
         "September 2026 · to date", "August 2026", "July 2026", "June 2026"]
-    assert [option_dict["selected_bool"] for option_dict in default_dict["month_option_list"]] == [False, True, False, False]
+    assert [option_dict["selected_bool"] for option_dict in default_dict["month_option_list"]] == [True, False, False, False]
     current_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=DEMO_NOW_TS, month_str="2026-09")
+    assert current_dict == default_dict
     assert current_dict["draft_bool"] and current_dict["draft_reason_str"] == "Month in progress, through Sep 4"
     assert current_dict["period_label_str"] == "September 2026 · to Sep 4"
     assert current_dict["money_row_list"][0]["label_str"] == "Value on September 4"
@@ -391,7 +392,7 @@ def test_a_month_is_final_only_once_its_last_calendar_day_is_finalized():
 
 def test_a_missing_other_account_does_not_hold_back_the_programs_report():
     workspace_dict, snapshot_obj = _sample_tuple(last_row_dict={"U900": "2026-08-28"})
-    report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS)
+    report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-08")
     page_dict = build_performance_page_dict(workspace_dict, snapshot_obj, as_of_ts=SAMPLE_AS_OF_TS,
         from_date_str="2026-08-03", to_date_str="2026-08-31")
     assert report_dict["month_str"] == "2026-08" and not report_dict["draft_bool"], report_dict["draft_reason_str"]

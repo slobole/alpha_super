@@ -89,7 +89,8 @@ earlier-movements row within that month.
 
 ## Issue, store and correct
 
-1. Open Performance, then Monthly report, and select the completed month.
+1. Open Performance, then Monthly report. It opens on the current month to the
+   latest saved day, marked as a draft; select the completed month to issue it.
 2. Review scope, balances, program identities and concise missing-data notices.
 3. `Save report and print PDF` rechecks the displayed report identity, rejects
    drafts/stale previews and freezes HTML, CSS, font, optional picture, timestamp
@@ -175,6 +176,8 @@ are unchanged. This update remains local and does not rewrite older archives.
   the last one. A client with only other accounts gets no report.
 - The Programs panel can change or clear a saved program. Saved reports keep
   the names they were issued with.
+- The report opens on the newest month, to the latest saved day. While that
+  month is in progress it is a marked draft; completed months are in the list.
 - Engine, archive, holdings rules and the Performance page are unchanged.
 
 Validation: 2,785 Live Ops V4, report and client TWR tests pass. The two golden
