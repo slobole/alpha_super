@@ -350,6 +350,11 @@ def test_chart_stays_inside_its_plot_and_labels_zero():
         for x_float, y_float in coordinate_list)
     assert [tick_dict["label_str"] for tick_dict in chart_dict["tick_list"]] == ["0%", "+5%", "+10%"]
     assert chart_dict["end_label_str"] == "+6.7%" and chart_dict["month_list"][0]["label_str"] == "Apr"
+    # The shading closes on the 0% gridline at both ends, so it fills between the line and zero.
+    zero_y = next(tick_dict["y"] for tick_dict in chart_dict["tick_list"] if tick_dict["zero_bool"])
+    area_point_list = [tuple(map(float, part_str.split())) for part_str in chart_dict["area_str"][1:-2].split(" L")]
+    assert area_point_list[1:-1] == coordinate_list and chart_dict["area_str"].endswith(" Z")
+    assert area_point_list[0] == (coordinate_list[0][0], zero_y) and area_point_list[-1] == (coordinate_list[-1][0], zero_y)
     assert not _chart_dict(path_list[:1], single_bool=False)["available_bool"]
 
 

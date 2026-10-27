@@ -334,7 +334,7 @@ def _chart_dict(path_list, *, single_bool, wide_bool=False):
     top_float, bottom_float = 10., height_int - 22.
     result_dict = {"available_bool": False, "reason_str": "Return since start is not available yet.", "wide_bool": single_bool and wide_bool,
         "width_int": width_int, "height_int": height_int, "plot_left": left_int, "plot_right": right_int,
-        "tick_list": [], "month_list": [], "path_str": "", "end_x": 0, "end_y": 0, "end_label_str": ""}
+        "tick_list": [], "month_list": [], "path_str": "", "area_str": "", "end_x": 0, "end_y": 0, "end_label_str": ""}
     point_list = [(date.fromisoformat(point_dict["market_date_str"][:10]).toordinal()
         + (0 if point_dict["market_date_str"].endswith(" SOD") else .75), point_dict["cumulative_return_float"])
         for point_dict in path_list]
@@ -383,6 +383,9 @@ def _chart_dict(path_list, *, single_bool, wide_bool=False):
             for value_float in tick_value_list],
         month_list=[{"x": round(x_value_float + 1, 1), "label_str": label_str} for x_value_float, label_str in kept_list],
         path_str="M" + " L".join(f"{x_value_float:.1f} {y_value_float:.1f}" for x_value_float, y_value_float in coordinate_list),
+        # Light shading between the line and 0%, like the Performance chart.
+        area_str=f"M{coordinate_list[0][0]:.1f} {y_float(0.):.1f} " + " ".join(f"L{x_value_float:.1f} {y_value_float:.1f}"
+            for x_value_float, y_value_float in coordinate_list) + f" L{coordinate_list[-1][0]:.1f} {y_float(0.):.1f} Z",
         end_x=round(coordinate_list[-1][0], 1), end_y=round(coordinate_list[-1][1], 1),
         end_label_str=_percent_str(value_list[-1]))
     return result_dict
