@@ -96,8 +96,8 @@ CASH_LABEL_STR = "Cash and accruals"
 
 def _empty_dict():
     return {"available_bool": False, "error_str": "", "client_name_str": "", "sub_str": "", "month_str": "",
-        "month_label_str": "", "period_label_str": "", "month_word_str": "", "close_label_str": "", "back_url_str": "",
-        "month_option_list": [], "status_note_str": "", "draft_bool": False, "draft_reason_str": "",
+        "month_label_str": "", "period_label_str": "", "month_word_str": "", "back_url_str": "",
+        "month_option_list": [], "status_note_str": "", "draft_bool": False, "draft_bar_bool": False, "draft_reason_str": "",
         "art_url_str": "", "art_height_int": ART_HEIGHT_INT, "brand_name_str": BRAND_NAME_STR, "brand_desc_str": BRAND_DESC_STR, "brand_initials_str": BRAND_INITIALS_STR,
         "money_row_list": [], "breakdown_dict": None, "chart_dict": _chart_dict([], height_int=208),
         "single_program_bool": True, "details_bool": False, "program_list": [],
@@ -388,9 +388,10 @@ def _chart_dict(series_list, *, height_int):
     label_char_int = max((len(label_name_str(series_dict)) for series_dict, _ in drawn_list), default=0) + 7
     width_int, left_int = CHART_WIDTH_INT, 40
     right_int = width_int - (37 + round(label_char_int * 8.6) if many_bool else 62)
-    top_float, bottom_float = 10., height_int - 24.
+    # The strip above the plot holds the legend.
+    top_float, bottom_float = 26., height_int - 24.
     result_dict = {"available_bool": False, "reason_str": "Return since start is not available yet.", "width_int": width_int,
-        "height_int": height_int, "plot_left": left_int, "plot_right": right_int, "tick_list": [], "month_list": [], "line_list": []}
+        "height_int": height_int, "plot_left": left_int, "plot_right": right_int, "tick_list": [], "month_list": [], "line_list": [], "legend_color_str": ""}
     if not drawn_list:
         return result_dict
     value_list = [value_float for _, point_list in drawn_list for _, value_float in point_list]
@@ -450,7 +451,8 @@ def _chart_dict(series_list, *, height_int):
     shift_float = min(shift_float, ordered_list[0]["label_y"] - top_float - 5)
     for line_dict in line_list:
         line_dict["label_y"] = round(line_dict["label_y"] - shift_float, 1)
-    result_dict.update(available_bool=True, reason_str="", line_list=line_list,
+    # With several lines their end labels carry the colours, so the legend only names the measure.
+    result_dict.update(available_bool=True, reason_str="", line_list=line_list, legend_color_str="#94A3B8" if many_bool else drawn_list[0][0]["color_str"],
         tick_list=[{"y": round(y_float(value_float), 1), "zero_bool": abs(value_float) < 1e-12,
             "label_str": ("+" if value_float > 1e-12 else "−" if value_float < -1e-12 else "") + f"{abs(value_float) * 100:g}%"}
             for value_float in tick_value_list],
@@ -690,7 +692,7 @@ def _flow_dict(account_list, snapshot_obj, pod_list, *, from_str, to_str, put_in
             total_tone_str=_money_tone_str(total_decimal),
             cell_list=[{"value_str": _money_str(cell_decimal, signed_bool=row_dict["kind_str"] != "Opening capital", cents_bool=True) if cell_decimal else "",
                 "tone_str": _money_tone_str(cell_decimal)} for cell_decimal in row_dict["cell_list"]])
-    # What moved this month, in the ledger behind Net capital. A Pod's opening value is money
+    # What moved this month, in the ledger behind Net invested. A Pod's opening value is money
     # moved too, even on the month's first session, except on the client's very first day.
     book_first_str = event_list[0][0][0] if event_list else ""
     movement_decimal = closed_decimal + sum((sum(cell_list, Decimal(0)) for (date_str, kind_int), cell_list in event_list
@@ -890,7 +892,7 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
     month_suffix_str = "" if complete_bool else f" · to {_short_day_str(close_str)}"
     month_word_str = calendar.month_name[month_obj.month]
     result_dict.update(available_bool=True, period_label_str=result_dict["month_label_str"] + month_suffix_str,
-        month_word_str=month_word_str, close_label_str=_long_day_str(close_str))
+        month_word_str=month_word_str)
 
     # *** CRITICAL *** headline NAV, P&L and TWR cover the programs only, the
     # same scope as the Performance page. Never add other accounts here: IBKR
@@ -911,7 +913,7 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
         {"class_str": "", "label_str": f"Since {_short_day_str(start_str)}, {start_str[:4]}", "value_str": _money_str(since_pnl_float, signed_bool=True),
             "tone_str": _money_tone_str(since_pnl_float), "pct_str": _percent_str(summary_since_dict.get("twr_float")),
             "pct_tone_str": _percent_tone_str(summary_since_dict.get("twr_float"))},
-        {"class_str": "", "label_str": "Net capital", "value_str": _money_str(put_in_decimal), "tone_str": "",
+        {"class_str": "", "label_str": "Net invested", "value_str": _money_str(put_in_decimal), "tone_str": "",
             "pct_str": "", "pct_tone_str": ""},
     ]
     result_dict["money_row_list"] = money_row_list
@@ -1051,22 +1053,22 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
 
     # Draft: the badge prints a short reason; the screen bar adds the detail.
     detail_str = ""
-    if not complete_bool:
-        draft_reason_str = ("Final month-end statement not saved yet" if option_dict["sessions_done_bool"]
-            else f"Month in progress, through {_short_day_str(close_str)}")
-    elif summary_month_dict.get("status_str") != "ready":
-        draft_reason_str, detail_str = "Month data incomplete", next(iter(summary_month_dict.get("issue_list") or []), "")
+    if summary_month_dict.get("status_str") != "ready":
+        problem_str, detail_str = "Month data incomplete", next(iter(summary_month_dict.get("issue_list") or []), "")
     elif summary_since_dict.get("twr_float") is None:
-        draft_reason_str, detail_str = "Return since start unavailable", summary_since_dict.get("twr_reason_str") or next(
+        problem_str, detail_str = "Return since start unavailable", summary_since_dict.get("twr_reason_str") or next(
             iter(summary_since_dict.get("issue_list") or []), "")
     elif summary_since_dict.get("status_str") != "ready":
-        draft_reason_str, detail_str = "Data since start incomplete", next(iter(summary_since_dict.get("issue_list") or []), "")
+        problem_str, detail_str = "Data since start incomplete", next(iter(summary_since_dict.get("issue_list") or []), "")
     elif any(status_str != "ready" for status_str in program_status_list):
-        draft_reason_str = "Program data incomplete"
+        problem_str = "Program data incomplete"
     elif flow_dict["reason_str"]:
-        draft_reason_str = "Capital movements do not reconcile"
+        problem_str = "Capital movements do not reconcile"
     else:
-        draft_reason_str = ""
+        problem_str = ""
+    # A month not final yet says so in its date ("to Oct 30"); the bar on paper is for data that does not tie.
+    draft_reason_str = problem_str or ("" if complete_bool else "Final month-end statement not saved yet" if option_dict["sessions_done_bool"]
+        else f"Month in progress, through {_short_day_str(close_str)}")
     # The screen bar shows these explanations; a saved report keeps them in its evidence file.
     note_list = [f"Draft · {draft_reason_str}"] if draft_reason_str else []
     note_list += [detail_str] if detail_str else []
@@ -1074,10 +1076,10 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
         if not program_dict["holding_dict"]["available_bool"] and program_dict["holding_dict"]["reason_str"]))
     if flow_dict["reason_str"]:
         note_list.append(flow_dict["reason_str"])
-    result_dict.update(draft_bool=bool(draft_reason_str), draft_reason_str=draft_reason_str, status_note_str=" · ".join(note_list))
+    result_dict.update(draft_bool=bool(draft_reason_str), draft_bar_bool=bool(problem_str), draft_reason_str=draft_reason_str, status_note_str=" · ".join(note_list))
     is_demo_bool = workspace_dict["client_dict"].get("is_demo") is True
     height_int, result_dict["art_height_int"] = _page_height_tuple(art_bool=bool(result_dict["art_url_str"]),
-        banner_int=bool(draft_reason_str) + is_demo_bool, movement_bool=movement_bool, sub_str=result_dict["sub_str"],
+        banner_int=bool(problem_str) + is_demo_bool, movement_bool=movement_bool, sub_str=result_dict["sub_str"],
         client_name_str=result_dict["client_name_str"], scope_note_bool=bool(other_name_list),
         breakdown_row_int=len(breakdown_dict["row_list"]) if breakdown_dict else 0,
         legend_list_list=[program_dict["holding_dict"]["legend_list"] for program_dict in program_list],

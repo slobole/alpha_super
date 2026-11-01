@@ -57,7 +57,7 @@
   <main class="mr-pages" data-report-id="{{ report_dict.report_id_str }}">
     {% set lead_dict = report_dict.money_row_list[0] %}
     <section class="pg" aria-label="Summary">
-      {% if report_dict.draft_bool %}<div class="mr-draft">Draft · {{ report_dict.draft_reason_str }}</div>{% endif %}
+      {% if report_dict.draft_bar_bool %}<div class="mr-draft">Draft · {{ report_dict.draft_reason_str }}</div>{% endif %}
       {% if report_dict.is_demo_bool %}<div class="mr-demo">DEMONSTRATION · synthetic data</div>{% endif %}
       {% if report_dict.art_url_str %}<img class="art" src="{{ report_dict.art_url_str }}" alt="Picture of the month" style="height: {{ report_dict.art_height_int }}px">{% endif %}
       <div class="panel{% if not report_dict.art_url_str %} panel-top{% endif %}">
@@ -99,11 +99,12 @@
         {% if report_dict.scope_note_str %}<p class="scope-note">{{ report_dict.scope_note_str }}</p>{% endif %}
 
         <section class="sec" aria-label="Return since start">
-          <div class="sh"><b>Return since start</b><span>Time-weighted (TWR)</span></div>
+          <div class="sh"><b>Return since start</b></div>
           {% set chart_dict = report_dict.chart_dict %}
           {% if chart_dict.available_bool %}
-          <svg class="chart" viewBox="0 0 {{ chart_dict.width_int }} {{ chart_dict.height_int }}" role="img" aria-label="Return since start: {% for line_dict in chart_dict.line_list %}{{ line_dict.name_str }} {{ line_dict.label_str }}{% if not loop.last %}, {% endif %}{% endfor %}">
+          <svg class="chart" viewBox="0 0 {{ chart_dict.width_int }} {{ chart_dict.height_int }}" role="img" aria-label="TWR since start: {% for line_dict in chart_dict.line_list %}{{ line_dict.name_str }} {{ line_dict.label_str }}{% if not loop.last %}, {% endif %}{% endfor %}">
             {% for tick_dict in chart_dict.tick_list %}<line x1="{{ chart_dict.plot_left }}" y1="{{ tick_dict.y }}" x2="{{ chart_dict.plot_right }}" y2="{{ tick_dict.y }}" stroke="{{ '#CBD5E1' if tick_dict.zero_bool else '#EEF1F5' }}" stroke-width="1"></line><text x="{{ chart_dict.plot_left - 7 }}" y="{{ tick_dict.y + 4 }}" text-anchor="end" font-size="12" fill="#64748B">{{ tick_dict.label_str }}</text>{% endfor %}
+            <line x1="{{ chart_dict.plot_left }}" y1="8" x2="{{ chart_dict.plot_left + 16 }}" y2="8" stroke="{{ chart_dict.legend_color_str }}" stroke-width="2" stroke-linecap="round"></line><text x="{{ chart_dict.plot_left + 22 }}" y="12" font-size="12" fill="#64748B">TWR</text>
             {% for month_dict in chart_dict.month_list %}<text x="{{ month_dict.x }}" y="{{ chart_dict.height_int - 5 }}" font-size="12" fill="#64748B">{{ month_dict.label_str }}</text>{% endfor %}
             {% for line_dict in chart_dict.line_list %}{% if line_dict.area_str %}<path d="{{ line_dict.area_str }}" fill="{{ line_dict.color_str }}" fill-opacity=".1" stroke="none"></path>{% endif %}<path d="{{ line_dict.path_str }}" fill="none" stroke="{{ line_dict.color_str }}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></path>{% endfor %}
             {% for line_dict in chart_dict.line_list %}{% if line_dict.leader_bool %}<line x1="{{ line_dict.end_x + 5 }}" y1="{{ line_dict.end_y }}" x2="{{ line_dict.label_x - 2 }}" y2="{{ line_dict.label_y }}" stroke="#CBD5E1" stroke-width="1"></line><rect x="{{ line_dict.label_x }}" y="{{ line_dict.label_y - 5 }}" width="10" height="10" rx="2" fill="{{ line_dict.color_str }}"></rect><text x="{{ line_dict.label_x + 15 }}" y="{{ line_dict.label_y + 4.5 }}" font-size="14" font-weight="600" fill="#0F172A">{{ line_dict.label_name_str }} {{ line_dict.label_str }}</text>{% else %}<text x="{{ line_dict.label_x }}" y="{{ line_dict.label_y + 4.5 }}" font-size="14" font-weight="600" fill="#0F172A">{{ line_dict.label_str }}</text>{% endif %}<circle cx="{{ line_dict.end_x }}" cy="{{ line_dict.end_y }}" r="4" fill="{{ line_dict.color_str }}" stroke="#FFFFFF" stroke-width="2"></circle>{% endfor %}
@@ -112,7 +113,7 @@
         </section>
 
         <section class="sec" aria-label="Holdings">
-          <div class="sh"><b>Holdings</b><span>Weights on {{ report_dict.close_label_str }}</span></div>
+          <div class="sh"><b>Holdings</b></div>
           <div class="holds{% if not report_dict.single_program_bool %} holds-two{% endif %}">
             {% for program_dict in report_dict.program_list %}
             {% set holding_dict = program_dict.holding_dict %}
@@ -153,7 +154,7 @@
 
     {% if report_dict.details_bool %}
     <section class="pg" aria-label="Details">
-      {% if report_dict.draft_bool %}<div class="mr-draft">Draft · {{ report_dict.draft_reason_str }}</div>{% endif %}
+      {% if report_dict.draft_bar_bool %}<div class="mr-draft">Draft · {{ report_dict.draft_reason_str }}</div>{% endif %}
       {% if report_dict.is_demo_bool %}<div class="mr-demo">DEMONSTRATION · synthetic data</div>{% endif %}
       <div class="dark-head"><span>{% if report_dict.client_name_str %}<b>{{ report_dict.client_name_str }}</b> · {% endif %}{{ report_dict.period_label_str }} · Details</span><span>{{ report_dict.brand_name_str }}</span></div>
       <div class="in">

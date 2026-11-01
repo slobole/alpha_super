@@ -256,7 +256,8 @@ def test_printed_body_omits_method_section_but_keeps_missing_evidence_and_partia
         assert text_str not in body_str
     partial_dict = _report_dict(workspace_dict, snapshot_obj, month_str="2026-09")
     partial_body_str = _printed_body_str(partial_dict)
-    assert partial_dict["draft_bool"] and partial_body_str.count("Draft · Month in progress, through Sep 3") == 2
+    # A month not final yet says so in its date; the bar on paper is for data that does not tie.
+    assert partial_dict["draft_bool"] and "Draft ·" not in partial_body_str
     assert "September 2026 · to Sep 3" in partial_body_str
 
 

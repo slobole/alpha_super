@@ -19,7 +19,8 @@ page; larger books may continue onto additional pages without hiding rows.
 - Values use the approved USD-base statement contract. A statement actually
   denominated in ILS is unsupported. Showing VAULT in shekels would need IBKR's
   cash report by currency in the Flex query, which is not configured.
-- `Net capital` includes the initial measured value and
+- `Net invested` (`Net capital` until 2026-11-01; that is also a regulatory term for
+  brokers) includes the initial measured value and
   subsequent capital/scope movements. It is not a lifetime deposit total.
 - Dollar profit includes recorded costs, income and FX. It is not TWR multiplied
   by contributions. Posted activity is explanatory: never add it to profit again.
@@ -201,12 +202,12 @@ elegance, simplicity, ease of reading, and the bottom line first. Accounting,
 engine, archive and the Performance page are unchanged; only the page changed.
 
 - Page 1: the picture band, a dark panel with the name and the bottom line (value,
-  the month, since start, net capital, one more row when money moved), the return
+  the month, since start, net invested, one more row when money moved), the return
   chart, holdings. Removed: the Pod donut, card frames, the Opening/Closing strip
   (now `Capital account` in Details) and filler sentences.
 - One Pod = one page. More Pods, or signed holdings to list, add a Details page:
   months with Pod rows, capital account, money in and out, activity.
-- The money-moved row comes from the ledger behind `Net capital`, so the row and
+- The money-moved row comes from the ledger behind `Net invested`, so the row and
   that figure agree. A Pod entering on a month's first session counts in that
   month; a Pod closing on a month's last day counts in the next, because it was
   still in that month's value. The client's very first day is not money moved.
@@ -230,8 +231,13 @@ engine, archive and the Performance page are unchanged; only the page changed.
 - Four type sizes only: 48, 22, 14 and 12 px (40 for a value over ten characters).
   The font is Hanken Grotesk, bundled in `static/fonts` and embedded in saved copies.
 - A name stored in capitals reads as a name; any other spelling stays as typed.
-- `TWR` is named once, beside the chart (owner decision 2026-11-01). The month table's
-  caption is `Return (%)`.
+- `TWR` is named once, as a legend on the chart (owner decision 2026-11-01). The month
+  table's caption is `Return (%)`. Holdings carries no date of its own; the panel's
+  `Value on <day>` gives it.
+- A month not final yet says so in its date, `October 2026 · to Oct 30`, with no bar on
+  paper (owner decision 2026-11-01). The operator's screen keeps the reason, the button
+  stays `Print draft` and it cannot be saved as final. The amber bar prints only for
+  data that does not tie, in any month.
 - `Return by month` has one row per year, newest first, with Jan to Dec and the
   year's linked return, so it serves any number of years; a first year's return is
   the return since start. Pods are listed under the report's year. With one Pod and
@@ -273,7 +279,7 @@ Tier 3 by path; no order, sizing, price, state or schema path changed, and only
 `app.py` imports `monthly_report`. A separate review compared the committed module
 with the new one over 17 synthetic books: every money, bridge, flow, program, holding,
 month and chart-end value was identical. Its findings were fixed and re-checked; the
-new money-moved row tied to `Net capital` within $0.11 across 70 books. The year
+new money-moved row tied to `Net invested` within $0.11 across 70 books. The year
 table came after that review and is covered by tests and the page checks below.
 
 2,833 Live Ops V4, report, client reporting and required live tests pass. The two
@@ -296,3 +302,8 @@ printed in Chrome hold their sheets up to eight Pods. These still run onto a fur
 sheet: nine Pods with a draft bar, two programs of eight long rows with a draft bar,
 three programs with long ticker lists, four programs, and a three-year page carrying
 every optional line.
+
+The last round (`TWR` as a legend, no holdings date, no bar on a month not final yet)
+changed display only and had no separate reviews. 2,850 tests pass, with the same two
+golden Overview failures. The 38 page shapes hold their sheets; four programs now fit
+on two, with no room to spare.

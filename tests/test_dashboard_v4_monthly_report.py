@@ -117,7 +117,7 @@ def test_month_and_since_start_match_the_performance_page(demo_tuple):
         "Value on August 31": (_money_str(since_dict["closing_nav_float"]), ""),
         "August": (_money_str(month_dict["pnl_float"], signed_bool=True), _percent_str(month_dict["twr_float"])),
         "Since Jun 1, 2026": (_money_str(since_dict["pnl_float"], signed_bool=True), _percent_str(since_dict["twr_float"])),
-        "Net capital": (_money_str(since_dict["closing_nav_float"] - since_dict["pnl_float"]), ""),
+        "Net invested": (_money_str(since_dict["closing_nav_float"] - since_dict["pnl_float"]), ""),
     }
     assert _money_value_dict(report_dict)["August"] == ("+$1,090", "+1.1%")
     # The months row links the same daily returns as the Performance grid.
@@ -158,11 +158,11 @@ def test_route_is_read_only_validates_the_month_and_renders_both_pages(demo_tupl
     response_obj = client_obj.get("/monthly-report?month=2026-08")
     text_str = _visible_text_str(response_obj.get_data(as_text=True))
     for expected_str in ("Monthly report", "Value on August 31 · USD", "+$1,090", "+1.1%", "Since Jun 1, 2026", "Holdings",
-            "Return by month", "Return (%)", "Time-weighted (TWR)", "Details", "Net capital", "Capital account", "Money in and out",
+            "Return by month", "Return (%)", "TWR", "Details", "Net invested", "Capital account", "Money in and out",
             "August 2026 · Summary", "August 2026 · Details", "Quantitative Strategies"):
         assert expected_str in text_str
-    # TWR is named once, beside the chart.
-    assert text_str.count("Time-weighted") == 1
+    # TWR is a legend on the chart, and nothing else repeats it or dates the holdings.
+    assert response_obj.get_data(as_text=True).count(">TWR</text>") == 1 and "Time-weighted" not in text_str and "Weights on" not in text_str
     assert "About these numbers" not in text_str
     assert "Draft" not in text_str
     assert response_obj.headers["Content-Security-Policy"].startswith("default-src 'self'")
@@ -236,7 +236,7 @@ def test_flows_add_up_to_money_put_in_and_withhold_any_gap(demo_tuple):
     report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=DEMO_NOW_TS, month_str="2026-08")
     flow_dict = report_dict["flow_dict"]
     assert flow_dict["row_list"] == []  # No August capital movements; prior months are not repeated.
-    assert flow_dict["total_str"] == _money_value_dict(report_dict)["Net capital"][0] == "$92,000"
+    assert flow_dict["total_str"] == _money_value_dict(report_dict)["Net invested"][0] == "$92,000"
     account_list = [account_dict for account_dict in workspace_dict["client_dict"]["accounts"]]
     pod_list = [{"pod_id_str": account_dict["pod_id"], "name_str": account_dict["display_name"]} for account_dict in account_list]
     wrong_dict = _flow_dict(account_list, snapshot_obj, pod_list, from_str="2026-06-01", to_str="2026-08-31", put_in_float=92100.)
@@ -372,7 +372,7 @@ def test_one_pod_is_one_page_with_everything_on_it(tmp_path):
     html_str = app_obj.test_client().get("/monthly-report?month=2026-08").get_data(as_text=True)
     page_str = html_str[html_str.index('<main class="mr-pages"'):]
     assert page_str.count('class="pg"') == 1 and "Return by month" in page_str and "Return (%)" in page_str and "August activity" in page_str
-    assert page_str.count("Time-weighted") == 1
+    assert page_str.count(">TWR</text>") == 1 and "Time-weighted" not in page_str
     assert page_str.count("Commissions and fees charged by Interactive Brokers") == 1
     assert "Capital account" not in page_str and "· Details" not in page_str and "· Summary" not in page_str
 
@@ -403,7 +403,7 @@ def test_a_withdrawal_is_one_row_and_a_transfer_between_pods_is_none():
     assert report_dict["money_row_list"][-1]["tone_str"] == "neg"
     workspace_dict, snapshot_obj = _sample_tuple(extra_event_dict={("U100", "2026-08-17"): {"depositsWithdrawals": "0"}})
     report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-08")
-    assert [row_dict["label_str"] for row_dict in report_dict["money_row_list"]] == ["Value on August 31", "August", "Since Aug 3, 2026", "Net capital"]
+    assert [row_dict["label_str"] for row_dict in report_dict["money_row_list"]] == ["Value on August 31", "August", "Since Aug 3, 2026", "Net invested"]
 
 
 def test_empty_activity_lines_stay_off_the_page():
@@ -421,12 +421,12 @@ def test_money_moved_at_a_month_boundary_still_gets_its_row():
     def report_dict(month_str):
         return build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str=month_str)
 
-    def net_capital_int(report_dict_obj):
-        return _money_int(_money_value_dict(report_dict_obj)["Net capital"][0])
+    def net_invested_int(report_dict_obj):
+        return _money_int(_money_value_dict(report_dict_obj)["Net invested"][0])
 
     opening_decimal = next(row_obj.opening_nav_decimal for row_obj in snapshot_obj.row_tuple if row_obj.account_route_str == "U200" and row_obj.market_date_str == "2026-09-01")
     assert _money_value_dict(report_dict("2026-09"))["Added in September"] == (_money_str(opening_decimal, signed_bool=True), "")
-    assert abs(net_capital_int(report_dict("2026-09")) - net_capital_int(report_dict("2026-08")) - _money_int(_money_str(opening_decimal))) <= 1
+    assert abs(net_invested_int(report_dict("2026-09")) - net_invested_int(report_dict("2026-08")) - _money_int(_money_str(opening_decimal))) <= 1
     # A Pod that closes on the month's last day counted in that month's value, so it leaves in the next.
     workspace_dict, snapshot_obj = _sample_tuple(effective_to_dict={"U200": "2026-08-31"})
     closing_decimal = next(row_obj.closing_nav_decimal for row_obj in snapshot_obj.row_tuple if row_obj.account_route_str == "U200" and row_obj.market_date_str == "2026-08-31")
@@ -436,10 +436,10 @@ def test_money_moved_at_a_month_boundary_still_gets_its_row():
     assert [(line_dict["date_str"], line_dict["kind_str"], line_dict["pod_str"], line_dict["value_str"]) for line_dict in report_dict("2026-09")["flow_dict"]["line_list"]] == [
         ("Aug 31, 2026", "Pod closed, money out", "Pod 2 · U···200", _money_str(-closing_decimal, signed_bool=True, cents_bool=True))]
     assert report_dict("2026-08")["flow_dict"]["line_list"][-1]["kind_str"] != "Pod closed, money out"
-    assert abs(net_capital_int(report_dict("2026-08")) - net_capital_int(report_dict("2026-09")) - _money_int(_money_str(closing_decimal))) <= 1
-    # The client's very first day is where net capital starts, not money moved.
+    assert abs(net_invested_int(report_dict("2026-08")) - net_invested_int(report_dict("2026-09")) - _money_int(_money_str(closing_decimal))) <= 1
+    # The client's very first day is where net invested starts, not money moved.
     workspace_dict, snapshot_obj = _one_pod_tuple(extra_event_dict={("U100", "2026-08-17"): {"depositsWithdrawals": "0"}, ("U100", "2026-08-24"): {"depositsWithdrawals": "0"}})
-    assert [row_dict["label_str"] for row_dict in report_dict("2026-08")["money_row_list"]] == ["Value on August 31", "August", "Since Aug 3, 2026", "Net capital"]
+    assert [row_dict["label_str"] for row_dict in report_dict("2026-08")["money_row_list"]] == ["Value on August 31", "August", "Since Aug 3, 2026", "Net invested"]
 
 
 def test_pod_rows_add_up_to_the_month_when_a_pod_retires():
@@ -586,13 +586,45 @@ def test_the_chart_budget_is_fed_by_what_the_page_prints(monkeypatch):
         "details_bool": True, "year_row_int": 2, "activity_list": report_dict["activity_list"], "flow_note_bool": False}
     assert report_dict["sub_str"] and all(seen_dict["legend_list_list"]) and seen_dict["activity_list"]
     assert report_dict["art_height_int"] == 176 and report_dict["chart_dict"]["height_int"] < 280
-    # A month in progress adds its draft bar; no picture means none is charged.
+    # A month in progress prints no bar, and no picture means none is charged.
     build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-09", database_path_str="unused.sqlite3")
-    assert seen_dict["banner_int"] == 1 and seen_dict["art_bool"] is False
-    # The line that says money could not be matched.
+    assert seen_dict["banner_int"] == 0 and seen_dict["art_bool"] is False
+    # Data that does not tie prints the bar, and the line that says money could not be matched.
     workspace_dict, snapshot_obj = _one_pod_tuple(extra_event_dict={("U100", "2026-08-12"): {"linkingAdjustments": "NaN"}})
     report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-08")
-    assert report_dict["flow_dict"]["reason_str"] and seen_dict["flow_note_bool"] is True and seen_dict["details_bool"] is False
+    assert report_dict["flow_dict"]["reason_str"] and seen_dict["flow_note_bool"] is True and seen_dict["details_bool"] is False and seen_dict["banner_int"] == 1
+
+
+def test_the_chart_legend_names_the_measure_in_the_colour_of_a_lone_line():
+    def series_dict(name_str, color_str):
+        return {"name_str": name_str, "color_str": color_str, "path_list": [
+            {"market_date_str": "2026-08-03", "cumulative_return_float": 0.}, {"market_date_str": "2026-08-04", "cumulative_return_float": .01}]}
+
+    chart_dict = _chart_dict([series_dict("Growth", "#123456")], height_int=120)
+    assert chart_dict["legend_color_str"] == "#123456"
+    # The plot starts under the legend's strip, at the smallest chart too.
+    assert min(tick_dict["y"] for tick_dict in chart_dict["tick_list"]) > 16
+    assert _chart_dict([series_dict("Growth", "#123456"), series_dict("Steady", "#654321")], height_int=208)["legend_color_str"] == "#94A3B8"
+
+
+def test_a_month_not_final_says_so_in_its_date_and_only_a_data_problem_prints_the_bar(tmp_path):
+    def report_dict(month_str, extra_event_dict=None):
+        workspace_dict, snapshot_obj = _sample_tuple(extra_event_dict=extra_event_dict)
+        return build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str=month_str)
+
+    progress_dict = report_dict("2026-09")
+    assert progress_dict["draft_bool"] and not progress_dict["draft_bar_bool"] and progress_dict["period_label_str"].endswith(" · to Sep 3")
+    # The operator still sees why, and the report still cannot be saved as final.
+    assert progress_dict["status_note_str"].startswith("Draft · Month in progress, through Sep 3")
+    final_dict = report_dict("2026-08")
+    assert not final_dict["draft_bool"] and not final_dict["draft_bar_bool"]
+    for problem_dict in (report_dict("2026-08", {("U100", "2026-08-12"): {"linkingAdjustments": "NaN"}}), report_dict("2026-09", {("U100", "2026-09-01"): {"linkingAdjustments": "NaN"}})):
+        assert problem_dict["draft_bool"] and problem_dict["draft_bar_bool"] and problem_dict["draft_reason_str"] != "Month in progress, through Sep 3"
+    workspace_dict, snapshot_obj = _sample_tuple()
+    client_obj = create_app(object(), now_fn=lambda: SAMPLE_AS_OF_TS, performance_db_path_str=str(tmp_path / "none.sqlite3"),
+        workspace_snapshot_fn=lambda: (workspace_dict, snapshot_obj)).test_client()
+    html_str = client_obj.get("/monthly-report?month=2026-09").get_data(as_text=True)
+    assert 'class="mr-draft"' not in html_str and "Print draft" in html_str and "September 2026 · to Sep 3" in html_str
 
 
 def test_other_fees_are_listed_beside_commissions():
@@ -790,7 +822,7 @@ def test_other_account_lines_need_an_other_account_at_the_close():
     workspace_dict, snapshot_obj = _sample_tuple(effective_to_dict={"U900": "2026-08-13"})
     report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-08")
     assert [row_dict["label_str"] for row_dict in report_dict["money_row_list"]] == [
-        "Value on August 31", "August", "Since Aug 3, 2026", "Net capital", "Added in August"]
+        "Value on August 31", "August", "Since Aug 3, 2026", "Net invested", "Added in August"]
 
 
 def test_a_retired_pod_keeps_its_history_but_leaves_the_split():
@@ -804,7 +836,7 @@ def test_a_retired_pod_keeps_its_history_but_leaves_the_split():
     assert [row_dict["name_str"] for row_dict in report_dict["month_table_dict"]["row_list"]] == ["Portfolio 2026", "Pod 1 · U···100", "Pod 2 · U···200"]
     flow_dict = report_dict["flow_dict"]
     assert "Pod closed, money out" in [row_dict["kind_str"] for row_dict in flow_dict["row_list"]]
-    assert flow_dict["total_str"] != "—" and flow_dict["total_str"] != _money_value_dict(report_dict)["Net capital"][0]
+    assert flow_dict["total_str"] != "—" and flow_dict["total_str"] != _money_value_dict(report_dict)["Net invested"][0]
     assert build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS,
         month_str="2026-09")["available_bool"]
 
@@ -831,7 +863,7 @@ def test_a_missing_since_start_report_keeps_the_month_and_says_why(demo_tuple, m
     report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=DEMO_NOW_TS, month_str="2026-08")
     value_dict = _money_value_dict(report_dict)
     assert value_dict["August"] == ("+$1,090", "+1.1%")
-    assert value_dict["Since Jun 1, 2026"] == ("—", "—") and value_dict["Net capital"] == ("—", "")
+    assert value_dict["Since Jun 1, 2026"] == ("—", "—") and value_dict["Net invested"] == ("—", "")
     assert report_dict["draft_reason_str"] == "Return since start unavailable"
     assert "Money in and out appears once the account history since start is complete." in report_dict["status_note_str"]
     assert not report_dict["chart_dict"]["available_bool"] and not report_dict["program_list"][0]["chart_available_bool"]
