@@ -19,10 +19,18 @@ from data.norgate_loader import build_data_source_metadata_dict
 
 
 MR_CAPSULE_CONTRACT_STR = "mr_capsule_close_targets_v1"
-MR_CAPSULE_STRATEGY_IMPORT_TUPLE = tuple(
-    f"strategies.mr_capsule.strategy_mr_{pod_str}_{mode_str}"
-    for pod_str in ("dv2_vix_gated", "hpi_vote_vix_gated")
-    for mode_str in ("cash", "bil", "spmo")
+# Same signal and exit rules and account contract as the 1/N pods; the dollars of a new entry differ and, as the book fills sooner, so do some names.
+MR_CAPSULE_LIQUIDITY_STRATEGY_IMPORT_TUPLE = (
+    "strategies.mr_capsule.strategy_mr_dv2_vix_gated_liq_bil",
+    "strategies.mr_capsule.strategy_mr_hpi_vote_vix_gated_liq_bil",
+)
+MR_CAPSULE_STRATEGY_IMPORT_TUPLE = (
+    *(
+        f"strategies.mr_capsule.strategy_mr_{pod_str}_{mode_str}"
+        for pod_str in ("dv2_vix_gated", "hpi_vote_vix_gated")
+        for mode_str in ("cash", "bil", "spmo")
+    ),
+    *MR_CAPSULE_LIQUIDITY_STRATEGY_IMPORT_TUPLE,
 )
 MR_CAPSULE_PROFILE_TUPLE = (
     "norgate_eod_sp500_mr_capsule_pit",
@@ -124,6 +132,13 @@ def build_mr_capsule_decision_plan(release_obj: LiveRelease, as_of_ts: datetime,
     from strategies.mr_capsule.vix_stress_gate import load_vix_close_ser
 
     validate_mr_capsule_release(release_obj)
+    liquidity_bool = release_obj.strategy_import_str in MR_CAPSULE_LIQUIDITY_STRATEGY_IMPORT_TUPLE
+    if liquidity_bool:
+        try:
+            from strategies.mr_capsule import dv2_vix_gated_liq, hpi_vote_vix_gated_liq
+        except Exception as exception_obj:
+            # The runner blocks one pod on RuntimeError and goes on; any other error at import would escape its catch and stop a shared tick.
+            raise RuntimeError(f"MR capsule liquidity sizing cannot load: {exception_obj}") from exception_obj
     signal_date_ts = scheduler_utils.get_latest_completed_session_label_ts(as_of_ts, "XNYS")
     if signal_date_ts is None:
         raise ValueError("MR capsule has no completed decision session.")
@@ -146,6 +161,9 @@ def build_mr_capsule_decision_plan(release_obj: LiveRelease, as_of_ts: datetime,
     else:
         pricing_data_df, universe_df = dv2_vix_gated.load_pricing_data(end_date_str)
         build_strategy_fn = dv2_vix_gated.build_dv2_capsule_strategy
+    if liquidity_bool:
+        build_strategy_fn = (hpi_vote_vix_gated_liq.build_hpi_capsule_liquidity_strategy if hpi_bool
+            else dv2_vix_gated_liq.build_dv2_capsule_liquidity_strategy)
     # *** CRITICAL *** Truncate the frame before indicators; the next session is
     # a calendar label only, never a source of tomorrow's prices or fills.
     pricing_data_df = pricing_data_df.loc[:signal_date_ts].copy()
@@ -196,6 +214,8 @@ def build_mr_capsule_decision_plan(release_obj: LiveRelease, as_of_ts: datetime,
     strategy_host._seed_strategy_state(strategy_obj, pod_state_obj)
     strategy_obj._total_value_history_list = [decision_nav_float]
     signal_df = strategy_obj.compute_signals(pricing_data_df)
+    if liquidity_bool:
+        liquidity_coverage_float = strategy_obj.validate_liquidity_sizing_ready(signal_df, signal_date_ts)
     strategy_obj.previous_bar = signal_date_ts
     strategy_obj.current_bar = pd.Timestamp(scheduler_utils.next_business_day_timestamp_ts(signal_date_ts, "XNYS").date())
     close_row_ser = signal_df.loc[signal_date_ts]
@@ -220,6 +240,14 @@ def build_mr_capsule_decision_plan(release_obj: LiveRelease, as_of_ts: datetime,
         "account_snapshot_timestamp_str": pod_state_obj.updated_timestamp_ts.isoformat(),
         "parking_trade_ids_used_for_live_identity_bool": False,
     })
+    if liquidity_bool:
+        # m / 10 and the skips stay with the plan: the plan's weights alone can be capped by the account.
+        snapshot_metadata_dict.update({
+            "liquidity_reference_float": float(strategy_obj.liquidity_reference_ser.loc[signal_date_ts]),
+            "liquidity_coverage_float": liquidity_coverage_float,
+            "liquidity_entry_wanted_weight_dict": {asset_str: float(weight_float) for (_, asset_str), weight_float in strategy_obj.entry_weight_by_date_dict.items()},
+            "liquidity_skipped_entry_list": list(strategy_obj.skipped_entry_symbol_list),
+        })
     decision_plan_obj = strategy_host._build_decision_plan_from_orders(
         release_obj, signal_date_ts, strategy_obj, snapshot_metadata_dict,
     )

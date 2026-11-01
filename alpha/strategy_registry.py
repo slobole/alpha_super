@@ -157,6 +157,10 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     "strategies.mr_capsule.strategy_mr_hpi_vote_vix_gated_spmo": MaturityTier.WIRED,
     "strategies.mr_capsule.strategy_mr_hpi_vote_vix_gated_bil": MaturityTier.WIRED,
     "strategies.mr_capsule.strategy_mr_hpi_vote_vix_gated_cash": MaturityTier.WIRED,
+    # The BIL pods with each entry sized by liquidity (docs/research/GROWTH_MR_PRODUCTS_20261101.md), same routes
+    # and account contract. Templates remain disabled. The 1/N pods stay available; an account moves between the two only when flat.
+    "strategies.mr_capsule.strategy_mr_dv2_vix_gated_liq_bil": MaturityTier.WIRED,
+    "strategies.mr_capsule.strategy_mr_hpi_vote_vix_gated_liq_bil": MaturityTier.WIRED,
     # MOSAIC was demoted to RESEARCH on 2026-09-28 by owner decision: its
     # 2026-07-31 validation was invalidated by the split-price fix and it left
     # the recommended books (readiness audit, section 10). Committed YAMLs that

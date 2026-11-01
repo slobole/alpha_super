@@ -54,7 +54,7 @@ def test_capsule_examples_have_distinct_ids_and_remain_disabled():
     release_list = [parse_release_manifest(str(template_path_obj)) for template_path_obj in CAPSULE_TEMPLATE_PATH_TUPLE]
     assert {release_obj.strategy_import_str for release_obj in release_list} == set(MR_CAPSULE_STRATEGY_IMPORT_TUPLE)
     client_id_set = {release_obj.broker_client_id_int for release_obj in release_list}
-    assert len(client_id_set) == len(release_list) == 6
+    assert len(client_id_set) == len(release_list) == 8
     assert not client_id_set.intersection({31, 32})
     # Disabled, but auto-submit once enabled: daily pods send every session.
     assert all(not release_obj.enabled_bool and release_obj.auto_submit_enabled_bool for release_obj in release_list)

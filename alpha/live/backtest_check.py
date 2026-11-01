@@ -65,6 +65,7 @@ TAA_IMPORT_PREFIX_STR = "strategies.taa_df."
 NON_ASSET_KEY_SET = frozenset({"Cash", "cash", "CASH"})
 WEIGHT_MIN_FLOAT = 1e-12
 ENTRY_WEIGHT_TOLERANCE_FLOAT = 1e-6
+SIZED_ENTRY_WEIGHT_TOLERANCE_FLOAT = 1e-3  # m reads a rolling Turnover history, which a vendor revision can move slightly.
 # Full books compare targets with the backtest's weights at that session's close, which carry the day's move
 # (a -9% day on a 50% sleeve moves it ~3 points). Only a clear difference counts.
 WEIGHT_TOLERANCE_FLOAT = 0.05
@@ -250,7 +251,8 @@ def _clean_weight_map(weight_map_dict, *, skip_set=frozenset()) -> dict[str, flo
 
 
 def compare_decision_dict(decision_dict: dict, *, reference_weight_map_dict: dict, reference_trade_map_dict: dict,
-                          reference_entry_weight_map_dict: dict | None = None, skip_set=frozenset()) -> dict:
+                          reference_entry_weight_map_dict: dict | None = None, skip_set=frozenset(),
+                          entry_weight_tolerance_float: float = ENTRY_WEIGHT_TOLERANCE_FLOAT, entry_weight_basis_str: str | None = None) -> dict:
     """Compare the live decision with the backtest for one session. Symbols and weights only, never shares.
 
     Full books: live full target weights vs the backtest's holdings weights after the session
@@ -290,11 +292,11 @@ def compare_decision_dict(decision_dict: dict, *, reference_weight_map_dict: dic
                         else "BUY · weight unavailable" if asset_str in buy_set else "SELL" if asset_str in sell_set else "—")
             same_bool = live_str.split(" ")[0] == test_str.split(" ")[0]
             if same_bool and asset_str in buy_set:
-                same_bool = (abs(entry_dict[asset_str] - reference_entry_dict[asset_str]) <= ENTRY_WEIGHT_TOLERANCE_FLOAT
+                same_bool = (abs(entry_dict[asset_str] - reference_entry_dict[asset_str]) <= entry_weight_tolerance_float
                              if asset_str in reference_entry_dict else None)
             row_list.append({"asset_str": asset_str, "live_str": live_str, "backtest_str": test_str,
                              "same_bool": same_bool})
-        basis_str = "Entries, exits and equal-slot entry weights (tolerance 0.0001 percentage points)."
+        basis_str = entry_weight_basis_str or "Entries, exits and equal-slot entry weights (tolerance 0.0001 percentage points)."
     differ_int = sum(1 for row_dict in row_list if row_dict["same_bool"] is False)
     unknown_bool = any(row_dict["same_bool"] is None for row_dict in row_list)
     row_list.sort(key=lambda row_dict: (row_dict["same_bool"] is True, row_dict["asset_str"]))
@@ -538,6 +540,13 @@ def run_reference_maps_dict(release_obj, *, start_str: str | None, end_str: str,
         key_tuple: 1.0 / slot_count_int for key_tuple, trade_dict in maps_dict["transaction_map_dict"].items()
         if trade_dict["quantity_float"] > 0
     } if isinstance(slot_count_int, int) and slot_count_int > 0 else {}
+    # Liquidity-sized capsule pods have no equal slot: they record each entry's m / 10 when they place it.
+    recorded_entry_weight_dict = getattr(strategy_obj, "entry_weight_by_date_dict", None)
+    if isinstance(recorded_entry_weight_dict, dict):
+        maps_dict["entry_weight_by_date_dict"] = {
+            key_tuple: float(weight_float) for key_tuple, weight_float in recorded_entry_weight_dict.items()
+            if maps_dict["transaction_map_dict"].get(key_tuple, {}).get("quantity_float", 0.0) > 0
+        }
     maps_dict.pop("reference_strategy_obj", None)
     del strategy_obj
     return maps_dict
@@ -665,10 +674,16 @@ def check_pod_dict(target_obj, *, as_of_date_str: str, live_return_dict: dict, p
     else:
         entry_weight_map_dict = {asset_str: value_float for (date_str, asset_str), value_float
                                  in maps_dict.get("entry_weight_by_date_dict", {}).items() if date_str == session_str}
-        decision_dict = compare_decision_dict(source_dict["decision_dict"],
+        # *** CRITICAL*** a sized capsule entry can be capped by the account at Close_T; its m / 10 cannot, so both sides compare that.
+        wanted_weight_dict = (source_dict["decision_dict"].get("snapshot_metadata_dict") or {}).get("liquidity_entry_wanted_weight_dict")
+        sized_kwarg_dict = {} if not isinstance(wanted_weight_dict, dict) else {
+            "entry_weight_tolerance_float": SIZED_ENTRY_WEIGHT_TOLERANCE_FLOAT,
+            "entry_weight_basis_str": "Entries, exits and liquidity-sized entry weights before the cap (tolerance 0.1 percentage points).",
+        }
+        decision_dict = compare_decision_dict({**source_dict["decision_dict"], "entry_target_weight_map_dict": wanted_weight_dict} if sized_kwarg_dict else source_dict["decision_dict"],
                                               reference_weight_map_dict=get_reference_realized_weight_map_dict(maps_dict, session_str),
                                               reference_trade_map_dict=trade_map_dict,
-                                              reference_entry_weight_map_dict=entry_weight_map_dict, skip_set=skip_set)
+                                              reference_entry_weight_map_dict=entry_weight_map_dict, skip_set=skip_set, **sized_kwarg_dict)
     metadata_dict = source_dict["decision_dict"]["snapshot_metadata_dict"]
     decision_dict.update(session_str=session_str, data_snapshot_str=str(metadata_dict.get("norgate_snapshot_date_str") or ""),
                          data_hash_str=str(metadata_dict.get("norgate_manifest_hash_str") or "")[:12])
