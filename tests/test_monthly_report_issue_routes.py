@@ -65,6 +65,9 @@ def test_issue_and_saved_read_preserve_the_reviewed_report_after_source_and_map_
     assert saved_obj.status_code == 200 and saved_obj.mimetype == "text/html"
     frozen_html_str = saved_obj.get_data(as_text=True)
     assert preview_dict["body_dict"]["report_id_str"] in frozen_html_str
+    # The picture is inside the copy at the height this page gave it, and the monogram is drawn in place.
+    assert re.search(r'<img class="art" src="data:image/[a-z]+;base64,[^"]+" alt="Picture of the month" style="height: \d+px">', frozen_html_str)
+    assert ">LS</text>" in frozen_html_str
     archive_path_obj = next((context_dict["root_obj"] / "monthly_reports").glob("*.json"))
     payload_dict = json.loads(archive_path_obj.read_text(encoding="utf-8"))
     assert payload_dict["html_str"] == frozen_html_str

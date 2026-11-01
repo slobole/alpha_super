@@ -59,7 +59,7 @@
     <section class="pg" aria-label="Summary">
       {% if report_dict.draft_bool %}<div class="mr-draft">Draft · {{ report_dict.draft_reason_str }}</div>{% endif %}
       {% if report_dict.is_demo_bool %}<div class="mr-demo">DEMONSTRATION · synthetic data</div>{% endif %}
-      {% if report_dict.art_url_str %}<img class="art" src="{{ report_dict.art_url_str }}" alt="Picture of the month">{% endif %}
+      {% if report_dict.art_url_str %}<img class="art" src="{{ report_dict.art_url_str }}" alt="Picture of the month" style="height: {{ report_dict.art_height_int }}px">{% endif %}
       <div class="panel{% if not report_dict.art_url_str %} panel-top{% endif %}">
         <header class="mast">
           <div>
@@ -67,8 +67,11 @@
             <div class="sub">{{ report_dict.sub_str }}</div>
           </div>
           <div class="brand">
-            <div class="bname">{{ report_dict.brand_name_str }}</div>
-            <div class="bdesc">{{ report_dict.brand_desc_str }}</div>
+            <svg class="mono" width="44" height="44" viewBox="0 0 44 44" aria-hidden="true"><circle cx="22" cy="22" r="21" fill="none" stroke="#B9CDD1" stroke-width="1"></circle><text x="22.6" y="27.5" text-anchor="middle" font-size="15" font-weight="500" letter-spacing="1.2" fill="#FFFFFF">{{ report_dict.brand_initials_str }}</text></svg>
+            <div>
+              <div class="bname">{{ report_dict.brand_name_str }}</div>
+              <div class="bdesc">{{ report_dict.brand_desc_str }}</div>
+            </div>
           </div>
         </header>
         <section class="top" aria-label="Bottom line">
@@ -132,12 +135,12 @@
 
         {% if not report_dict.details_bool %}
         <section class="sec" aria-label="Return by month">
-          <div class="sh"><b>Return by month</b><span>Time-weighted, %</span></div>
+          <div class="sh"><b>Return by month</b><span>Return (%)</span></div>
           {% include "_monthly_report_months.html" %}
         </section>
         {% if report_dict.activity_list %}
         <section class="sec" aria-label="Activity">
-          <div class="sh"><b>{{ report_dict.month_word_str }} activity</b></div>
+          <div class="sh"><b>{{ report_dict.month_word_str }} activity</b>{% if report_dict.activity_note_str %}<span>{{ report_dict.activity_note_str }}</span>{% endif %}</div>
           <div class="act">{% for item_dict in report_dict.activity_list %}<span>{{ item_dict.label_str }}<b>{{ item_dict.value_str }}</b></span>{% endfor %}</div>
         </section>
         {% endif %}
@@ -156,7 +159,7 @@
       <div class="in">
         {% if report_dict.month_table_dict.row_list %}
         <section class="sec" aria-label="Return by month">
-          <div class="sh"><b>Return by month</b><span>Time-weighted, %</span></div>
+          <div class="sh"><b>Return by month</b><span>Return (%)</span></div>
           {% include "_monthly_report_months.html" %}
         </section>
         {% endif %}
@@ -194,7 +197,7 @@
 
         {% if report_dict.activity_list %}
         <section class="sec" aria-label="Activity">
-          <div class="sh"><b>{{ report_dict.month_word_str }} activity</b></div>
+          <div class="sh"><b>{{ report_dict.month_word_str }} activity</b>{% if report_dict.activity_note_str %}<span>{{ report_dict.activity_note_str }}</span>{% endif %}</div>
           <div class="act">{% for item_dict in report_dict.activity_list %}<span>{{ item_dict.label_str }}<b>{{ item_dict.value_str }}</b></span>{% endfor %}</div>
         </section>
         {% endif %}

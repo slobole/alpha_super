@@ -18,7 +18,7 @@ from alpha.live.dashboard_v4 import monthly_report
 from alpha.live.dashboard_v4.app import create_app
 from alpha.live.dashboard_v4.demo import DEMO_NOW_TS, build_demo_workspace_tuple
 from alpha.live.dashboard_v4.monthly_report import (
-    ASSET_CLASS_TUPLE, _chart_dict, _flow_dict, _money_str, _month_option_list, _percent_str, _year_list, _year_row_list,
+    ASSET_CLASS_TUPLE, _chart_dict, _flow_dict, _money_str, _month_option_list, _page_height_tuple, _percent_str, _year_list, _year_row_list,
     build_monthly_report_dict, load_holder_name_str,
 )
 from alpha.live.dashboard_v4.performance import build_performance_page_dict
@@ -78,7 +78,7 @@ def _sample_tuple(*, operations_source_str="local", effective_to_dict=None, last
             override_dict.update(event_dict.get((route_str, date_str), {}))
             capital_decimal = Decimal(override_dict.get("depositsWithdrawals", "0"))
             economic_decimal = sum((value_decimal for value_decimal in (Decimal(override_dict.get(field_str, "0"))
-                for field_str in ("mtm", "commissions", "dividends", "withholdingTax", "interest")) if value_decimal.is_finite()), Decimal(0))
+                for field_str in ("mtm", "commissions", "otherFees", "dividends", "withholdingTax", "interest")) if value_decimal.is_finite()), Decimal(0))
             opening_decimal = nav_dict[route_str]
             nav_dict[route_str] = opening_decimal + capital_decimal + economic_decimal
             attribute_list.append(expanded_nav_attributes_dict(route_str, date_str=date_str, opening_str=str(opening_decimal),
@@ -158,15 +158,19 @@ def test_route_is_read_only_validates_the_month_and_renders_both_pages(demo_tupl
     response_obj = client_obj.get("/monthly-report?month=2026-08")
     text_str = _visible_text_str(response_obj.get_data(as_text=True))
     for expected_str in ("Monthly report", "Value on August 31 · USD", "+$1,090", "+1.1%", "Since Jun 1, 2026", "Holdings",
-            "Return by month", "Time-weighted (TWR)", "Details", "Net capital", "Capital account", "Money in and out",
-            "August 2026 · Summary", "August 2026 · Details"):
+            "Return by month", "Return (%)", "Time-weighted (TWR)", "Details", "Net capital", "Capital account", "Money in and out",
+            "August 2026 · Summary", "August 2026 · Details", "Quantitative Strategies"):
         assert expected_str in text_str
+    # TWR is named once, beside the chart.
+    assert text_str.count("Time-weighted") == 1
     assert "About these numbers" not in text_str
     assert "Draft" not in text_str
     assert response_obj.headers["Content-Security-Policy"].startswith("default-src 'self'")
     assert "<script>" not in response_obj.get_data(as_text=True)
     assert "Draft · Month in progress, through Sep 4" in _visible_text_str(client_obj.get("/monthly-report?month=2026-09").get_data(as_text=True))
     assert 'href="/monthly-report"' in client_obj.get("/performance").get_data(as_text=True)
+    assert '<svg class="mono"' in response_obj.get_data(as_text=True) and ">LS</text>" in response_obj.get_data(as_text=True)
+    assert re.search(r'<img class="art" [^>]*style="height: \d+px"', response_obj.get_data(as_text=True))
 
 
 @pytest.mark.parametrize("method_str", ["POST", "PUT", "PATCH", "DELETE"])
@@ -216,7 +220,7 @@ def test_holdings_use_the_close_and_fixed_class_order(demo_tuple):
     legend_list = holding_dict["legend_list"]
     assert [item_dict["name_str"] for item_dict in legend_list] == sorted((item_dict["name_str"] for item_dict in legend_list), key=class_order_list.index)
     assert abs(sum(float(item_dict["pct_str"].rstrip("%")) for item_dict in legend_list) - 100) < .35
-    assert {item_dict["name_str"]: item_dict["detail_str"] for item_dict in legend_list}["Stocks"] == "10 stocks"
+    assert {item_dict["name_str"]: item_dict["detail_str"] for item_dict in legend_list}["Stocks"] == "10 names"
     stock_pod_dict, fund_pod_dict = report_dict["program_list"][0]["pod_holding_list"][0], report_dict["program_list"][0]["pod_holding_list"][2]
     assert not stock_pod_dict["name_bool"] and fund_pod_dict["name_bool"]
     assert stock_pod_dict["row_list"][-1]["symbol_str"] == "Cash and accruals" and stock_pod_dict["row_list"][-1]["muted_bool"]
@@ -337,7 +341,7 @@ def test_saved_portfolio_counts_only_when_captured_after_that_close(monkeypatch)
     assert {item_dict["name_str"]: item_dict["pct_str"] for item_dict in holding_dict["legend_list"]} == {
         name_str: _percent_str(value_float / closing_float, signed_bool=False) for name_str, value_float in
         (("Nasdaq 100", 8000.), ("Stocks", 5400.), ("Gold", 6000.), ("US dollar", 4000.), ("Cash and accruals", closing_float - 23400.))}
-    assert {item_dict["name_str"]: item_dict["detail_str"] for item_dict in holding_dict["legend_list"]}["Stocks"] == "6 stocks"
+    assert {item_dict["name_str"]: item_dict["detail_str"] for item_dict in holding_dict["legend_list"]}["Stocks"] == "6 names"
     # A capture from another day, or before the close, never stands in for this month end.
     for timestamp_str in ("2026-09-01T20:10:00+00:00", "2026-08-31T19:30:00+00:00"):
         observed_dict["timestamp_str"] = timestamp_str
@@ -356,19 +360,20 @@ def _one_pod_tuple(**keyword_dict):
 
 
 def test_one_pod_is_one_page_with_everything_on_it(tmp_path):
-    workspace_dict, snapshot_obj = _one_pod_tuple()
+    workspace_dict, snapshot_obj = _one_pod_tuple(extra_event_dict={("U100", "2026-08-05"): {"commissions": "-2"}})
     report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-08")
     assert not report_dict["details_bool"] and report_dict["breakdown_dict"] is None
     assert report_dict["sub_str"] == "Monthly report · Account U···100"
     assert [row_dict["name_str"] for row_dict in report_dict["month_table_dict"]["row_list"]] == ["2026"]
     assert report_dict["month_table_dict"]["wide_bool"]
-    # The money-moved row takes its height from the chart, so the page stays on one sheet.
-    assert report_dict["chart_dict"]["height_int"] == 208 - 31
+    assert report_dict["chart_dict"]["height_int"] == 208
     app_obj = create_app(object(), now_fn=lambda: SAMPLE_AS_OF_TS, performance_db_path_str=str(tmp_path / "none.sqlite3"),
         workspace_snapshot_fn=lambda: (workspace_dict, snapshot_obj))
     html_str = app_obj.test_client().get("/monthly-report?month=2026-08").get_data(as_text=True)
     page_str = html_str[html_str.index('<main class="mr-pages"'):]
-    assert page_str.count('class="pg"') == 1 and "Return by month" in page_str and "August activity" in page_str
+    assert page_str.count('class="pg"') == 1 and "Return by month" in page_str and "Return (%)" in page_str and "August activity" in page_str
+    assert page_str.count("Time-weighted") == 1
+    assert page_str.count("Commissions and fees charged by Interactive Brokers") == 1
     assert "Capital account" not in page_str and "· Details" not in page_str and "· Summary" not in page_str
 
 
@@ -477,25 +482,139 @@ def test_many_years_move_the_table_of_one_pod_to_a_details_page(monkeypatch):
 
     assert not report_dict()["details_bool"] and report_dict()["chart_dict"]["height_int"] == 208
     monkeypatch.setattr(monthly_report, "_year_list", lambda start_str, month_str: ["2026", "2025", "2024"])
-    assert not report_dict()["details_bool"] and report_dict()["chart_dict"]["height_int"] == 208 - 66
+    assert not report_dict()["details_bool"]
     monkeypatch.setattr(monthly_report, "_year_list", lambda start_str, month_str: ["2026", "2025", "2024", "2023"])
-    assert report_dict()["details_bool"] and report_dict()["chart_dict"]["height_int"] == 208
+    # On a Details page the months leave page 1, and the chart takes the room.
+    assert report_dict()["details_bool"] and report_dict()["chart_dict"]["height_int"] == 280
 
 
-def test_the_chart_gives_way_so_the_page_stays_on_one_sheet():
-    workspace_dict, snapshot_obj = _one_pod_tuple(extra_event_dict={("U100", "2026-08-17"): {"depositsWithdrawals": "0"}, ("U100", "2026-08-24"): {"depositsWithdrawals": "0"}})
+def _page_heights_tuple(legend_row_list=(4,), **keyword_dict):
+    return _page_height_tuple(**{"art_bool": True, "banner_int": 0, "movement_bool": False, "sub_str": "Monthly report", "client_name_str": "Dana Levi",
+        "scope_note_bool": False, "breakdown_row_int": 0, "legend_list_list": [[{"name_str": "Gold", "detail_str": "GLD"}] * row_int for row_int in legend_row_list],
+        "details_bool": False, "year_row_int": 1, "activity_list": [{"label_str": "Commissions", "value_str": "$12.65"}], "flow_note_bool": False, **keyword_dict})
 
-    def height_int(month_str, **keyword_dict):
-        return build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str=month_str, **keyword_dict)["chart_dict"]["height_int"]
 
-    assert height_int("2026-08") == 208
-    assert height_int("2026-09") == 208 - 29, "A draft bar takes its height from the chart."
+def _chart_height_of_page_int(*position_list, **keyword_dict):
+    return _page_heights_tuple(*position_list, **keyword_dict)[0]
+
+
+def _cost_list(value_str):
+    return [{"label_str": label_str, "value_str": value_str} for label_str in ("Commissions", "Other fees", "Dividends", "Tax withheld", "Interest")]
+
+
+def test_the_chart_takes_the_room_the_rest_of_the_page_leaves():
+    height_int = _chart_height_of_page_int
+    # One Pod, one page: the chart stops at a calm size, with air below it.
+    assert height_int() == 208
+    # More Pods: the months are on Details, so the chart can use the page.
+    assert height_int(breakdown_row_int=2, legend_row_list=[5], details_bool=True) > 250
+    assert height_int(breakdown_row_int=4, legend_row_list=[5], details_bool=True) < height_int(breakdown_row_int=2, legend_row_list=[5], details_bool=True)
+    # Whatever else grows, the chart gives way, and never below a size that can be read.
+    crowded_dict = {"year_row_int": 3, "movement_bool": True, "banner_int": 1, "scope_note_bool": True}
+    assert 120 <= height_int(**crowded_dict) < 208
+    # A long name or sub line wraps beside the monogram, and the chart makes room for the extra line.
+    two_year_dict = {"year_row_int": 2}
+    assert height_int(**two_year_dict, client_name_str="N" * 37) == height_int(**two_year_dict, client_name_str="N" * 36) - 26
+    assert height_int(**two_year_dict, sub_str="S" * 63) == height_int(**two_year_dict, sub_str="S" * 62) - 20
+    # So does a costs row long enough to wrap, and the line that says money could not be matched.
+    assert height_int(**two_year_dict, activity_list=_cost_list("$1,234.56")) <= height_int(**two_year_dict, activity_list=_cost_list("$1.25")) - 24
+    assert height_int(**two_year_dict, flow_note_bool=True) <= height_int(**two_year_dict) - 20
+    assert height_int(breakdown_row_int=9, legend_row_list=[8, 8, 8, 8], details_bool=True, movement_bool=True, banner_int=2) == 120
+    # Six or more classes on one program sit in two columns, so they take no more room than four.
+    assert height_int(legend_row_list=[8]) == height_int(legend_row_list=[4])
+
+
+FOUR_PODS_DICT = {"details_bool": True, "breakdown_row_int": 4, "legend_row_list": [5]}
+
+
+@pytest.mark.parametrize("override_dict,height_int", [
+    (FOUR_PODS_DICT, 210),
+    ({**FOUR_PODS_DICT, "banner_int": 1}, 181),
+    ({**FOUR_PODS_DICT, "movement_bool": True}, 179),
+    ({**FOUR_PODS_DICT, "scope_note_bool": True}, 185),
+    ({**FOUR_PODS_DICT, "legend_row_list": [2]}, 240),
+    ({**FOUR_PODS_DICT, "legend_row_list": [0]}, 280),
+    ({"art_bool": False, "details_bool": True, "breakdown_row_int": 3, "legend_row_list": [5, 3, 2]}, 240),
+    ({"details_bool": True, "breakdown_row_int": 2, "legend_row_list": [5, 3]}, 258),
+    ({"year_row_int": 3, "activity_list": []}, 208),
+])
+def test_chart_height_for_each_page_shape(override_dict, height_int):
+    # The page's heights, from monthly_report.css. A browser checks them against the real print; see MONTHLY_CLIENT_REPORT.md.
+    assert _chart_height_of_page_int(**override_dict) == height_int
+
+
+def test_a_crowded_page_takes_room_from_the_picture_after_the_chart():
+    # An ordinary page keeps the whole picture.
+    assert _page_heights_tuple() == (208, 176)
+    # One Pod, two years, money moved, a Vault note, five classes and five costs that wrap.
+    assert _page_heights_tuple(legend_row_list=[5], year_row_int=2, movement_bool=True, scope_note_bool=True, activity_list=_cost_list("$1,234.56")) == (120, 141)
+    # Six Pods with a Vault note and money moved.
+    assert _page_heights_tuple(legend_row_list=[5], details_bool=True, breakdown_row_int=6, movement_bool=True, scope_note_bool=True) == (120, 143)
+    # Past that the picture stops at a thin band, and the page continues on a further sheet.
+    assert _page_heights_tuple(legend_row_list=[8, 8, 8, 8], details_bool=True, breakdown_row_int=9, movement_bool=True, banner_int=2) == (120, 96)
+
+
+def test_rows_that_wrap_beside_another_program_take_room_from_the_chart():
+    def height_int(detail_str):
+        return _chart_height_of_page_int(details_bool=True, breakdown_row_int=2, legend_list_list=[
+            [{"name_str": "Nasdaq 100", "detail_str": detail_str}] * 2 + [{"name_str": "Gold", "detail_str": "GLD"}] * 3, [{"name_str": "Gold", "detail_str": "GLD"}] * 3])
+
+    assert height_int("TQQQ") == 258
+    assert height_int("TQQQ, QQQ") == 258 - 35
+    assert height_int("TQQQ, QQQ, QLD, X") == 258 - 70
+    # In two columns under one program a row has more room.
+    many_list = [{"name_str": "Nasdaq 100", "detail_str": "TQQQ, QQQ"}] * 8
+    assert _chart_height_of_page_int(details_bool=True, breakdown_row_int=2, legend_list_list=[many_list]) == _chart_height_of_page_int(details_bool=True, breakdown_row_int=2, legend_row_list=[8])
+
+
+def test_the_chart_budget_is_fed_by_what_the_page_prints(monkeypatch):
+    seen_dict, real_fn = {}, monthly_report._page_height_tuple
+
+    def spy_tuple(**keyword_dict):
+        seen_dict.clear()
+        seen_dict.update(keyword_dict)
+        return real_fn(**keyword_dict)
+
+    monkeypatch.setattr(monthly_report, "_page_height_tuple", spy_tuple)
     workspace_dict, snapshot_obj = _sample_tuple()
-    assert height_int("2026-08") == 176 - 31 - 24, "The vault's line under the table counts too."
-    assert height_int("2026-08", program_by_pod_dict={"pod_taa": "Growth", "pod_ndx": "Steady"}) == 120, "Held at the floor."
-    # It never goes below a size that can still be read.
-    report_dict = build_monthly_report_dict(*build_demo_workspace_tuple(include_holdings_bool=True), as_of_ts=DEMO_NOW_TS, month_str="2026-08")
-    assert report_dict["chart_dict"]["height_int"] == 120 and len(report_dict["breakdown_dict"]["row_list"]) == 4
+    workspace_dict["client_dict"]["display_name"] = "Dana Levi"
+    provider_obj = _patch_saved_portfolio(monkeypatch, {"pod_taa": [("TQQQ", 9000.), ("GLD", 6000.)], "pod_ndx": [("MU", 9000.)]}, {"pod_taa": 5000., "pod_ndx": 4000.})
+    report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-08",
+        database_path_str="unused.sqlite3", program_by_pod_dict={"pod_taa": "Growth", "pod_ndx": "Steady"}, art_url_fn=lambda month_str: "/art.jpg")
+    assert seen_dict == {"art_bool": True, "banner_int": 0, "movement_bool": True, "sub_str": report_dict["sub_str"], "client_name_str": "Dana Levi",
+        "scope_note_bool": True, "breakdown_row_int": 2, "legend_list_list": [program_dict["holding_dict"]["legend_list"] for program_dict in report_dict["program_list"]],
+        "details_bool": True, "year_row_int": 2, "activity_list": report_dict["activity_list"], "flow_note_bool": False}
+    assert report_dict["sub_str"] and all(seen_dict["legend_list_list"]) and seen_dict["activity_list"]
+    assert report_dict["art_height_int"] == 176 and report_dict["chart_dict"]["height_int"] < 280
+    # A month in progress adds its draft bar; no picture means none is charged.
+    build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-09", database_path_str="unused.sqlite3")
+    assert seen_dict["banner_int"] == 1 and seen_dict["art_bool"] is False
+    # The line that says money could not be matched.
+    workspace_dict, snapshot_obj = _one_pod_tuple(extra_event_dict={("U100", "2026-08-12"): {"linkingAdjustments": "NaN"}})
+    report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-08")
+    assert report_dict["flow_dict"]["reason_str"] and seen_dict["flow_note_bool"] is True and seen_dict["details_bool"] is False
+
+
+def test_other_fees_are_listed_beside_commissions():
+    def report_dict(extra_event_dict=None):
+        workspace_dict, snapshot_obj = _sample_tuple(extra_event_dict=extra_event_dict)
+        return build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-08")
+
+    def gain_str(result_dict):
+        return {row_dict["label_str"]: row_dict["value_str"] for row_dict in result_dict["bridge_row_list"]}["Investment gain/loss"]
+
+    charged_dict, plain_dict = report_dict({("U100", "2026-08-05"): {"otherFees": "-14.5"}}), report_dict()
+    assert charged_dict["activity_list"][:2] == [{"label_str": "Commissions", "value_str": "$1.25"}, {"label_str": "Other fees", "value_str": "$14.50"}]
+    # The fee is already inside the gain: the line shows it, it does not take it again.
+    assert not charged_dict["draft_bool"] and not plain_dict["draft_bool"]
+    assert (gain_str(plain_dict), gain_str(charged_dict)) == ("+$63.55", "+$49.05")
+    # The caption says who charges them, and only when a cost is printed.
+    assert charged_dict["activity_note_str"] == "Commissions and fees charged by Interactive Brokers"
+    income_dict = report_dict({("U200", "2026-08-10"): {"commissions": "0"}})
+    assert income_dict["activity_list"] and income_dict["activity_note_str"] == ""
+    # A refund reads as a negative cost; a charge and a refund that cancel stay off the page.
+    assert {item_dict["label_str"]: item_dict["value_str"] for item_dict in report_dict({("U100", "2026-08-05"): {"otherFees": "3"}})["activity_list"]}["Other fees"] == "−$3.00"
+    assert "Other fees" not in {item_dict["label_str"] for item_dict in report_dict({("U100", "2026-08-05"): {"otherFees": "-3"}, ("U200", "2026-08-06"): {"otherFees": "3"}})["activity_list"]}
 
 
 def test_a_missing_since_start_never_shows_the_month_as_since_start(demo_tuple, monkeypatch):
@@ -740,7 +859,14 @@ def test_shorts_and_borrowing_get_no_donut_and_long_lists_fold(monkeypatch):
     row_list = report_dict["program_list"][0]["pod_holding_list"][1]["row_list"]
     assert len(row_list) == 13 and row_list[-2]["symbol_str"] == "3 more" and row_list[-2]["muted_bool"] and row_list[-1]["symbol_str"] == "Cash and accruals"
     legend_dict = {item_dict["name_str"]: item_dict["detail_str"] for item_dict in report_dict["program_list"][0]["holding_dict"]["legend_list"]}
-    assert legend_dict["Nasdaq 100"] == "TQQQ" and legend_dict["Stocks"] == "14 stocks"
+    assert legend_dict["Nasdaq 100"] == "TQQQ" and legend_dict["Stocks"] == "14 names"
+    # A fund among the stocks: four holdings in the class are four names, not four funds.
+    provider_obj = _patch_saved_portfolio(monkeypatch, {"pod_taa": [("TQQQ", 9000.)],
+        "pod_ndx": [("AAPL", 2000.), ("MSFT", 2000.), ("NVDA", 2000.), ("SPY", 2000.)]}, {"pod_taa": 1000., "pod_ndx": 2000.})
+    report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=SAMPLE_AS_OF_TS,
+        month_str="2026-08", database_path_str="unused.sqlite3")
+    legend_dict = {item_dict["name_str"]: item_dict["detail_str"] for item_dict in report_dict["program_list"][0]["holding_dict"]["legend_list"]}
+    assert legend_dict["Stocks"] == "4 names"
 
 
 def test_four_programs_reuse_colour_families(demo_tuple):
@@ -768,15 +894,49 @@ def test_pods_are_named_by_number_masked_account_and_ibkr_alias():
     workspace_dict, snapshot_obj = _sample_tuple()
     report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-08",
         alias_by_pod_dict={"pod_ndx": "growth_mom_natr20"})
-    assert [(row_dict["name_str"], row_dict["note_str"]) for row_dict in report_dict["breakdown_dict"]["row_list"]] == [
-        ("Pod 1 · U···100", ""), ("Pod 2 · U···200", "growth_mom_natr20")]
+    # The alias helps the operator in the Programs panel; the client's page names a Pod by number and account.
+    assert [(row_dict["name_str"], row_dict["note_str"]) for row_dict in report_dict["breakdown_dict"]["row_list"]] == [("Pod 1 · U···100", ""), ("Pod 2 · U···200", "")]
     assert [choice_dict["name_str"] for choice_dict in report_dict["pod_choice_list"]] == ["Pod 1 · U···100", "Pod 2 · U···200 · growth_mom_natr20"]
     assert report_dict["flow_dict"]["pod_name_list"] == [{"head_str": "Pod 1 · U···100", "alias_str": ""},
         {"head_str": "Pod 2 · U···200", "alias_str": "growth_mom_natr20"}]
     # Numbers follow the first measured day: a Pod that starts later is numbered after the others.
     workspace_dict["client_dict"]["accounts"][0]["effective_from"] = "2026-08-04"
     report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-08")
-    assert {row_dict["name_str"] for row_dict in report_dict["breakdown_dict"]["row_list"]} == {"Pod 1 · U···200", "Pod 2 · U···100"}
+    # They also print in that order, whatever the order of the accounts.
+    assert [row_dict["name_str"] for row_dict in report_dict["breakdown_dict"]["row_list"]] == ["Pod 1 · U···200", "Pod 2 · U···100"]
+    assert [row_dict["name_str"] for row_dict in report_dict["month_table_dict"]["row_list"]][1:] == ["Pod 1 · U···200", "Pod 2 · U···100"]
+
+
+def test_alias_prints_only_in_the_programs_panel(monkeypatch, tmp_path):
+    monkeypatch.setattr("alpha.live.dashboard_v4.app.load_alias_by_pod_dict", lambda _: {"pod_ndx": "growth_mom_natr20"})
+    workspace_dict, snapshot_obj = _sample_tuple()
+    # A short position lists the Pods' holdings on Details, one more place a Pod is named.
+    provider_obj = _patch_saved_portfolio(monkeypatch, {"pod_taa": [("TQQQ", 9000.)], "pod_ndx": [("MU", 9000.), ("AMD", -3000.)]}, {"pod_taa": 5000., "pod_ndx": 4000.})
+    provider_obj.event_log_path_str = str(tmp_path / "events.jsonl")
+    client_obj = create_app(provider_obj, now_fn=lambda: SAMPLE_AS_OF_TS, performance_db_path_str=str(tmp_path / "none.sqlite3"),
+        workspace_snapshot_fn=lambda: (workspace_dict, snapshot_obj)).test_client()
+    panel_str, page_str = client_obj.get("/monthly-report?month=2026-08").get_data(as_text=True).split('<main class="mr-pages"', 1)
+    assert '<span class="mr-pname">Pod 2 · U···200 · growth_mom_natr20</span>' in panel_str
+    assert "signed holdings by Pod" in page_str and "Pod 2 · U···200" in page_str and "growth_mom_natr20" not in page_str
+
+
+def test_every_table_follows_the_pod_numbers_when_accounts_arrive_out_of_order(monkeypatch):
+    workspace_dict, snapshot_obj = _sample_tuple()
+    workspace_dict["client_dict"]["accounts"][0]["effective_from"] = "2026-08-04"
+    provider_obj = _patch_saved_portfolio(monkeypatch, {"pod_taa": [("TQQQ", 9000.), ("GLD", 6000.)], "pod_ndx": [("MU", 9000.)]}, {"pod_taa": 5000., "pod_ndx": 4000.})
+    report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=SAMPLE_AS_OF_TS,
+        month_str="2026-08", database_path_str="unused.sqlite3")
+    expected_list = ["Pod 1 · U···200", "Pod 2 · U···100"]
+    assert [row_dict["name_str"] for row_dict in report_dict["breakdown_dict"]["row_list"]] == expected_list
+    assert [row_dict["name_str"] for row_dict in report_dict["month_table_dict"]["row_list"]][1:] == expected_list
+    assert [item_dict["name_str"] for item_dict in report_dict["pod_choice_list"]] == expected_list
+    assert [item_dict["name_str"] for item_dict in report_dict["program_list"][0]["pod_holding_list"]] == expected_list
+    # Both Pods move money on Aug 24, so these lines show the column order.
+    assert [line_dict["pod_str"] for line_dict in report_dict["flow_dict"]["line_list"] if line_dict["kind_str"] == "Offsetting movements"] == expected_list
+    # Two programs: the program holding Pod 1 comes first.
+    report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-08",
+        database_path_str="unused.sqlite3", program_by_pod_dict={"pod_taa": "Growth", "pod_ndx": "Steady"})
+    assert [program_dict["name_str"] for program_dict in report_dict["program_list"]] == ["Steady", "Growth"]
 
 
 def _program_token_str(client_obj):

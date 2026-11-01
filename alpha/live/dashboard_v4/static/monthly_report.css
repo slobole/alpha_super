@@ -47,7 +47,8 @@ html, body { margin: 0; }
 .mast { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; padding-bottom: 18px; border-bottom: 1px solid rgba(255,255,255,.18); }
 .h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -.01em; line-height: 1.2; }
 .sub { margin-top: 2px; color: #B9CDD1; }
-.brand { text-align: right; white-space: nowrap; }
+.brand { display: flex; align-items: center; gap: 12px; flex: none; white-space: nowrap; }
+.mono { display: block; flex: none; }
 .bname { font-weight: 600; }
 .bdesc { font-size: 12px; color: #B9CDD1; }
 .top { display: grid; grid-template-columns: minmax(0, 1fr) 346px; column-gap: 32px; align-items: center; padding-top: 20px; }

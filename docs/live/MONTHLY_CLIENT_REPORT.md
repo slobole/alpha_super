@@ -212,14 +212,26 @@ engine, archive and the Performance page are unchanged; only the page changed.
   still in that month's value. The client's very first day is not money moved.
 - The table under the panel goes one level down: programs when there are two or
   more, otherwise Pods still holding money plus any that closed this month, so the
-  rows add up to the month; otherwise nothing. The chart draws one line per program
-  and gives way to the table, the money-moved row, a draft bar and a long sub line,
-  down to 120 px, so a page stays on one sheet. Three or four programs may continue
-  on a further sheet; a program's name stays with its holdings.
+  rows add up to the month; otherwise nothing. Pods print in number order, by number
+  and masked account; the IBKR alias stays in the operator's Programs panel. The chart
+  draws one line per program and takes the room the rest of the page leaves, 120 to
+  208 px with the months on the page and up to 280 with them on Details. A crowded
+  page then takes room from the picture, from 176 down to 96 px, so it stays on one
+  sheet. Past that a page continues on a further sheet; a program's name stays with
+  its holdings.
+- The panel's top right carries the LS monogram, the name and `Quantitative
+  Strategies`. Avoid regulated words here (fund, capital, asset or portfolio
+  management, advice) until the lawyer has reviewed the wording.
+- `Other fees` (IBKR `otherFees`) is listed beside commissions. It is already inside
+  the gain/loss; the line only shows it. The activity caption says commissions and
+  fees are charged by Interactive Brokers, so a client does not read them as the
+  manager's charge (owner request 2026-11-01). It stays off when no cost is printed.
 - A long program name is cut in the chart label only; the table shows it in full.
 - Four type sizes only: 48, 22, 14 and 12 px (40 for a value over ten characters).
   The font is Hanken Grotesk, bundled in `static/fonts` and embedded in saved copies.
 - A name stored in capitals reads as a name; any other spelling stays as typed.
+- `TWR` is named once, beside the chart (owner decision 2026-11-01). The month table's
+  caption is `Return (%)`.
 - `Return by month` has one row per year, newest first, with Jan to Dec and the
   year's linked return, so it serves any number of years; a first year's return is
   the return since start. Pods are listed under the report's year. With one Pod and
@@ -271,3 +283,16 @@ were measured and printed in Edge: one Pod is one sheet and more Pods two; three
 four programs continue on a third. The two real IBKR exports printed at 316-360 KB,
 and September matched the figures verified on 2026-10-26. A saved copy from the demo
 is self-contained (320 KB, no links out, no scripts). Not run on a client's VPS yet.
+
+The later pass (Other fees, Pod order, chart and picture budget, alias, monogram, one
+`TWR`) had separate parity, failure-modes and coverage reviews. Parity: on 12 demo
+reports and 5 sample books only the print order moved, and an `otherFees` charge lowers
+the gain and the closing value by exactly its amount, once. Failure modes found two
+pages spilling onto a sheet that held only the footer; both are fixed and in the page
+checks. 2,848 tests pass, with the same two golden Overview failures. Through the real
+route, 38 page shapes were measured and printed in Edge: one Pod is one sheet, more Pods
+two, three programs two, four programs three. Sixteen crowded pages built by hand and
+printed in Chrome hold their sheets up to eight Pods. These still run onto a further
+sheet: nine Pods with a draft bar, two programs of eight long rows with a draft bar,
+three programs with long ticker lists, four programs, and a three-year page carrying
+every optional line.

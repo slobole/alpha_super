@@ -39,7 +39,10 @@ FLOW_ROW_LIMIT_INT = 12
 HOLDING_ROW_LIMIT_INT = 12
 NAME_XML_BYTE_LIMIT_INT = 32_000_000
 BRAND_NAME_STR = "Loren Slobodinsky"
-BRAND_DESC_STR = "Quantitative strategies"
+BRAND_DESC_STR = "Quantitative Strategies"
+BRAND_INITIALS_STR = "LS"
+ART_HEIGHT_INT = 176
+BROKER_COST_NOTE_STR = "Commissions and fees charged by Interactive Brokers"
 DEFAULT_PROGRAM_STR = "Portfolio"
 # One hue family per program: the program colour, then its Pods' shades in account
 # order (a fourth Pod reuses the last shade). Adjacent shades pass the dataviz
@@ -95,12 +98,12 @@ def _empty_dict():
     return {"available_bool": False, "error_str": "", "client_name_str": "", "sub_str": "", "month_str": "",
         "month_label_str": "", "period_label_str": "", "month_word_str": "", "close_label_str": "", "back_url_str": "",
         "month_option_list": [], "status_note_str": "", "draft_bool": False, "draft_reason_str": "",
-        "art_url_str": "", "brand_name_str": BRAND_NAME_STR, "brand_desc_str": BRAND_DESC_STR,
+        "art_url_str": "", "art_height_int": ART_HEIGHT_INT, "brand_name_str": BRAND_NAME_STR, "brand_desc_str": BRAND_DESC_STR, "brand_initials_str": BRAND_INITIALS_STR,
         "money_row_list": [], "breakdown_dict": None, "chart_dict": _chart_dict([], height_int=208),
         "single_program_bool": True, "details_bool": False, "program_list": [],
         "month_table_dict": {"label_list": [], "row_list": [], "wide_bool": False},
         "flow_dict": {"row_list": [], "line_list": [], "pod_name_list": [], "pod_total_list": [], "total_str": "", "reason_str": ""},
-        "activity_list": [], "pod_choice_list": []}
+        "activity_list": [], "activity_note_str": "", "pod_choice_list": []}
 
 
 def report_art_name_str(art_directory_obj, month_str):
@@ -455,6 +458,42 @@ def _chart_dict(series_list, *, height_int):
     return result_dict
 
 
+def _page_height_tuple(*, art_bool, banner_int, movement_bool, sub_str, client_name_str, scope_note_bool, breakdown_row_int,
+                       legend_list_list, details_bool, year_row_int, activity_list, flow_note_bool):
+    """The chart's height and the picture's, with everything else on the page on one sheet.
+
+    The heights are what monthly_report.css gives each part, in px. A page with its own
+    months keeps the chart at 208; a page with them on Details can give the chart more.
+    A crowded page takes room from the chart down to 120, then from the picture down to 96.
+    """
+    def char_int(item_dict):
+        return len(item_dict["name_str"] + item_dict["detail_str"])
+
+    # Beside the monogram the name wraps from about 37 wide characters, the sub line from about 63.
+    used_float = (ART_HEIGHT_INT if art_bool else 18) + 29 * banner_int + 230 + 31 * movement_bool + 20 * (len(sub_str) > 62) + 26 * (len(client_name_str) > 36)
+    used_float += (44 + 33.5 * breakdown_row_int if breakdown_row_int else 0) + 24.5 * scope_note_bool + 55.5 + 55.5 + 51.5 + 8
+    if len(legend_list_list) == 1:
+        legend_list = legend_list_list[0]
+        if len(legend_list) > 5:
+            # Two columns: a row wraps from about 25 characters.
+            used_float += max(112, math.ceil(len(legend_list) / 2) * 28.5 + 17.5 * sum(char_int(item_dict) > 24 for item_dict in legend_list))
+        else:
+            used_float += max(112, len(legend_list) * 28.5) if legend_list else 40
+    else:
+        # Beside another program's donut a row takes a second line from about 19 characters, a third from about 25.
+        height_list = [sum(26.5 + 17.5 * ((char_int(item_dict) > 18) + (char_int(item_dict) > 24)) for item_dict in legend_list) for legend_list in legend_list_list]
+        pair_list = [height_list[index_int:index_int + 2] for index_int in range(0, len(height_list), 2)]
+        used_float += sum(28.5 + max(92, *pair_float_list) for pair_float_list in pair_list) + 22 * max(0, len(pair_list) - 1)
+    if not details_bool:
+        used_float += 26 + 29.5 + 24.5 + 33.5 * year_row_int + 20.5 * flow_note_bool
+        if activity_list:
+            # Long amounts wrap the row: about 7 px a character, 31 px per item less the last gap, 674 px across.
+            row_float = sum(7 * len(item_dict["label_str"] + item_dict["value_str"]) + 31 for item_dict in activity_list) - 26
+            used_float += 76 + 24.5 * (row_float > 674)
+    room_float = 1123 - used_float - 16
+    return int(max(120, min(280 if details_bool else 208, room_float))), int(max(96, ART_HEIGHT_INT - max(0., 120 - room_float)))
+
+
 def _class_str(symbol_str):
     # A symbol outside the fund list is a single stock.
     return SYMBOL_CLASS_DICT.get(symbol_str, "Stocks")
@@ -544,10 +583,9 @@ def _program_holding_dict(program_name_str, pod_list, holdings_by_pod_dict):
         if _rounded_decimal(weight_float * 100, ".1") == 0:
             continue
         symbol_list = list(dict.fromkeys(symbol_by_class_dict.get(class_str, [])))
-        stock_count_int = sum(symbol_str not in SYMBOL_CLASS_DICT for symbol_str in symbol_list)
         # Weights are by value. Tickers only, no leverage multiple (owner decision 2026-11-01).
-        detail_str = (f"{len(symbol_list)} stocks" if class_str == "Stocks" and stock_count_int > 3 else
-            ", ".join(symbol_list) if len(symbol_list) <= 3 else f"{len(symbol_list)} funds")
+        detail_str = (", ".join(symbol_list) if len(symbol_list) <= 3 else
+            f"{len(symbol_list)} names" if class_str == "Stocks" else f"{len(symbol_list)} funds")
         cash_label_str = "T-bills and cash" if symbol_list else CASH_LABEL_STR
         item_list.append({"weight_float": weight_float, "color_str": color_str, "name_str": cash_label_str if class_str == "Cash" else class_str,
             "pct_str": _percent_str(weight_float, signed_bool=False), "detail_str": detail_str})
@@ -561,7 +599,7 @@ def _program_holding_dict(program_name_str, pod_list, holdings_by_pod_dict):
 
 def _pod_holding_table_dict(pod_dict, color_str, holdings_dict):
     """Page 2: every holding of one Pod as a share of the Pod's value, then cash."""
-    result_dict = {"color_str": color_str, "name_str": pod_dict["name_str"], "row_list": [], "name_bool": False,
+    result_dict = {"color_str": color_str, "name_str": pod_dict["head_str"], "row_list": [], "name_bool": False,
         "reason_str": holdings_dict["reason_str"]}
     if not holdings_dict["available_bool"]:
         return result_dict
@@ -680,9 +718,11 @@ def _activity_list(account_list, snapshot_obj, *, from_str, to_str):
             return None
 
     commission_decimal, tax_decimal = total_decimal(("commissions",)), total_decimal(("withholdingTax",))
+    fee_decimal = total_decimal(("otherFees",))
     # A line with nothing to report stays off the page.
     return [{"label_str": label_str, "value_str": _money_str(value_decimal, cents_bool=True)} for label_str, value_decimal in (
-        ("Commissions", None if commission_decimal is None else -commission_decimal), ("Dividends", total_decimal(("dividends",))),
+        ("Commissions", None if commission_decimal is None else -commission_decimal), ("Other fees", None if fee_decimal is None else -fee_decimal),
+        ("Dividends", total_decimal(("dividends",))),
         ("Tax withheld", None if tax_decimal is None else -tax_decimal), ("Interest", total_decimal(("interest",))))
         if value_decimal is not None and _rounded_decimal(value_decimal, ".01") != 0]
 
@@ -882,9 +922,10 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
     # its number when others are added or retired.
     pod_number_dict = {pod_id_str: index_int + 1 for index_int, pod_id_str in enumerate(dict.fromkeys(account_dict["pod_id"]
         for _, account_dict in sorted(enumerate(account_list), key=lambda pair_tuple: (pair_tuple[1]["effective_from"], pair_tuple[0]))))}
-    pod_list = _pod_list(pod_source_dict, {account_dict["pod_id"] for account_dict in account_list
+    pod_list = sorted(_pod_list(pod_source_dict, {account_dict["pod_id"] for account_dict in account_list
         if account_dict["effective_from"] <= close_str <= (account_dict.get("effective_to") or "9999-12-31")},
-        lambda pod_id_str, route_str: _pod_label_tuple(pod_number_dict[pod_id_str], route_str, (alias_by_pod_dict or {}).get(pod_id_str, "")))
+        lambda pod_id_str, route_str: _pod_label_tuple(pod_number_dict[pod_id_str], route_str, (alias_by_pod_dict or {}).get(pod_id_str, ""))),
+        key=lambda pod_dict: pod_number_dict[pod_dict["pod_id_str"]])
     program_by_pod_dict = program_by_pod_dict or {}
     # Case never makes a second program: the first spelling seen names it.
     display_by_key_dict = {}
@@ -972,7 +1013,7 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
         breakdown_dict = {"title_str": "Program", "row_list": program_row_list}
     elif len(month_pod_list) > 1:
         breakdown_dict = {"title_str": "Pod", "row_list": [{"name_str": pod_dict["head_str"], "color_str": "",
-            "note_str": pod_dict["alias_str"] if pod_dict["active_bool"] else f"closed {_short_day_str(pod_dict['close_str'])}, {pod_dict['close_str'][:4]}",
+            "note_str": "" if pod_dict["active_bool"] else f"closed {_short_day_str(pod_dict['close_str'])}, {pod_dict['close_str'][:4]}",
             **_breakdown_cell_dict(pod_dict["closing_float"] if pod_dict["active_bool"] else 0., active_total_float, _window_pnl_float(pod_dict["daily_list"], from_str, to_str),
                 pod_dict["month_return_dict"].get(month_str), pod_dict["twr_float"] if since_report_dict else None)} for pod_dict in month_pod_list]}
     # This is the strategy-capital ledger, separate from the all-account summary.
@@ -994,6 +1035,7 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
         sub_part_list.append(program_name_list[0])
     if one_pod_bool:
         sub_part_list.append("Account " + _masked_account_str(pod_list[0]["account_route_str"]))
+    activity_list = _activity_list(account_list, snapshot_obj, from_str=from_str, to_str=to_str)
     result_dict.update(single_program_bool=single_bool, program_list=program_list, sub_str=" · ".join(sub_part_list),
         # The Programs panel lists every Pod in the report with its current program ("" = Portfolio).
         pod_choice_list=[{"pod_id_str": pod_dict["pod_id_str"], "name_str": pod_dict["name_str"],
@@ -1003,7 +1045,9 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
         details_bool=not one_pod_bool or len(year_list) > ONE_PAGE_YEAR_LIMIT_INT or any(program_dict["pod_holding_list"]
             and not program_dict["holding_dict"]["available_bool"] for program_dict in program_list),
         month_table_dict={"row_list": month_row_list, "wide_bool": one_pod_bool, "label_list": list(calendar.month_abbr)[1:]},
-        flow_dict=flow_dict, activity_list=_activity_list(account_list, snapshot_obj, from_str=from_str, to_str=to_str))
+        flow_dict=flow_dict, activity_list=activity_list,
+        # A client must not read the broker's costs as the manager's charge.
+        activity_note_str=BROKER_COST_NOTE_STR if any(item_dict["label_str"] in ("Commissions", "Other fees") for item_dict in activity_list) else "")
 
     # Draft: the badge prints a short reason; the screen bar adds the detail.
     detail_str = ""
@@ -1032,13 +1076,14 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
         note_list.append(flow_dict["reason_str"])
     result_dict.update(draft_bool=bool(draft_reason_str), draft_reason_str=draft_reason_str, status_note_str=" · ".join(note_list))
     is_demo_bool = workspace_dict["client_dict"].get("is_demo") is True
-    # The chart gives way to whatever else is on the page, so the page stays on one sheet.
-    one_page_bool = not result_dict["details_bool"]
-    legend_row_int = max((len(program_dict["holding_dict"]["legend_list"]) for program_dict in program_list), default=0)
-    result_dict["chart_dict"] = _chart_dict(series_list, height_int=max(120, (208 if not breakdown_dict else 150 if len(program_list) > 1 else 176)
-        - 24 * max(0, len(breakdown_dict["row_list"]) - 2 if breakdown_dict else 0) - 31 * movement_bool - 29 * bool(draft_reason_str) - 29 * is_demo_bool
-        - 20 * (len(result_dict["sub_str"]) > 66) - 27 * (len(result_dict["client_name_str"]) > 40) - 24 * bool(other_name_list)
-        - 29 * (one_page_bool and legend_row_int == 5) - 33 * one_page_bool * (len(year_list) - 1)))
+    height_int, result_dict["art_height_int"] = _page_height_tuple(art_bool=bool(result_dict["art_url_str"]),
+        banner_int=bool(draft_reason_str) + is_demo_bool, movement_bool=movement_bool, sub_str=result_dict["sub_str"],
+        client_name_str=result_dict["client_name_str"], scope_note_bool=bool(other_name_list),
+        breakdown_row_int=len(breakdown_dict["row_list"]) if breakdown_dict else 0,
+        legend_list_list=[program_dict["holding_dict"]["legend_list"] for program_dict in program_list],
+        details_bool=result_dict["details_bool"], year_row_int=sum(row_dict["class_str"] == "prog" for row_dict in month_row_list),
+        activity_list=result_dict["activity_list"], flow_note_bool=bool(flow_dict["reason_str"]))
+    result_dict["chart_dict"] = _chart_dict(series_list, height_int=height_int)
     result_dict["note_list"] = note_list
     result_dict["is_demo_bool"] = is_demo_bool
     result_dict["method_note_str"] = ("Amounts in USD. Portfolio/program TWR is calculated from daily NAV with end-of-day capital flows; "
