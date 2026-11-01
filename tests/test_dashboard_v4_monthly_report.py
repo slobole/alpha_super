@@ -200,14 +200,14 @@ def test_holdings_use_the_close_and_fixed_class_order(demo_tuple):
     report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=DEMO_NOW_TS, month_str="2026-08")
     holding_dict = report_dict["program_list"][0]["holding_dict"]
     assert holding_dict["available_bool"]
-    class_order_list = [name_str for name_str, _ in ASSET_CLASS_TUPLE]
+    class_order_list = [monthly_report.CASH_LABEL_STR if name_str == "Cash" else name_str for name_str, _ in ASSET_CLASS_TUPLE]
     legend_list = holding_dict["legend_list"]
     assert [item_dict["name_str"] for item_dict in legend_list] == sorted((item_dict["name_str"] for item_dict in legend_list), key=class_order_list.index)
     assert abs(sum(float(item_dict["pct_str"].rstrip("%")) for item_dict in legend_list) - 100) < .35
     assert {item_dict["name_str"]: item_dict["detail_str"] for item_dict in legend_list}["Stocks"] == "10 stocks"
     stock_pod_dict, fund_pod_dict = report_dict["program_list"][0]["pod_holding_list"][0], report_dict["program_list"][0]["pod_holding_list"][2]
     assert not stock_pod_dict["name_bool"] and fund_pod_dict["name_bool"]
-    assert stock_pod_dict["row_list"][-1]["symbol_str"] == "Cash" and stock_pod_dict["row_list"][-1]["muted_bool"]
+    assert stock_pod_dict["row_list"][-1]["symbol_str"] == "Cash and accruals" and stock_pod_dict["row_list"][-1]["muted_bool"]
     assert {row_dict["symbol_str"]: row_dict["name_str"] for row_dict in fund_pod_dict["row_list"]}["TQQQ"] == "Nasdaq 100 3×"
     # Each weight is rounded on its own (equal holdings keep equal weights), so a
     # column may miss 100.0% by up to 0.05 points a row.
@@ -261,8 +261,35 @@ def test_other_accounts_stay_apart_from_programs_and_activity_reads_the_month(tm
     assert "$50,100" not in page_str and "not included: Vault." in page_str
     # The narrow allocation legend puts the masked account under the Pod number instead of wrapping mid-name.
     assert '<span>Pod 1<span class="pa">U···100</span></span>' in page_str and "since Aug 3, 2026" in page_str
-    assert "Holdings on Aug 31 were not saved." in page_str
+    # The client's page says it plainly; the technical reason stays on the operator's screen bar.
+    assert "Holdings are not included in this report." in page_str and "Holdings on Aug 31" not in page_str
     assert "Holdings on Aug 31 were not saved." in html_str[:html_str.index('<main class="mr-pages"')]
+
+
+def test_flex_positions_leave_cash_and_accruals_as_the_rest_of_nav(monkeypatch):
+    workspace_dict, snapshot_obj = _sample_tuple()
+    value_by_route_dict = {"U100": ("TQQQ", 8000.), "U200": ("MU", 900.)}
+
+    def close_holdings_dict(database_path_str, nav_row_obj, *, query_name_str, as_of_ts):
+        symbol_str, value_float = value_by_route_dict[nav_row_obj.account_route_str]
+        return {"available_bool": True, "position_list": [{"symbol_str": symbol_str, "shares_float": 10., "value_float": value_float}]}
+
+    monkeypatch.setattr(monthly_report, "load_close_holdings_dict", close_holdings_dict)
+
+    def holding_dict():
+        return build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS,
+            month_str="2026-08", database_path_str="unused.sqlite3")["program_list"][0]["holding_dict"]
+
+    closing_float = sum(float(row_obj.closing_nav_decimal) for row_obj in snapshot_obj.row_tuple
+        if row_obj.account_route_str in value_by_route_dict and row_obj.market_date_str == "2026-08-31")
+    assert {item_dict["name_str"]: item_dict["pct_str"] for item_dict in holding_dict()["legend_list"]} == {
+        name_str: _percent_str(value_float / closing_float, signed_bool=False) for name_str, value_float in
+        (("Nasdaq 100", 8000.), ("Stocks", 900.), ("Cash and accruals", closing_float - 8900.))}
+    # Positions worth more than the account mean borrowing: stated, never drawn as a share of the donut.
+    value_by_route_dict["U100"] = ("TQQQ", closing_float * 2)
+    short_dict = holding_dict()
+    assert not short_dict["available_bool"]
+    assert short_dict["paper_note_str"] == "Holdings include borrowing or short positions. Details lists them."
 
 
 def test_saved_portfolio_counts_only_when_captured_after_that_close(monkeypatch):
@@ -291,7 +318,7 @@ def test_saved_portfolio_counts_only_when_captured_after_that_close(monkeypatch)
         if row_obj.account_route_str in {"U100", "U200"} and row_obj.market_date_str == "2026-08-31")
     assert {item_dict["name_str"]: item_dict["pct_str"] for item_dict in holding_dict["legend_list"]} == {
         name_str: _percent_str(value_float / closing_float, signed_bool=False) for name_str, value_float in
-        (("Nasdaq 100", 8000.), ("Stocks", 5400.), ("Gold", 6000.), ("US dollar", 4000.), ("Cash", closing_float - 23400.))}
+        (("Nasdaq 100", 8000.), ("Stocks", 5400.), ("Gold", 6000.), ("US dollar", 4000.), ("Cash and accruals", closing_float - 23400.))}
     assert {item_dict["name_str"]: item_dict["detail_str"] for item_dict in holding_dict["legend_list"]}["Stocks"] == "6 stocks"
     # A capture from another day, or before the close, never stands in for this month end.
     for timestamp_str in ("2026-09-01T20:10:00+00:00", "2026-08-31T19:30:00+00:00"):
@@ -477,7 +504,7 @@ def test_shorts_and_borrowing_get_no_donut_and_long_lists_fold(monkeypatch):
     report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=SAMPLE_AS_OF_TS,
         month_str="2026-08", database_path_str="unused.sqlite3")
     row_list = report_dict["program_list"][0]["pod_holding_list"][1]["row_list"]
-    assert len(row_list) == 13 and row_list[-2]["symbol_str"] == "3 more" and row_list[-2]["muted_bool"] and row_list[-1]["symbol_str"] == "Cash"
+    assert len(row_list) == 13 and row_list[-2]["symbol_str"] == "3 more" and row_list[-2]["muted_bool"] and row_list[-1]["symbol_str"] == "Cash and accruals"
     legend_dict = {item_dict["name_str"]: item_dict["detail_str"] for item_dict in report_dict["program_list"][0]["holding_dict"]["legend_list"]}
     assert legend_dict["Nasdaq 100"] == "TQQQ 3×" and legend_dict["Stocks"] == "14 stocks"
 

@@ -138,13 +138,12 @@ def test_actual_non_usd_base_source_is_rejected_instead_of_silently_converted(cu
             source_import_id_int=1, source_checksum_str=hashlib.sha256(raw_xml_str.encode()).hexdigest())
 
 
-def _holding_fixture_tuple(*, position_float, cash_float=None, cash_date_str=None):
+def _holding_fixture_tuple(*, position_float, symbol_str="SPY"):
     workspace_dict, snapshot_obj = _sample_tuple()
     nav_row_obj = next(row_obj for row_obj in snapshot_obj.row_tuple
         if row_obj.account_route_str == "U100" and row_obj.market_date_str == "2026-08-31")
     snapshot_obj = replace(snapshot_obj, row_tuple=(replace(nav_row_obj, closing_nav_decimal=Decimal("1000")),))
-    close_dict = {"available_bool": True, "position_list": [{"symbol_str": "SPY", "shares_float": 1., "value_float": position_float}],
-        "cash_float": cash_float, "cash_date_str": cash_date_str}
+    close_dict = {"available_bool": True, "position_list": [{"symbol_str": symbol_str, "shares_float": 1., "value_float": position_float}]}
     provider_obj = SimpleNamespace(get_close_holdings_dict=lambda *args, **kwargs: close_dict)
     pod_dict = {"pod_id_str": "pod_taa", "account_route_str": "U100", "close_str": "2026-08-31", "active_bool": True}
     holding_dict = monthly_report._pod_holdings_dict(pod_dict,
@@ -153,23 +152,33 @@ def _holding_fixture_tuple(*, position_float, cash_float=None, cash_date_str=Non
     return pod_dict, holding_dict
 
 
-@pytest.mark.parametrize("cash_float,cash_date_str", [(None, None), (100., "2026-08-28"),
-    (float("nan"), "2026-08-31"), (float("inf"), "2026-08-31"), (99., "2026-08-31")])
-def test_missing_stale_or_invalid_cash_never_becomes_nav_residual(cash_float, cash_date_str):
-    _, holding_dict = _holding_fixture_tuple(position_float=900., cash_float=cash_float, cash_date_str=cash_date_str)
+@pytest.mark.parametrize("position_float", [float("nan"), float("inf"), float("-inf")])
+def test_invalid_position_value_never_becomes_cash(position_float):
+    _, holding_dict = _holding_fixture_tuple(position_float=position_float)
     assert not holding_dict["available_bool"]
     assert holding_dict["cash_float"] is None and holding_dict["position_list"] == []
 
 
-def test_verified_penny_reconciliation_keeps_nav_denominator_and_negative_cash_has_no_donut():
-    pod_dict, holding_dict = _holding_fixture_tuple(position_float=999.99, cash_float=0., cash_date_str="2026-08-31")
-    assert holding_dict["available_bool"] and holding_dict["total_float"] == 1000.
-    assert monthly_report._program_holding_dict("Growth", [pod_dict], {"pod_taa": holding_dict})["available_bool"]
-    _, invalid_dict = _holding_fixture_tuple(position_float=999.98, cash_float=0., cash_date_str="2026-08-31")
-    assert not invalid_dict["available_bool"]
-    pod_dict, negative_dict = _holding_fixture_tuple(position_float=1000.001, cash_float=-.001, cash_date_str="2026-08-31")
-    assert negative_dict["available_bool"]
-    assert not monthly_report._program_holding_dict("Growth", [pod_dict], {"pod_taa": negative_dict})["available_bool"]
+def test_cash_is_the_statement_nav_less_its_positions_and_real_borrowing_has_no_donut():
+    pod_dict, holding_dict = _holding_fixture_tuple(position_float=900.)
+    assert holding_dict["available_bool"] and holding_dict["total_float"] == 1000. and holding_dict["cash_float"] == 100.
+    legend_dict = {item_dict["name_str"]: item_dict["pct_str"] for item_dict in
+        monthly_report._program_holding_dict("Growth", [pod_dict], {"pod_taa": holding_dict})["legend_list"]}
+    assert legend_dict == {"Stocks": "90.0%", "Cash and accruals": "10.0%"}
+    # Cents of accrued costs below zero round to 0.0% of the Pod: not borrowing.
+    pod_dict, cents_dict = _holding_fixture_tuple(position_float=1000.3)
+    assert cents_dict["available_bool"] and cents_dict["cash_float"] < 0
+    assert monthly_report._program_holding_dict("Growth", [pod_dict], {"pod_taa": cents_dict})["available_bool"]
+    pod_dict, borrowed_dict = _holding_fixture_tuple(position_float=1100.)
+    program_dict = monthly_report._program_holding_dict("Growth", [pod_dict], {"pod_taa": borrowed_dict})
+    assert borrowed_dict["available_bool"] and not program_dict["available_bool"]
+    assert program_dict["paper_note_str"] == "Holdings include borrowing or short positions. Details lists them."
+
+
+def test_t_bill_funds_are_never_labelled_as_plain_cash():
+    pod_dict, holding_dict = _holding_fixture_tuple(position_float=600., symbol_str="BIL")
+    legend_list = monthly_report._program_holding_dict("Steady", [pod_dict], {"pod_taa": holding_dict})["legend_list"]
+    assert [(item_dict["name_str"], item_dict["pct_str"], item_dict["detail_str"]) for item_dict in legend_list] == [("T-bills and cash", "100.0%", "BIL")]
 
 
 def test_many_month_movements_fold_without_losing_any_dollars():
@@ -239,8 +248,10 @@ def test_printed_body_omits_method_section_but_keeps_missing_evidence_and_partia
     workspace_dict, snapshot_obj = _sample_tuple()
     report_dict = _report_dict(workspace_dict, snapshot_obj)
     body_str = _printed_body_str(report_dict)
-    for text_str in ("Holdings on Aug 31 were not saved.", "since Aug 3, 2026", "Your portfolio", "USD", "not included: Vault"):
+    for text_str in ("Holdings are not included in this report.", "since Aug 3, 2026", "Your portfolio", "USD", "not included: Vault"):
         assert text_str in body_str
+    # The technical reason stays with the operator: the screen bar and the saved evidence.
+    assert "Holdings on Aug 31" not in body_str and "Holdings on Aug 31 were not saved." in report_dict["evidence_dict"]["note_list"]
     for text_str in ("About these numbers", "end-of-day capital flows", "Prepared ", "Source:"):
         assert text_str not in body_str
     partial_dict = _report_dict(workspace_dict, snapshot_obj, month_str="2026-09")

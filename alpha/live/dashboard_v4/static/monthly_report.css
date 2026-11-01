@@ -107,7 +107,7 @@ html, body { margin: 0; }
 .hl { display: flex; flex-direction: column; gap: 7px; min-width: 0; flex: 1; }
 .hi { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 0 8px; align-items: baseline; font-size: 12.5px; }
 .hi .sw { width: 10px; height: 10px; border-radius: 2px; align-self: center; }
-.hi .nm { font-weight: 600; white-space: nowrap; }
+.hi .nm { font-weight: 600; }
 .hi .pc { font-weight: 600; font-variant-numeric: tabular-nums; }
 .hi .tk { grid-column: 2 / 4; font-size: 11px; color: #64748B; letter-spacing: .02em; }
 

@@ -83,6 +83,7 @@ Select **only** the following:
 | Accounts | All LIVE accounts for this client; no PAPER or unrelated accounts |
 | Account Information | `Account ID`, `Currency` |
 | Change in NAV → Mark-to-Market | `Account ID`, `Currency`, `From Date`, `To Date`, `Starting Value`, `Ending Value`, `TWR` |
+| Open Positions (level of detail `Summary`), for holdings in the monthly report | `Account ID`, `Currency`, `Asset Class`, `FX Rate to Base`, `Symbol`, `Conid`, `Report Date`, `Quantity`, `Multiplier`, `Mark Price`, `Position Value`, `Level of Detail` |
 | Delivery format | `XML` |
 | Period | `Last Business Day` |
 | Breakout by Day | `Yes` |
@@ -107,8 +108,11 @@ Check only four things:
 2. Each selected account has its own `FlexStatement`.
 3. Each account has one `ChangeInNAV` row per reported session, with no duplicate account/date rows.
 4. Every row contains `currency="USD"`, `fromDate`, `toDate`, `startingValue`, `endingValue`, and `twr`.
+5. Each daily `FlexStatement` holds one `OpenPositions` section with `levelOfDetail="SUMMARY"` rows, whose `reportDate` is that day.
 
 If any check fails, fix the Query before continuing.
+
+Open Positions stays in this Query because the monthly report takes holdings from the same saved import as the NAV row, then shows that NAV minus the positions as "Cash and accruals". It adds little: a one-account import of 35 KB grew to 65–100 KB and a six-account import of 212 KB to about 413 KB, in a synthetic test with the fields listed above (2026-11-01). Selecting all fields makes each position row about four times larger. Imports above 256 KB are not cached, about 5 → 12.5 ms per saved import on each refresh.
 
 #### Not enabled yet: per-symbol P&L for the Positions month view
 

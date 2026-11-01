@@ -2,7 +2,7 @@
 
 Read-only. Other accounts (such as VAULT, often cash in shekels) are named but
 never converted into the report's USD numbers. Holdings need saved same-close
-positions and independently evidenced cash, or are left out.
+positions, or are left out; what the statement's NAV leaves is cash and accruals.
 """
 
 import calendar
@@ -18,8 +18,6 @@ from zoneinfo import ZoneInfo
 
 from alpha.live.client_reporting import CAPITAL_FIELD_TUPLE, ClientReportingError
 from alpha.live.client_reporting import content_hash_str
-from alpha.live.dashboard_v3.client_cash import load_portfolio_cash_list
-from alpha.live.dashboard_v3.client_operations import build_client_operations_dict
 from alpha.live.dashboard_v4.performance import build_performance_page_dict
 from alpha.live.dashboard_v4.pod_broker_holdings import load_broker_holdings_dict
 from alpha.live.dashboard_v4.pod_holdings import load_close_holdings_dict
@@ -85,6 +83,7 @@ SYMBOL_NAME_DICT = {
     "BIL": "T-bills", "SGOV": "T-bills", "SHV": "T-bills",
 }
 LEVERAGE_SUFFIX_DICT = {"QLD": " 2×", "TQQQ": " 3×", "SSO": " 2×", "UPRO": " 3×", "QID": " −2×", "SQQQ": " −3×"}
+CASH_LABEL_STR = "Cash and accruals"
 
 
 def _empty_dict():
@@ -396,8 +395,7 @@ def _class_str(symbol_str):
     return SYMBOL_CLASS_DICT.get(symbol_str, "Stocks")
 
 
-def _pod_holdings_dict(pod_dict, *, client_dict, snapshot_obj, provider_obj, as_of_ts, database_path_str,
-                       cash_by_pod_dict=None):
+def _pod_holdings_dict(pod_dict, *, client_dict, snapshot_obj, provider_obj, as_of_ts, database_path_str):
     """Valued holdings at the Pod's close from one saved IBKR source; never values from another day."""
     close_str = pod_dict["close_str"]
     result_dict = {"available_bool": False, "reason_str": f"Holdings on {_short_day_str(close_str)} were not saved.",
@@ -418,13 +416,10 @@ def _pod_holdings_dict(pod_dict, *, client_dict, snapshot_obj, provider_obj, as_
         if close_dict.get("available_bool"):
             position_list = [(item_dict["symbol_str"], item_dict["value_float"]) for item_dict in close_dict["position_list"]
                 if item_dict["shares_float"] != 0]
-            # *** CRITICAL *** exact-close accounting: cash must be independently
-            # observed on this date. NAV minus positions includes accruals, not just cash.
-            cash_float = (cash_by_pod_dict or {}).get(pod_dict["pod_id_str"])
-            if client_dict.get("is_demo") and close_dict.get("cash_date_str") == close_str:
-                cash_float = close_dict.get("cash_float")
-            if cash_float is None:
-                result_dict["reason_str"] = f"Holdings on {_short_day_str(close_str)} lack verified same-day cash."
+            # *** CRITICAL *** the same statement's positions at its own marks: what is left of its
+            # NAV is cash plus accruals, labelled as one line. Below zero is borrowing, never hidden.
+            cash_float = float(nav_row_list[0].closing_nav_decimal - sum(
+                (Decimal(str(value_float)) for _, value_float in position_list), Decimal(0)))
         # 2. The saved IBKR portfolio, only when its end-of-day capture is this close.
         elif not client_dict.get("is_demo") and client_dict.get("operations_source") == "local" and hasattr(provider_obj, "get_target_for_pod"):
             target_obj = provider_obj.get_target_for_pod(pod_dict["pod_id_str"])
@@ -453,12 +448,14 @@ def _pod_holdings_dict(pod_dict, *, client_dict, snapshot_obj, provider_obj, as_
 
 def _program_holding_dict(program_name_str, pod_list, holdings_by_pod_dict):
     """One donut by asset class for the program's Pods at the same close."""
-    result_dict = {"available_bool": False, "reason_str": "", "aria_str": "", "segment_list": [], "legend_list": []}
+    result_dict = {"available_bool": False, "reason_str": "", "paper_note_str": "", "aria_str": "", "segment_list": [], "legend_list": []}
     active_list = [pod_dict for pod_dict in pod_list if pod_dict["active_bool"]]
     missing_list = [pod_dict for pod_dict in active_list if not holdings_by_pod_dict[pod_dict["pod_id_str"]]["available_bool"]]
     if not active_list or missing_list:
+        # The technical reason stays on the operator's screen; the client's page says it plainly.
         result_dict["reason_str"] = (holdings_by_pod_dict[missing_list[0]["pod_id_str"]]["reason_str"] if missing_list
             else "No holdings at this close.")
+        result_dict["paper_note_str"] = "Holdings are not included in this report." if missing_list else result_dict["reason_str"]
         return result_dict
     value_by_class_dict, symbol_by_class_dict, total_float = {}, {}, 0.
     for pod_dict in active_list:
@@ -469,10 +466,12 @@ def _program_holding_dict(program_name_str, pod_list, holdings_by_pod_dict):
             value_by_class_dict[class_str] = value_by_class_dict.get(class_str, 0.) + value_float
             symbol_by_class_dict.setdefault(class_str, []).append(symbol_str)
         value_by_class_dict["Cash"] = value_by_class_dict.get("Cash", 0.) + holdings_dict["cash_float"]
-    # A short or negative cash is never hidden by netting it inside a class.
+    # A short or negative cash is never hidden by netting it inside a class. Cents of
+    # accrued costs that round to 0.0% of the Pod are not borrowing.
     if (any(value_float < 0 for pod_dict in active_list for _, value_float in holdings_by_pod_dict[pod_dict["pod_id_str"]]["position_list"])
-            or any(holdings_by_pod_dict[pod_dict["pod_id_str"]]["cash_float"] < 0 for pod_dict in active_list)):
-        result_dict["reason_str"] = "Holdings include borrowing or short positions. Details lists them."
+            or any(_rounded_decimal(holdings_by_pod_dict[pod_dict["pod_id_str"]]["cash_float"] / holdings_by_pod_dict[pod_dict["pod_id_str"]]["total_float"] * 100, ".1") < 0
+                for pod_dict in active_list)):
+        result_dict["reason_str"] = result_dict["paper_note_str"] = "Holdings include borrowing or short positions. Details lists them."
         return result_dict
     item_list = []
     for class_str, color_str in ASSET_CLASS_TUPLE:
@@ -485,7 +484,8 @@ def _program_holding_dict(program_name_str, pod_list, holdings_by_pod_dict):
         detail_str = (f"{len(symbol_list)} stocks" if class_str == "Stocks" and stock_count_int > 3 else
             ", ".join(symbol_str + LEVERAGE_SUFFIX_DICT.get(symbol_str, "") for symbol_str in symbol_list)
             if len(symbol_list) <= 3 else f"{len(symbol_list)} funds")
-        item_list.append({"weight_float": weight_float, "color_str": color_str, "name_str": class_str,
+        cash_label_str = "T-bills and cash" if symbol_list else CASH_LABEL_STR
+        item_list.append({"weight_float": weight_float, "color_str": color_str, "name_str": cash_label_str if class_str == "Cash" else class_str,
             "pct_str": _percent_str(weight_float, signed_bool=False), "detail_str": detail_str})
     result_dict.update(available_bool=True,
         aria_str=f"{program_name_str} holdings: " + ", ".join(f"{item_dict['name_str']} {item_dict['pct_str']}" for item_dict in item_list),
@@ -510,7 +510,7 @@ def _pod_holding_table_dict(pod_dict, color_str, holdings_dict):
         rest_list = position_list[len(shown_list):]
         row_list.append({"symbol_str": f"{len(rest_list)} more", "name_str": "", "muted_bool": True,
             "weight_str": _percent_str(sum(value_float for _, value_float in rest_list) / total_float, signed_bool=False)})
-    row_list.append({"symbol_str": "Cash", "name_str": "", "muted_bool": True,
+    row_list.append({"symbol_str": CASH_LABEL_STR, "name_str": "", "muted_bool": True,
         "weight_str": _percent_str(holdings_dict["cash_float"] / total_float, signed_bool=False)})
     result_dict.update(row_list=row_list, name_bool=any(row_dict["name_str"] for row_dict in row_list), reason_str="")
     return result_dict
@@ -806,18 +806,8 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
         for index_int, pod_dict in enumerate(active_member_list):
             pod_color_dict[pod_dict["pod_id_str"]] = family_tuple[min(index_int, len(family_tuple) - 1)]
     single_bool = len(program_name_list) == 1
-    try:
-        operations_dict = build_client_operations_dict(workspace_dict["client_dict"], workspace_dict.get("summary_dict", {}),
-            as_of_ts=as_of_ts, local_account_list=workspace_dict.get("operations_account_list"))
-        cash_list = load_portfolio_cash_list(workspace_dict["client_dict"], pod_source_dict, provider_obj, operations_dict, as_of_ts=as_of_ts)
-    except (ValueError, TypeError, KeyError, AttributeError):
-        cash_list = []
-    cash_by_pod_dict = {row_dict["pod_id_str"]: row_dict["cash_float"] for row_dict in cash_list
-        if row_dict["market_date_str"] == close_str and isinstance(row_dict.get("cash_float"), (int, float))
-        and math.isfinite(row_dict["cash_float"])}
     holdings_by_pod_dict = {pod_dict["pod_id_str"]: _pod_holdings_dict(pod_dict, client_dict=workspace_dict["client_dict"],
-        snapshot_obj=snapshot_obj, provider_obj=provider_obj, as_of_ts=as_of_ts, database_path_str=database_path_str,
-        cash_by_pod_dict=cash_by_pod_dict)
+        snapshot_obj=snapshot_obj, provider_obj=provider_obj, as_of_ts=as_of_ts, database_path_str=database_path_str)
         if pod_dict["active_bool"] else {"available_bool": False, "reason_str": ""} for pod_dict in pod_list}
     active_total_float = closing_float or 0.
     month_list = _month_column_list(start_str, month_str)
@@ -860,7 +850,7 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
             "value_str": _money_str(program_value_float),
             "change_str": _money_str(month_pnl_float, signed_bool=True) + " this month", "change_tone_str": _money_tone_str(month_pnl_float),
             "stat_list": stat_list, "chart_dict": _chart_dict(path_list, single_bool=single_bool, wide_bool=not holding_dict["available_bool"]),
-            # Print only evidenced holdings; missing-data reasons also print below.
+            # Print only evidenced holdings; when missing, the page says so plainly below.
             "holding_dict": holding_dict, "pod_holding_list": [table_dict for table_dict in table_list if table_dict["row_list"]]})
         share_list = [(pod_dict, pod_dict["closing_float"] / active_total_float) for pod_dict in member_list
             if pod_dict["active_bool"] and pod_dict["closing_float"] and active_total_float > 0]
@@ -913,7 +903,7 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
         draft_reason_str = "Capital movements do not reconcile"
     else:
         draft_reason_str = ""
-    # The screen and issued copy both retain draft and missing-data explanations.
+    # The screen bar shows these explanations; a saved report keeps them in its evidence file.
     note_list = [f"Draft · {draft_reason_str}"] if draft_reason_str else []
     note_list += [detail_str] if detail_str else []
     note_list += list(dict.fromkeys(program_dict["holding_dict"]["reason_str"] for program_dict in program_list
@@ -936,8 +926,8 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
     result_dict["evidence_dict"] = {"month_report_hash_str": summary_month_dict.get("report_hash_str"),
         "since_report_hash_str": summary_since_dict.get("report_hash_str"), "program_by_pod_dict": program_by_pod_dict,
         "source_checksum_list": sorted({source_dict["checksum_str"] for source_dict in summary_since_dict.get("source_list", [])}),
-        "method_version_str": summary_since_dict.get("method_version_str"), "renderer_version_str": "monthly_report_v2",
-        "program_evidence_dict": program_evidence_dict}
+        "method_version_str": summary_since_dict.get("method_version_str"), "renderer_version_str": "monthly_report_v3",
+        "program_evidence_dict": program_evidence_dict, "note_list": note_list}
     # Bind save/print to all displayed values, warnings and provenance, not just NAV.
     result_dict["report_id_str"] = content_hash_str({key_str: value_obj for key_str, value_obj in result_dict.items()
         if key_str != "generated_at_str"})[:16]
