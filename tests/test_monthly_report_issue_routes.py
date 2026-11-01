@@ -88,7 +88,7 @@ def test_saved_html_is_self_contained_without_controls_tokens_or_internal_identi
     response_obj = _issue_obj(context_dict, preview_dict)
     assert response_obj.status_code == 200
     html_str = context_dict["client_obj"].get(response_obj.get_json()["archive_url_str"]).get_data(as_text=True)
-    assert "data:font/woff2;base64," in html_str and "@media print" in html_str
+    assert "data:font/woff2;base64," in html_str and "@media print" in html_str and 'class="art" src="data:image/jpeg;base64,' in html_str
     assert "About these numbers" not in html_str
     for forbidden_str in ("<script", "<link", "<nav", "data-token=", "data-programs", "data-print", "/assets/", "/static/",
             "U100", "U200", "U900", "pod_taa", "pod_ndx", str(context_dict["root_obj"]),

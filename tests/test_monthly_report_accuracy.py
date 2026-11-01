@@ -71,9 +71,10 @@ def test_retired_program_keeps_its_own_return_and_zero_closing_allocation():
     assert program_dict["Growth"]["value_str"] == _money_str(growth_close_float)
     assert program_dict["Steady"]["value_str"] == "$0" and program_dict["Steady"]["closed_bool"]
     assert program_dict["Steady"]["since_str"] == "since Aug 3, 2026 · closed Aug 13, 2026"
-    assert "Steady" not in [group_dict["name_str"] for group_dict in report_dict["split_dict"]["group_list"]]
+    closed_row_dict = next(row_dict for row_dict in report_dict["breakdown_dict"]["row_list"] if row_dict["name_str"] == "Steady")
+    assert closed_row_dict["value_str"] == "$0" and closed_row_dict["share_str"] == "0.0%" and closed_row_dict["note_str"] == "closed Aug 13, 2026"
     assert [row_dict["name_str"] for row_dict in report_dict["month_table_dict"]["row_list"]] == [
-        "Growth", "Pod 1 · U···100", "Steady", "Pod 2 · U···200"]
+        "Growth 2026", "Pod 1 · U···100", "Steady 2026", "Pod 2 · U···200"]
     assert not report_dict["draft_bool"]
 
 
@@ -98,12 +99,12 @@ def test_cross_program_transfer_resolves_without_changing_broker_rows_or_account
         route_str = "U100" if card_dict["name_str"] == "Growth" else "U200"
         expected_return_float, _, _ = _expected_tuple(snapshot_obj, {route_str})
         assert card_dict["stat_list"][-1]["value_str"] == _percent_str(expected_return_float)
-        assert card_dict["chart_dict"]["available_bool"]
+        assert card_dict["chart_available_bool"]
     account_days_int = sum(row_obj.account_route_str == "U100" and row_obj.market_date_str <= "2026-08-31"
         for row_obj in snapshot_obj.row_tuple)
     pod_row_dict = next(row_dict for row_dict in report_dict["month_table_dict"]["row_list"]
         if row_dict["name_str"] == "Pod 1 · U···100")
-    assert pod_row_dict["since_str"] == _percent_str(float(Decimal("1.005") ** account_days_int - 1), suffix_str="")
+    assert pod_row_dict["year_return_str"] == _percent_str(float(Decimal("1.005") ** account_days_int - 1), suffix_str="")
     assert snapshot_obj == original_obj and workspace_dict == original_workspace_dict
 
 
@@ -113,16 +114,15 @@ def test_vault_fx_gain_never_enters_the_programs_report():
     base_dict = _report_dict(base_workspace_dict, base_snapshot_obj)
     fx_dict = _report_dict(fx_workspace_dict, fx_snapshot_obj)
     expected_return_float, expected_pnl_float, expected_close_float = _expected_tuple(fx_snapshot_obj, {"U100", "U200"})
-    assert fx_dict["summary_scope_str"] == "Your portfolio · USD"
     assert fx_dict["money_row_list"][0]["value_str"] == _money_str(expected_close_float)
     assert fx_dict["money_row_list"][1]["value_str"] == _money_str(expected_pnl_float, signed_bool=True)
     assert fx_dict["money_row_list"][1]["pct_str"] == _percent_str(expected_return_float)
     # Cash held in shekels is translated by IBKR; its USD change is the exchange rate, not the programs.
-    for key_str in ("money_row_list", "bridge_row_list", "program_list", "split_dict", "activity_list", "month_table_dict"):
+    for key_str in ("money_row_list", "bridge_row_list", "program_list", "breakdown_dict", "chart_dict", "activity_list", "month_table_dict"):
         assert fx_dict[key_str] == base_dict[key_str], key_str
-    assert fx_dict["scope_note_str"] == "All values cover your programs. Your other IBKR accounts are not included: Vault."
+    assert fx_dict["scope_note_str"] == "Vault is held separately and is not included."
     assert "+$300" not in _printed_body_str(fx_dict) and "$50,300" not in _printed_body_str(fx_dict)
-    assert sum(float(group_dict["pct_str"].rstrip("%")) for group_dict in fx_dict["split_dict"]["group_list"]) == pytest.approx(100, abs=.15)
+    assert sum(float(row_dict["share_str"].rstrip("%")) for row_dict in fx_dict["breakdown_dict"]["row_list"]) == pytest.approx(100, abs=.15)
 
 
 @pytest.mark.parametrize("currency_target_str", ["account", "nav"])
@@ -248,7 +248,7 @@ def test_printed_body_omits_method_section_but_keeps_missing_evidence_and_partia
     workspace_dict, snapshot_obj = _sample_tuple()
     report_dict = _report_dict(workspace_dict, snapshot_obj)
     body_str = _printed_body_str(report_dict)
-    for text_str in ("Holdings are not included in this report.", "since Aug 3, 2026", "Your portfolio", "USD", "not included: Vault"):
+    for text_str in ("Holdings are not included in this report.", "Since Aug 3, 2026", "USD", "Vault is held separately"):
         assert text_str in body_str
     # The technical reason stays with the operator: the screen bar and the saved evidence.
     assert "Holdings on Aug 31" not in body_str and "Holdings on Aug 31 were not saved." in report_dict["evidence_dict"]["note_list"]

@@ -18,7 +18,7 @@ from alpha.live.dashboard_v4 import monthly_report
 from alpha.live.dashboard_v4.app import create_app
 from alpha.live.dashboard_v4.demo import DEMO_NOW_TS, build_demo_workspace_tuple
 from alpha.live.dashboard_v4.monthly_report import (
-    ASSET_CLASS_TUPLE, _chart_dict, _flow_dict, _money_str, _month_column_list, _month_option_list, _percent_str,
+    ASSET_CLASS_TUPLE, _chart_dict, _flow_dict, _money_str, _month_option_list, _percent_str, _year_list, _year_row_list,
     build_monthly_report_dict, load_holder_name_str,
 )
 from alpha.live.dashboard_v4.performance import build_performance_page_dict
@@ -42,6 +42,10 @@ def demo_tuple():
 
 def _visible_text_str(html_str):
     return re.sub(r"\s+", " ", unescape(re.sub(r"<[^>]+>", " ", html_str))).strip()
+
+
+def _money_int(value_str):
+    return int(value_str.replace("$", "").replace(",", "").replace("−", "-").replace("+", ""))
 
 
 def _money_value_dict(report_dict):
@@ -111,19 +115,21 @@ def test_month_and_since_start_match_the_performance_page(demo_tuple):
     assert report_dict["available_bool"] and not report_dict["draft_bool"]
     assert _money_value_dict(report_dict) == {
         "Value on August 31": (_money_str(since_dict["closing_nav_float"]), ""),
-        "Investment gain/loss · August": (_money_str(month_dict["pnl_float"], signed_bool=True), _percent_str(month_dict["twr_float"])),
-        "Gain since start": (_money_str(since_dict["pnl_float"], signed_bool=True), _percent_str(since_dict["twr_float"])),
-        "Opening capital + net movements": (_money_str(since_dict["closing_nav_float"] - since_dict["pnl_float"]), ""),
+        "August": (_money_str(month_dict["pnl_float"], signed_bool=True), _percent_str(month_dict["twr_float"])),
+        "Since Jun 1, 2026": (_money_str(since_dict["pnl_float"], signed_bool=True), _percent_str(since_dict["twr_float"])),
+        "Net capital": (_money_str(since_dict["closing_nav_float"] - since_dict["pnl_float"]), ""),
     }
-    assert _money_value_dict(report_dict)["Investment gain/loss · August"] == ("+$1,090", "+1.1%")
+    assert _money_value_dict(report_dict)["August"] == ("+$1,090", "+1.1%")
     # The months row links the same daily returns as the Performance grid.
     grid_dict = build_performance_page_dict(workspace_dict, snapshot_obj, as_of_ts=DEMO_NOW_TS, from_date_str="2026-06-01",
         to_date_str="2026-08-31")["monthly_row_list"][0]["cell_list"]
     program_row_dict = report_dict["month_table_dict"]["row_list"][0]
-    assert report_dict["month_table_dict"]["label_list"] == ["Jun", "Jul", "Aug"]
-    assert [cell_dict["value_str"] for cell_dict in program_row_dict["cell_list"]] == [
-        _percent_str(grid_dict[month_int - 1]["return_float"], suffix_str="") for month_int in (6, 7, 8)]
-    assert program_row_dict["since_str"] == _percent_str(since_dict["twr_float"], suffix_str="")
+    assert report_dict["month_table_dict"]["label_list"] == ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    assert program_row_dict["name_str"] == "Portfolio 2026"
+    assert [cell_dict["value_str"] for cell_dict in program_row_dict["cell_list"]] == ["", "", "", "", ""] + [
+        _percent_str(grid_dict[month_int - 1]["return_float"], suffix_str="") for month_int in (6, 7, 8)] + ["", "", "", ""]
+    # The first year's return is the return since start.
+    assert program_row_dict["year_return_str"] == _percent_str(since_dict["twr_float"], suffix_str="")
 
 
 def test_default_is_the_current_month_to_date_and_a_month_in_progress_is_a_draft(demo_tuple):
@@ -151,8 +157,9 @@ def test_route_is_read_only_validates_the_month_and_renders_both_pages(demo_tupl
         assert client_obj.get("/monthly-report" + query_str).status_code == status_int, query_str
     response_obj = client_obj.get("/monthly-report?month=2026-08")
     text_str = _visible_text_str(response_obj.get_data(as_text=True))
-    for expected_str in ("Monthly report", "Value on August 31", "+$1,090", "+1.1%", "Gain since start", "Holdings",
-            "TWR by month, %", "Details", "Opening capital + net movements", "August 2026 · Summary", "August 2026 · Details"):
+    for expected_str in ("Monthly report", "Value on August 31 · USD", "+$1,090", "+1.1%", "Since Jun 1, 2026", "Holdings",
+            "Return by month", "Time-weighted (TWR)", "Details", "Net capital", "Capital account", "Money in and out",
+            "August 2026 · Summary", "August 2026 · Details"):
         assert expected_str in text_str
     assert "About these numbers" not in text_str
     assert "Draft" not in text_str
@@ -185,14 +192,19 @@ def test_programs_group_pods_without_changing_any_total(demo_tuple):
     for program in report_dict["program_list"]:
         member_list = [pod_id_str for pod_id_str, name_str in program_dict.items() if name_str == program["name_str"]]
         assert program["value_str"] == _money_str(sum(strategy_dict[pod_id_str] for pod_id_str in member_list))
-        assert program["chart_dict"]["available_bool"] and program["chart_dict"]["width_int"] == 300
+        assert program["chart_available_bool"]
         assert [stat_dict["label_str"] for stat_dict in program["stat_list"]] == ["August", "Since start"]
         assert len(program["pod_holding_list"]) == 2 and all(closing_dict[pod_id_str] for pod_id_str in member_list)
     assert [(row_dict["class_str"], row_dict["name_str"]) for row_dict in report_dict["month_table_dict"]["row_list"]] == [
-        ("prog", "Steady"), ("pod", "Pod 1 · D···1_0"), ("pod", "Pod 2 · D···1_1"),
-        ("prog", "Growth"), ("pod", "Pod 3 · D···1_2"), ("pod", "Pod 4 · D···1_3")]
-    share_list = [float(pod_dict["pct_str"].rstrip("%")) for group_dict in report_dict["split_dict"]["group_list"] for pod_dict in group_dict["pod_list"]]
-    assert abs(sum(share_list) - 100) < .25 and len(report_dict["split_dict"]["segment_list"]) == 4
+        ("prog", "Steady 2026"), ("pod", "Pod 1 · D···1_0"), ("pod", "Pod 2 · D···1_1"),
+        ("prog", "Growth 2026"), ("pod", "Pod 3 · D···1_2"), ("pod", "Pod 4 · D···1_3")]
+    # The table under the summary and the chart both go one level down: the programs.
+    breakdown_dict = report_dict["breakdown_dict"]
+    assert breakdown_dict["title_str"] == "Program" and [row_dict["name_str"] for row_dict in breakdown_dict["row_list"]] == ["Steady", "Growth"]
+    assert abs(sum(float(row_dict["share_str"].rstrip("%")) for row_dict in breakdown_dict["row_list"]) - 100) < .15
+    assert [row_dict["value_str"] for row_dict in breakdown_dict["row_list"]] == [program["value_str"] for program in report_dict["program_list"]]
+    assert [(line_dict["name_str"], line_dict["color_str"]) for line_dict in report_dict["chart_dict"]["line_list"]] == [("Steady", "#1D4F91"), ("Growth", "#13875C")]
+    assert report_dict["details_bool"] and "Steady" not in report_dict["sub_str"]
 
 
 def test_holdings_use_the_close_and_fixed_class_order(demo_tuple):
@@ -208,7 +220,7 @@ def test_holdings_use_the_close_and_fixed_class_order(demo_tuple):
     stock_pod_dict, fund_pod_dict = report_dict["program_list"][0]["pod_holding_list"][0], report_dict["program_list"][0]["pod_holding_list"][2]
     assert not stock_pod_dict["name_bool"] and fund_pod_dict["name_bool"]
     assert stock_pod_dict["row_list"][-1]["symbol_str"] == "Cash and accruals" and stock_pod_dict["row_list"][-1]["muted_bool"]
-    assert {row_dict["symbol_str"]: row_dict["name_str"] for row_dict in fund_pod_dict["row_list"]}["TQQQ"] == "Nasdaq 100 3×"
+    assert {row_dict["symbol_str"]: row_dict["name_str"] for row_dict in fund_pod_dict["row_list"]}["TQQQ"] == "Nasdaq 100"
     # Each weight is rounded on its own (equal holdings keep equal weights), so a
     # column may miss 100.0% by up to 0.05 points a row.
     for pod_dict in report_dict["program_list"][0]["pod_holding_list"]:
@@ -220,7 +232,7 @@ def test_flows_add_up_to_money_put_in_and_withhold_any_gap(demo_tuple):
     report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=DEMO_NOW_TS, month_str="2026-08")
     flow_dict = report_dict["flow_dict"]
     assert flow_dict["row_list"] == []  # No August capital movements; prior months are not repeated.
-    assert flow_dict["total_str"] == _money_value_dict(report_dict)["Opening capital + net movements"][0] == "$92,000"
+    assert flow_dict["total_str"] == _money_value_dict(report_dict)["Net capital"][0] == "$92,000"
     account_list = [account_dict for account_dict in workspace_dict["client_dict"]["accounts"]]
     pod_list = [{"pod_id_str": account_dict["pod_id"], "name_str": account_dict["display_name"]} for account_dict in account_list]
     wrong_dict = _flow_dict(account_list, snapshot_obj, pod_list, from_str="2026-06-01", to_str="2026-08-31", put_in_float=92100.)
@@ -237,30 +249,36 @@ def test_other_accounts_stay_apart_from_programs_and_activity_reads_the_month(tm
     assert value_dict["Value on August 31"][0] == _money_str(page_dict["report_dict"]["closing_nav_float"])
     assert report_dict["program_list"][0]["value_str"] == _money_str(page_dict["report_dict"]["closing_nav_float"])
     # The vault is named, never counted: its USD change would mostly be the exchange rate.
-    assert value_dict["Gain since start"][0] == _money_str(page_dict["report_dict"]["pnl_float"], signed_bool=True)
-    assert report_dict["scope_note_str"] == "All values cover your programs. Your other IBKR accounts are not included: Vault."
-    assert [group_dict["name_str"] for group_dict in report_dict["split_dict"]["group_list"]] == ["Portfolio"]
+    assert value_dict["Since Aug 3, 2026"][0] == _money_str(page_dict["report_dict"]["pnl_float"], signed_bool=True)
+    assert report_dict["scope_note_str"] == "Vault is held separately and is not included."
+    # One program, two Pods: the table goes down to the Pods, and each Pod's month adds up to the whole.
+    breakdown_dict = report_dict["breakdown_dict"]
+    assert breakdown_dict["title_str"] == "Pod" and [row_dict["name_str"] for row_dict in breakdown_dict["row_list"]] == ["Pod 1 · U···100", "Pod 2 · U···200"]
+    assert sum(_money_int(row_dict["pnl_str"]) for row_dict in breakdown_dict["row_list"]) == _money_int(value_dict["August"][0])
+    assert value_dict["Added in August"] == ("+$1,000", "")
     assert [row_dict["kind_str"] for row_dict in report_dict["flow_dict"]["row_list"]] == ["Opening capital", "Net inflow", "Offsetting movements"]
     assert report_dict["flow_dict"]["pod_total_list"] == ["$20,500", "$10,500"] and report_dict["flow_dict"]["total_str"] == "$31,000"
     assert report_dict["activity_list"] == [{"label_str": "Commissions", "value_str": "$1.25"},
-        {"label_str": "Dividends paid", "value_str": "$10.00"}, {"label_str": "Tax withheld", "value_str": "$2.50"},
-        {"label_str": "Interest posted", "value_str": "$0.30"},
-        {"label_str": "Added or withdrawn", "value_str": "+$1,000"}]
+        {"label_str": "Dividends", "value_str": "$10.00"}, {"label_str": "Tax withheld", "value_str": "$2.50"},
+        {"label_str": "Interest", "value_str": "$0.30"}]
+    # Each movement is one line, whatever the number of Pods.
+    assert [(line_dict["kind_str"], line_dict["pod_str"], line_dict["value_str"]) for line_dict in report_dict["flow_dict"]["line_list"]] == [
+        ("Opening capital", "Pod 1 · U···100", "$20,000.00"), ("Opening capital", "Pod 2 · U···200", "$10,000.00"),
+        ("Net inflow", "Pod 1 · U···100", "+$1,000.00"), ("Offsetting movements", "Pod 1 · U···100", "−$500.00"), ("Offsetting movements", "Pod 2 · U···200", "+$500.00")]
     # Production client names come from the account holder; a technical configured id is never a title.
     assert report_dict["client_name_str"] == ""
     # Missing optional holdings remain absent, with their reason also on the printed page.
     program_dict = report_dict["program_list"][0]
     assert program_dict["holding_dict"]["reason_str"] == "Holdings on Aug 31 were not saved."
-    assert program_dict["pod_holding_list"] == [] and program_dict["chart_dict"]["width_int"] == 644
+    assert program_dict["pod_holding_list"] == [] and report_dict["chart_dict"]["available_bool"]
     assert report_dict["status_note_str"] == "Holdings on Aug 31 were not saved."
     app_obj = create_app(object(), now_fn=lambda: SAMPLE_AS_OF_TS, performance_db_path_str=str(tmp_path / "none.sqlite3"),
         workspace_snapshot_fn=lambda: (workspace_dict, snapshot_obj))
     html_str = app_obj.test_client().get("/monthly-report?month=2026-08").get_data(as_text=True)
     page_str = html_str[html_str.index('<main class="mr-pages"'):]
     assert '<h1 class="h1">August 2026</h1>' in page_str and "sample_user" not in html_str
-    assert "$50,100" not in page_str and "not included: Vault." in page_str
-    # The narrow allocation legend puts the masked account under the Pod number instead of wrapping mid-name.
-    assert '<span>Pod 1<span class="pa">U···100</span></span>' in page_str and "since Aug 3, 2026" in page_str
+    assert "$50,100" not in page_str and "Vault is held separately and is not included." in page_str
+    assert "<b>Pod 1 · U···100</b>" in page_str and "Since Aug 3, 2026" in page_str
     # The client's page says it plainly; the technical reason stays on the operator's screen bar.
     assert "Holdings are not included in this report." in page_str and "Holdings on Aug 31" not in page_str
     assert "Holdings on Aug 31 were not saved." in html_str[:html_str.index('<main class="mr-pages"')]
@@ -329,6 +347,196 @@ def test_saved_portfolio_counts_only_when_captured_after_that_close(monkeypatch)
         assert report_dict["program_list"][0]["pod_holding_list"] == []
 
 
+def _one_pod_tuple(**keyword_dict):
+    """The sample client with its second Pod and vault removed from the accounts."""
+    workspace_dict, snapshot_obj = _sample_tuple(**keyword_dict)
+    for key_list in (workspace_dict["client_dict"]["accounts"], workspace_dict["valuation_account_list"], workspace_dict["operations_account_list"]):
+        key_list[:] = [account_dict for account_dict in key_list if account_dict["account_route"] == "U100"]
+    return workspace_dict, snapshot_obj
+
+
+def test_one_pod_is_one_page_with_everything_on_it(tmp_path):
+    workspace_dict, snapshot_obj = _one_pod_tuple()
+    report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-08")
+    assert not report_dict["details_bool"] and report_dict["breakdown_dict"] is None
+    assert report_dict["sub_str"] == "Monthly report · Account U···100"
+    assert [row_dict["name_str"] for row_dict in report_dict["month_table_dict"]["row_list"]] == ["2026"]
+    assert report_dict["month_table_dict"]["wide_bool"]
+    # The money-moved row takes its height from the chart, so the page stays on one sheet.
+    assert report_dict["chart_dict"]["height_int"] == 208 - 31
+    app_obj = create_app(object(), now_fn=lambda: SAMPLE_AS_OF_TS, performance_db_path_str=str(tmp_path / "none.sqlite3"),
+        workspace_snapshot_fn=lambda: (workspace_dict, snapshot_obj))
+    html_str = app_obj.test_client().get("/monthly-report?month=2026-08").get_data(as_text=True)
+    page_str = html_str[html_str.index('<main class="mr-pages"'):]
+    assert page_str.count('class="pg"') == 1 and "Return by month" in page_str and "August activity" in page_str
+    assert "Capital account" not in page_str and "· Details" not in page_str and "· Summary" not in page_str
+
+
+def test_one_pod_with_shorts_gains_a_page_to_list_them(monkeypatch):
+    workspace_dict, snapshot_obj = _one_pod_tuple()
+    provider_obj = _patch_saved_portfolio(monkeypatch, {"pod_taa": [("TQQQ", 9000.), ("AMD", -3000.)], "pod_ndx": []}, {"pod_taa": 5000., "pod_ndx": 1.})
+    report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=SAMPLE_AS_OF_TS,
+        month_str="2026-08", database_path_str="unused.sqlite3")
+    assert report_dict["details_bool"], "The sentence on page 1 points at the list on page 2."
+    assert report_dict["program_list"][0]["holding_dict"]["paper_note_str"] == "Holdings include borrowing or short positions. Details lists them."
+
+
+def test_a_named_single_program_shows_in_the_sub_line_and_a_year_fits_with_one_pod():
+    workspace_dict, snapshot_obj = _one_pod_tuple()
+    workspace_dict["client_dict"]["accounts"][0]["effective_from"] = "2026-08-03"
+    report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-08",
+        program_by_pod_dict={"pod_taa": "Growth"})
+    assert report_dict["sub_str"] == "Monthly report · Growth · Account U···100"
+    assert report_dict["chart_dict"]["line_list"][0]["color_str"] == monthly_report.LONE_LINE_COLOR_STR
+
+
+def test_a_withdrawal_is_one_row_and_a_transfer_between_pods_is_none():
+    workspace_dict, snapshot_obj = _sample_tuple(extra_event_dict={
+        ("U100", "2026-08-17"): {"depositsWithdrawals": "-400"}, ("U100", "2026-08-24"): {"depositsWithdrawals": "0"}, ("U200", "2026-08-24"): {"depositsWithdrawals": "0"}})
+    report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-08")
+    assert _money_value_dict(report_dict)["Withdrawn in August"] == ("−$400", "")
+    assert report_dict["money_row_list"][-1]["tone_str"] == "neg"
+    workspace_dict, snapshot_obj = _sample_tuple(extra_event_dict={("U100", "2026-08-17"): {"depositsWithdrawals": "0"}})
+    report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-08")
+    assert [row_dict["label_str"] for row_dict in report_dict["money_row_list"]] == ["Value on August 31", "August", "Since Aug 3, 2026", "Net capital"]
+
+
+def test_empty_activity_lines_stay_off_the_page():
+    workspace_dict, snapshot_obj = _sample_tuple(extra_event_dict={
+        ("U200", "2026-08-10"): {"commissions": "0"}, ("U100", "2026-08-20"): {"dividends": "0", "withholdingTax": "0"}, ("U200", "2026-08-31"): {"interest": "0"}})
+    assert build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-08")["activity_list"] == []
+
+
+def test_money_moved_at_a_month_boundary_still_gets_its_row():
+    # A Pod that starts on the month's first session is in the month's opening value.
+    workspace_dict, snapshot_obj = _sample_tuple()
+    for key_list in (workspace_dict["client_dict"]["accounts"],):
+        next(account_dict for account_dict in key_list if account_dict["account_route"] == "U200")["effective_from"] = "2026-09-01"
+
+    def report_dict(month_str):
+        return build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str=month_str)
+
+    def net_capital_int(report_dict_obj):
+        return _money_int(_money_value_dict(report_dict_obj)["Net capital"][0])
+
+    opening_decimal = next(row_obj.opening_nav_decimal for row_obj in snapshot_obj.row_tuple if row_obj.account_route_str == "U200" and row_obj.market_date_str == "2026-09-01")
+    assert _money_value_dict(report_dict("2026-09"))["Added in September"] == (_money_str(opening_decimal, signed_bool=True), "")
+    assert abs(net_capital_int(report_dict("2026-09")) - net_capital_int(report_dict("2026-08")) - _money_int(_money_str(opening_decimal))) <= 1
+    # A Pod that closes on the month's last day counted in that month's value, so it leaves in the next.
+    workspace_dict, snapshot_obj = _sample_tuple(effective_to_dict={"U200": "2026-08-31"})
+    closing_decimal = next(row_obj.closing_nav_decimal for row_obj in snapshot_obj.row_tuple if row_obj.account_route_str == "U200" and row_obj.market_date_str == "2026-08-31")
+    assert "Withdrawn in August" not in _money_value_dict(report_dict("2026-08"))
+    assert _money_value_dict(report_dict("2026-09"))["Withdrawn in September"] == (_money_str(-closing_decimal, signed_bool=True), "")
+    # The month's list of movements says the same as the row above it.
+    assert [(line_dict["date_str"], line_dict["kind_str"], line_dict["pod_str"], line_dict["value_str"]) for line_dict in report_dict("2026-09")["flow_dict"]["line_list"]] == [
+        ("Aug 31, 2026", "Pod closed, money out", "Pod 2 · U···200", _money_str(-closing_decimal, signed_bool=True, cents_bool=True))]
+    assert report_dict("2026-08")["flow_dict"]["line_list"][-1]["kind_str"] != "Pod closed, money out"
+    assert abs(net_capital_int(report_dict("2026-08")) - net_capital_int(report_dict("2026-09")) - _money_int(_money_str(closing_decimal))) <= 1
+    # The client's very first day is where net capital starts, not money moved.
+    workspace_dict, snapshot_obj = _one_pod_tuple(extra_event_dict={("U100", "2026-08-17"): {"depositsWithdrawals": "0"}, ("U100", "2026-08-24"): {"depositsWithdrawals": "0"}})
+    assert [row_dict["label_str"] for row_dict in report_dict("2026-08")["money_row_list"]] == ["Value on August 31", "August", "Since Aug 3, 2026", "Net capital"]
+
+
+def test_pod_rows_add_up_to_the_month_when_a_pod_retires():
+    workspace_dict, snapshot_obj = _sample_tuple(effective_to_dict={"U200": "2026-08-13"})
+    # The vault here is a third Pod, so one Pod closes and two go on.
+    for key_list in (workspace_dict["client_dict"]["accounts"], workspace_dict["valuation_account_list"]):
+        third_dict = next(account_dict for account_dict in key_list if account_dict["account_route"] == "U900")
+        third_dict.pop("role")
+        third_dict["pod_id"] = "pod_third"
+    report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-08")
+    row_list = report_dict["breakdown_dict"]["row_list"]
+    assert len(row_list) == 3 and row_list[1]["note_str"] == "closed Aug 13, 2026" and row_list[1]["value_str"] == "$0"
+    assert abs(sum(_money_int(row_dict["pnl_str"]) for row_dict in row_list) - _money_int(_money_value_dict(report_dict)["August"][0])) <= 1
+
+
+def test_each_year_gets_a_row_newest_first_and_the_reports_year_lists_the_pods():
+    assert _year_list("2023-05-01", "2026-08") == ["2026", "2025", "2024", "2023"] and _year_list("2026-08-03", "2026-08") == ["2026"]
+    return_dict = {"2025-11": .01, "2025-12": .02, "2026-01": -.01}
+    pod_list = [{"head_str": "Pod 1 · U···100", "month_return_dict": {"2025-12": .03, "2026-01": .01}}, {"head_str": "Pod 2 · U···200", "month_return_dict": {"2025-11": .02}}]
+    row_list = _year_row_list("Growth", return_dict, pod_list, ["2026", "2025", "2024"], report_year_str="2026", year_known_bool=True, one_pod_bool=False)
+    # 2024 has nothing to show; Pod 2 had no month in the report's year.
+    assert [(row_dict["class_str"], row_dict["name_str"], row_dict["year_return_str"]) for row_dict in row_list] == [
+        ("prog", "Growth 2026", "−1.0"), ("pod", "Pod 1 · U···100", "+1.0"), ("prog", "Growth 2025", "+3.0")]
+    assert [cell_dict["value_str"] for cell_dict in row_list[2]["cell_list"]] == [""] * 10 + ["+1.0", "+2.0"]
+    assert [cell_dict["value_str"] for cell_dict in row_list[0]["cell_list"]][:2] == ["−1.0", ""]
+    assert row_list[0]["year_return_tone_str"] == "neg" and row_list[0]["cell_list"][0]["tone_str"] == "neg"
+    # One Pod: the year alone names the row. The report's year always has a row, even empty.
+    row_list = _year_row_list("Growth", {}, [], ["2026"], report_year_str="2026", year_known_bool=True, one_pod_bool=True)
+    assert [(row_dict["name_str"], row_dict["year_return_str"]) for row_dict in row_list] == [("2026", "—")]
+    # A program that closed last year has no empty row for this one.
+    row_list = _year_row_list("Steady", {"2025-11": .01}, [], ["2026", "2025"], report_year_str="2026", year_known_bool=True, one_pod_bool=False)
+    assert [row_dict["name_str"] for row_dict in row_list] == ["Steady 2025"]
+
+
+def test_many_years_move_the_table_of_one_pod_to_a_details_page(monkeypatch):
+    workspace_dict, snapshot_obj = _one_pod_tuple(extra_event_dict={("U100", "2026-08-17"): {"depositsWithdrawals": "0"}, ("U100", "2026-08-24"): {"depositsWithdrawals": "0"}})
+
+    def report_dict():
+        return build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-08")
+
+    assert not report_dict()["details_bool"] and report_dict()["chart_dict"]["height_int"] == 208
+    monkeypatch.setattr(monthly_report, "_year_list", lambda start_str, month_str: ["2026", "2025", "2024"])
+    assert not report_dict()["details_bool"] and report_dict()["chart_dict"]["height_int"] == 208 - 66
+    monkeypatch.setattr(monthly_report, "_year_list", lambda start_str, month_str: ["2026", "2025", "2024", "2023"])
+    assert report_dict()["details_bool"] and report_dict()["chart_dict"]["height_int"] == 208
+
+
+def test_the_chart_gives_way_so_the_page_stays_on_one_sheet():
+    workspace_dict, snapshot_obj = _one_pod_tuple(extra_event_dict={("U100", "2026-08-17"): {"depositsWithdrawals": "0"}, ("U100", "2026-08-24"): {"depositsWithdrawals": "0"}})
+
+    def height_int(month_str, **keyword_dict):
+        return build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str=month_str, **keyword_dict)["chart_dict"]["height_int"]
+
+    assert height_int("2026-08") == 208
+    assert height_int("2026-09") == 208 - 29, "A draft bar takes its height from the chart."
+    workspace_dict, snapshot_obj = _sample_tuple()
+    assert height_int("2026-08") == 176 - 31 - 24, "The vault's line under the table counts too."
+    assert height_int("2026-08", program_by_pod_dict={"pod_taa": "Growth", "pod_ndx": "Steady"}) == 120, "Held at the floor."
+    # It never goes below a size that can still be read.
+    report_dict = build_monthly_report_dict(*build_demo_workspace_tuple(include_holdings_bool=True), as_of_ts=DEMO_NOW_TS, month_str="2026-08")
+    assert report_dict["chart_dict"]["height_int"] == 120 and len(report_dict["breakdown_dict"]["row_list"]) == 4
+
+
+def test_a_missing_since_start_never_shows_the_month_as_since_start(demo_tuple, monkeypatch):
+    workspace_dict, snapshot_obj, provider_obj = demo_tuple
+    real_fn = monthly_report.build_performance_page_dict
+
+    def since_start_missing_dict(workspace_dict, snapshot_obj, **kwargs_dict):
+        page_dict = real_fn(workspace_dict, snapshot_obj, **kwargs_dict)
+        return {**page_dict, "report_dict": None, "client_report_dict": None} if kwargs_dict["from_date_str"] == "2026-06-01" else page_dict
+
+    monkeypatch.setattr(monthly_report, "build_performance_page_dict", since_start_missing_dict)
+    report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=DEMO_NOW_TS, month_str="2026-08",
+        program_by_pod_dict={"demo_1_0": "Steady", "demo_1_1": "Steady", "demo_1_2": "Growth", "demo_1_3": "Growth"})
+    assert report_dict["breakdown_dict"]["title_str"] == "Program"
+    assert all(row_dict["since_str"] == "—" for row_dict in report_dict["breakdown_dict"]["row_list"])
+    assert all(row_dict["year_return_str"] == "—" for row_dict in report_dict["month_table_dict"]["row_list"])
+    assert not report_dict["chart_dict"]["available_bool"]
+
+
+@pytest.mark.parametrize("name_str,expected_str", [("ERAN SLOBODINSKY", "Eran Slobodinsky"), ("Loren Slobodinsky", "Loren Slobodinsky"),
+    ("McDonald Levi", "McDonald Levi"), ("O'BRIEN", "O'Brien"), ("", ""), ("SMITH'S FUND LLC", "Smith's Fund LLC"),
+    ("JOHN SMITH III", "John Smith III"), ("MARY-ANN O'BRIEN", "Mary-Ann O'Brien"), ("שלום", "שלום"),
+    ("ANNE MCDONALD", "Anne McDonald"), ("SMITH’S", "Smith’s"), ("MC", "Mc")])
+def test_names_stored_in_capitals_read_as_names(name_str, expected_str):
+    assert monthly_report._display_name_str(name_str) == expected_str
+
+
+def test_picture_rule_never_leaves_a_month_without_one_once_any_exists(tmp_path):
+    from alpha.live.dashboard_v4.monthly_report import report_art_name_str
+    assert report_art_name_str(tmp_path / "missing", "2026-10") == ""
+    assert report_art_name_str(tmp_path, "2026-10") == ""
+    for name_str in ("2026-10.jpg", "2026-12.webp", "notes.txt", "2026-13.jpg", "x2026-11.jpg"):
+        (tmp_path / name_str).write_bytes(b"x")
+    (tmp_path / "2026-11.jpg").mkdir()
+    assert [report_art_name_str(tmp_path, month_str) for month_str in ("2026-09", "2026-10", "2026-11", "2026-12", "2027-03")] == [
+        "2026-10.jpg", "2026-10.jpg", "2026-10.jpg", "2026-12.webp", "2026-12.webp"]
+    # A file that failed to copy is no picture; the good older one stands in.
+    (tmp_path / "2027-01.jpg").write_bytes(b"")
+    assert report_art_name_str(tmp_path, "2027-03") == "2026-12.webp"
+
+
 def test_holder_name_comes_from_the_client_query_and_is_escaped(tmp_path):
     db_path_str = str(tmp_path / "performance.sqlite3")
 
@@ -371,18 +579,42 @@ def test_chart_stays_inside_its_plot_and_labels_zero():
     path_list = [{"market_date_str": "2026-04-13 SOD", "cumulative_return_float": 0.}]
     path_list += [{"market_date_str": f"2026-{month_int:02d}-15", "cumulative_return_float": value_float}
         for month_int, value_float in ((4, -.024), (5, .03), (6, .081), (7, .052), (8, .095), (9, .067))]
-    chart_dict = _chart_dict(path_list, single_bool=True)
-    coordinate_list = [tuple(map(float, pair_str.split())) for pair_str in chart_dict["path_str"][1:].split(" L")]
-    assert all(chart_dict["plot_left"] <= x_float <= chart_dict["plot_right"] and 10 <= y_float <= chart_dict["height_int"] - 22
+    chart_dict = _chart_dict([{"name_str": "Portfolio", "color_str": "#1F5F6B", "path_list": path_list}], height_int=208)
+    line_dict = chart_dict["line_list"][0]
+    coordinate_list = [tuple(map(float, pair_str.split())) for pair_str in line_dict["path_str"][1:].split(" L")]
+    assert all(chart_dict["plot_left"] <= x_float <= chart_dict["plot_right"] and 10 <= y_float <= chart_dict["height_int"] - 24
         for x_float, y_float in coordinate_list)
     assert [tick_dict["label_str"] for tick_dict in chart_dict["tick_list"]] == ["0%", "+5%", "+10%"]
-    assert chart_dict["end_label_str"] == "+6.7%" and chart_dict["month_list"][0]["label_str"] == "Apr"
+    assert line_dict["label_str"] == "+6.7%" and chart_dict["month_list"][0]["label_str"] == "Apr" and not line_dict["leader_bool"]
     # The shading closes on the 0% gridline at both ends, so it fills between the line and zero.
     zero_y = next(tick_dict["y"] for tick_dict in chart_dict["tick_list"] if tick_dict["zero_bool"])
-    area_point_list = [tuple(map(float, part_str.split())) for part_str in chart_dict["area_str"][1:-2].split(" L")]
-    assert area_point_list[1:-1] == coordinate_list and chart_dict["area_str"].endswith(" Z")
+    area_point_list = [tuple(map(float, part_str.split())) for part_str in line_dict["area_str"][1:-2].split(" L")]
+    assert area_point_list[1:-1] == coordinate_list and line_dict["area_str"].endswith(" Z")
     assert area_point_list[0] == (coordinate_list[0][0], zero_y) and area_point_list[-1] == (coordinate_list[-1][0], zero_y)
-    assert not _chart_dict(path_list[:1], single_bool=False)["available_bool"]
+    assert not _chart_dict([{"name_str": "Portfolio", "color_str": "#1F5F6B", "path_list": path_list[:1]}], height_int=208)["available_bool"]
+    assert not _chart_dict([], height_int=208)["available_bool"]
+
+
+def test_chart_end_labels_that_would_touch_move_apart_and_stay_on_the_page():
+    def path_list(value_float):
+        return [{"market_date_str": "2026-08-03", "cumulative_return_float": 0.}, {"market_date_str": "2026-09-30", "cumulative_return_float": value_float}]
+
+    chart_dict = _chart_dict([{"name_str": "Steady", "color_str": "#1D4F91", "path_list": path_list(.024)},
+        {"name_str": "Growth", "color_str": "#13875C", "path_list": path_list(.025)}], height_int=150)
+    steady_dict, growth_dict = chart_dict["line_list"]
+    assert abs(steady_dict["label_y"] - growth_dict["label_y"]) >= 18 and growth_dict["label_y"] < steady_dict["label_y"]
+    assert steady_dict["leader_bool"] and growth_dict["leader_bool"] and steady_dict["area_str"] == growth_dict["area_str"] == ""
+    # The longest allowed program name is cut in the label only, so its return stays on the chart.
+    long_name_str = "Aggressive Long Term Growth Plus"[:30]
+    chart_dict = _chart_dict([{"name_str": long_name_str, "color_str": "#1D4F91", "path_list": path_list(.5)},
+        {"name_str": "Growth", "color_str": "#13875C", "path_list": path_list(-.5)}], height_int=150)
+    assert chart_dict["plot_right"] > chart_dict["plot_left"] + 300
+    long_dict = chart_dict["line_list"][0]
+    assert long_dict["name_str"] == long_name_str and long_dict["label_name_str"].endswith("…") and len(long_dict["label_name_str"]) <= monthly_report.CHART_LABEL_NAME_LIMIT_INT
+    assert long_dict["label_x"] + 15 + len(long_dict["label_name_str"] + " +50.0%") * 8.6 <= chart_dict["width_int"]
+    # Ends at the very top and bottom keep their labels inside the plot.
+    for line_dict in chart_dict["line_list"]:
+        assert 10 <= line_dict["label_y"] <= chart_dict["height_int"] - 24 + 1
 
 
 def test_unverified_source_shows_a_message_instead_of_numbers(demo_tuple, tmp_path):
@@ -420,8 +652,6 @@ def test_a_month_is_final_only_once_its_last_calendar_day_is_finalized():
     assert october_dict["label_str"] == "October 2026 · to date"
     option_dict = {option_dict["month_str"]: option_dict for option_dict in _month_option_list("2026-09-01", "2026-11-02")}
     assert option_dict["2026-10"]["complete_bool"] and option_dict["2026-09"]["complete_bool"]
-    assert _month_column_list("2025-06-10", "2026-02") == ["2025-06", "2025-07", "2025-08", "2025-09", "2025-10",
-        "2025-11", "2025-12", "2026-01", "2026-02"]
 
 
 def test_a_missing_other_account_does_not_hold_back_the_programs_report():
@@ -441,17 +671,21 @@ def test_other_account_lines_need_an_other_account_at_the_close():
     workspace_dict, snapshot_obj = _sample_tuple(effective_to_dict={"U900": "2026-08-13"})
     report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-08")
     assert [row_dict["label_str"] for row_dict in report_dict["money_row_list"]] == [
-        "Value on August 31", "Investment gain/loss · August", "Gain since start", "Opening capital + net movements"]
+        "Value on August 31", "August", "Since Aug 3, 2026", "Net capital", "Added in August"]
 
 
 def test_a_retired_pod_keeps_its_history_but_leaves_the_split():
     workspace_dict, snapshot_obj = _sample_tuple(effective_to_dict={"U200": "2026-08-13"})
     report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-08")
-    assert [pod_dict["name_str"] for group_dict in report_dict["split_dict"]["group_list"] for pod_dict in group_dict["pod_list"]] == ["Pod 1 · U···100"]
-    assert [row_dict["name_str"] for row_dict in report_dict["month_table_dict"]["row_list"]] == ["Portfolio", "Pod 1 · U···100", "Pod 2 · U···200"]
+    # A Pod that closed this month keeps its row until the month is over, then only its history stays.
+    assert [(row_dict["name_str"], row_dict["value_str"], row_dict["share_str"], row_dict["note_str"]) for row_dict in report_dict["breakdown_dict"]["row_list"]] == [
+        ("Pod 1 · U···100", report_dict["money_row_list"][0]["value_str"], "100.0%", ""), ("Pod 2 · U···200", "$0", "0.0%", "closed Aug 13, 2026")]
+    assert build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-09")["breakdown_dict"] is None
+    assert report_dict["details_bool"]
+    assert [row_dict["name_str"] for row_dict in report_dict["month_table_dict"]["row_list"]] == ["Portfolio 2026", "Pod 1 · U···100", "Pod 2 · U···200"]
     flow_dict = report_dict["flow_dict"]
     assert "Pod closed, money out" in [row_dict["kind_str"] for row_dict in flow_dict["row_list"]]
-    assert flow_dict["total_str"] != "—" and flow_dict["total_str"] != _money_value_dict(report_dict)["Opening capital + net movements"][0]
+    assert flow_dict["total_str"] != "—" and flow_dict["total_str"] != _money_value_dict(report_dict)["Net capital"][0]
     assert build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS,
         month_str="2026-09")["available_bool"]
 
@@ -477,12 +711,12 @@ def test_a_missing_since_start_report_keeps_the_month_and_says_why(demo_tuple, m
     monkeypatch.setattr(monthly_report, "build_performance_page_dict", since_start_missing_dict)
     report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=DEMO_NOW_TS, month_str="2026-08")
     value_dict = _money_value_dict(report_dict)
-    assert value_dict["Investment gain/loss · August"] == ("+$1,090", "+1.1%")
-    assert value_dict["Gain since start"] == ("—", "—") and value_dict["Opening capital + net movements"] == ("—", "")
+    assert value_dict["August"] == ("+$1,090", "+1.1%")
+    assert value_dict["Since Jun 1, 2026"] == ("—", "—") and value_dict["Net capital"] == ("—", "")
     assert report_dict["draft_reason_str"] == "Return since start unavailable"
     assert "Money in and out appears once the account history since start is complete." in report_dict["status_note_str"]
-    assert not report_dict["program_list"][0]["chart_dict"]["available_bool"]
-    assert all(row_dict["since_str"] == "—" for row_dict in report_dict["month_table_dict"]["row_list"])
+    assert not report_dict["chart_dict"]["available_bool"] and not report_dict["program_list"][0]["chart_available_bool"]
+    assert all(row_dict["year_return_str"] == "—" for row_dict in report_dict["month_table_dict"]["row_list"])
 
 
 def test_shorts_and_borrowing_get_no_donut_and_long_lists_fold(monkeypatch):
@@ -506,7 +740,7 @@ def test_shorts_and_borrowing_get_no_donut_and_long_lists_fold(monkeypatch):
     row_list = report_dict["program_list"][0]["pod_holding_list"][1]["row_list"]
     assert len(row_list) == 13 and row_list[-2]["symbol_str"] == "3 more" and row_list[-2]["muted_bool"] and row_list[-1]["symbol_str"] == "Cash and accruals"
     legend_dict = {item_dict["name_str"]: item_dict["detail_str"] for item_dict in report_dict["program_list"][0]["holding_dict"]["legend_list"]}
-    assert legend_dict["Nasdaq 100"] == "TQQQ 3×" and legend_dict["Stocks"] == "14 stocks"
+    assert legend_dict["Nasdaq 100"] == "TQQQ" and legend_dict["Stocks"] == "14 stocks"
 
 
 def test_four_programs_reuse_colour_families(demo_tuple):
@@ -534,14 +768,15 @@ def test_pods_are_named_by_number_masked_account_and_ibkr_alias():
     workspace_dict, snapshot_obj = _sample_tuple()
     report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-08",
         alias_by_pod_dict={"pod_ndx": "growth_mom_natr20"})
-    name_list = ["Pod 1 · U···100", "Pod 2 · U···200 · growth_mom_natr20"]
-    assert [pod_dict["name_str"] for pod_dict in report_dict["split_dict"]["group_list"][0]["pod_list"]] == name_list
+    assert [(row_dict["name_str"], row_dict["note_str"]) for row_dict in report_dict["breakdown_dict"]["row_list"]] == [
+        ("Pod 1 · U···100", ""), ("Pod 2 · U···200", "growth_mom_natr20")]
+    assert [choice_dict["name_str"] for choice_dict in report_dict["pod_choice_list"]] == ["Pod 1 · U···100", "Pod 2 · U···200 · growth_mom_natr20"]
     assert report_dict["flow_dict"]["pod_name_list"] == [{"head_str": "Pod 1 · U···100", "alias_str": ""},
         {"head_str": "Pod 2 · U···200", "alias_str": "growth_mom_natr20"}]
     # Numbers follow the first measured day: a Pod that starts later is numbered after the others.
     workspace_dict["client_dict"]["accounts"][0]["effective_from"] = "2026-08-04"
     report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-08")
-    assert {pod_dict["name_str"] for pod_dict in report_dict["split_dict"]["group_list"][0]["pod_list"]} == {"Pod 1 · U···200", "Pod 2 · U···100"}
+    assert {row_dict["name_str"] for row_dict in report_dict["breakdown_dict"]["row_list"]} == {"Pod 1 · U···200", "Pod 2 · U···100"}
 
 
 def _program_token_str(client_obj):
@@ -632,7 +867,7 @@ def test_unassigned_retired_program_keeps_its_own_history():
     report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS,
         month_str="2026-08", program_by_pod_dict={"pod_taa": "Growth"})
     assert [program_dict["name_str"] for program_dict in report_dict["program_list"]] == ["Growth", "Portfolio"]
-    assert [row_dict["name_str"] for row_dict in report_dict["month_table_dict"]["row_list"]] == ["Growth", "Pod 1 · U···100", "Portfolio", "Pod 2 · U···200"]
+    assert [row_dict["name_str"] for row_dict in report_dict["month_table_dict"]["row_list"]] == ["Growth 2026", "Pod 1 · U···100", "Portfolio 2026", "Pod 2 · U···200"]
     assert report_dict["program_list"][1]["closed_bool"]
 
 

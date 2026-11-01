@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% if report_dict.client_name_str %}{{ report_dict.client_name_str }} · {% endif %}{% if report_dict.month_label_str %}{{ report_dict.month_label_str }} · {% endif %}Monthly report</title>
   <style>
-    @font-face { font-family: 'IBM Plex Sans'; font-style: normal; font-weight: 100 700; font-display: block; src: url('{{ url_for("assets", filename="fonts/IBMPlexSans-latin.woff2") }}') format('woff2'); }
+    @font-face { font-family: 'Hanken Grotesk'; font-style: normal; font-weight: 300 700; font-display: block; src: url('{{ url_for("static", filename="fonts/HankenGrotesk-latin.woff2") }}') format('woff2'); }
   </style>
   <link rel="stylesheet" href="{{ url_for('static', filename='monthly_report.css') }}">
   <script src="{{ url_for('static', filename='monthly_report.js') }}" defer></script>
@@ -55,172 +55,154 @@
   </main>
   {% else %}
   <main class="mr-pages" data-report-id="{{ report_dict.report_id_str }}">
+    {% set lead_dict = report_dict.money_row_list[0] %}
     <section class="pg" aria-label="Summary">
       {% if report_dict.draft_bool %}<div class="mr-draft">Draft · {{ report_dict.draft_reason_str }}</div>{% endif %}
       {% if report_dict.is_demo_bool %}<div class="mr-demo">DEMONSTRATION · synthetic data</div>{% endif %}
       {% if report_dict.art_url_str %}<img class="art" src="{{ report_dict.art_url_str }}" alt="Picture of the month">{% endif %}
-      <header class="mast{% if not report_dict.art_url_str %} mast-noart{% endif %}">
-        <div>
-          <div class="eyebrow">Monthly report</div>
-          <h1 class="h1">{{ report_dict.client_name_str or report_dict.period_label_str }}</h1>
-          {% if report_dict.client_name_str %}<div class="sub">{{ report_dict.period_label_str }}</div>{% endif %}
-        </div>
-        <div class="brand">
-          <div class="bname">{{ report_dict.brand_name_str }}</div>
-          <div class="bdesc">{{ report_dict.brand_desc_str }}</div>
-        </div>
-      </header>
-
-      <section class="top" aria-label="Summary">
-        <div>
-          <div class="sec-t">{{ report_dict.summary_scope_str }}</div>
-          <table class="money">
-            <thead><tr><th></th><th>Amount</th><th>TWR</th></tr></thead>
-            {% for row_dict in report_dict.money_row_list %}
-            <tr class="{{ row_dict.class_str }}"><td>{{ row_dict.label_str }}</td><td class="v {{ row_dict.tone_str }}">{{ row_dict.value_str }}</td><td class="p {{ row_dict.pct_tone_str }}">{{ row_dict.pct_str }}</td></tr>
+      <div class="panel{% if not report_dict.art_url_str %} panel-top{% endif %}">
+        <header class="mast">
+          <div>
+            <h1 class="h1">{{ report_dict.client_name_str or report_dict.period_label_str }}</h1>
+            <div class="sub">{{ report_dict.sub_str }}</div>
+          </div>
+          <div class="brand">
+            <div class="bname">{{ report_dict.brand_name_str }}</div>
+            <div class="bdesc">{{ report_dict.brand_desc_str }}</div>
+          </div>
+        </header>
+        <section class="top" aria-label="Bottom line">
+          <div class="hero">
+            <div class="hero-l">{{ lead_dict.label_str }} · USD</div>
+            <div class="hero-n{% if lead_dict.value_str | length > 10 %} hero-long{% endif %}">{{ lead_dict.value_str }}</div>
+          </div>
+          <table class="sum"><tbody>
+            {% for row_dict in report_dict.money_row_list[1:] %}<tr><td>{{ row_dict.label_str }}</td><td class="{{ row_dict.tone_str }}">{{ row_dict.value_str }}</td><td class="pct {{ row_dict.pct_tone_str }}">{{ row_dict.pct_str }}</td></tr>
             {% endfor %}
-          </table>
-        </div>
-        <div>
-          <div class="sec-t">Allocation at month end</div>
-          <div class="split">
-            <svg viewBox="0 0 112 112" role="img" aria-label="{{ report_dict.split_dict.aria_str }}">
-              {% for segment_dict in report_dict.split_dict.segment_list %}<path d="{{ segment_dict.d_str }}" fill="none" stroke="{{ segment_dict.color_str }}" stroke-width="16"></path>{% endfor %}
-            </svg>
-            <div class="sleg">
-              {% for group_dict in report_dict.split_dict.group_list %}
-              <div class="sg"><span>{{ group_dict.name_str }}</span><span class="n">{{ group_dict.pct_str }}</span></div>
-              {% if report_dict.single_program_bool %}{% for pod_dict in group_dict.pod_list %}<div class="sp"><span class="sw" style="background:{{ pod_dict.color_str }}"></span><span>{{ pod_dict.number_str }}{% if pod_dict.account_str %}<span class="pa">{{ pod_dict.account_str }}</span>{% endif %}</span><span class="pc">{{ pod_dict.pct_str }}</span></div>{% endfor %}{% endif %}
-              {% endfor %}
-            </div>
-          </div>
-        </div>
-      </section>
+          </tbody></table>
+        </section>
+      </div>
 
-      <section class="bridge" aria-label="Monthly balance reconciliation">
-        {% for row_dict in report_dict.bridge_row_list %}<div><span>{{ row_dict.label_str }}</span><b>{{ row_dict.value_str }}</b></div>{% endfor %}
-      </section>
-      <p class="scope-note">{{ report_dict.scope_note_str }}</p>
+      <div class="in">
+        {% set breakdown_dict = report_dict.breakdown_dict %}
+        {% if breakdown_dict %}
+        <section class="breakdown" aria-label="{{ breakdown_dict.title_str }}s">
+          <table><thead><tr><th>{{ breakdown_dict.title_str }}</th><th>Value</th><th>Share</th><th colspan="2">{{ report_dict.month_word_str }}</th><th>Since start</th></tr></thead><tbody>
+            {% for row_dict in breakdown_dict.row_list %}<tr><td class="bname-cell">{% if row_dict.color_str %}<span class="psw" style="background:{{ row_dict.color_str }}"></span>{% endif %}<b>{{ row_dict.name_str }}</b>{% if row_dict.note_str %}<span class="bnote">{{ row_dict.note_str }}</span>{% endif %}</td><td>{{ row_dict.value_str }}</td><td>{{ row_dict.share_str }}</td><td class="{{ row_dict.pnl_tone_str }}">{{ row_dict.pnl_str }}</td><td class="{{ row_dict.month_tone_str }}">{{ row_dict.month_str }}</td><td class="{{ row_dict.since_tone_str }}">{{ row_dict.since_str }}</td></tr>
+            {% endfor %}
+          </tbody></table>
+        </section>
+        {% endif %}
+        {% if report_dict.scope_note_str %}<p class="scope-note">{{ report_dict.scope_note_str }}</p>{% endif %}
 
-      <section class="cards{% if report_dict.single_program_bool %} cards-one{% endif %}">
-        {% for program_dict in report_dict.program_list %}
-        <article class="card" aria-label="{{ program_dict.name_str }} program">
-          <div class="chead">
-            <div class="cname"><span class="psw" style="background:{{ program_dict.color_str }}"></span><span>{{ program_dict.name_str }}</span><span class="since">{{ program_dict.since_str }}</span></div>
-            <div class="cval"><span class="vbig">{{ program_dict.value_str }}</span>{% if not report_dict.single_program_bool %}<span class="chg {{ program_dict.change_tone_str }}">{{ program_dict.change_str }}</span>{% endif %}</div>
-          </div>
-          {% if not report_dict.single_program_bool %}
-          <div class="stats">
-            {% for stat_dict in program_dict.stat_list %}<div><div class="lab">{{ stat_dict.label_str }}</div><div class="rv {{ stat_dict.tone_str }}">{{ stat_dict.value_str }}</div></div>{% endfor %}
-          </div>
-          {% endif %}
-          <div class="body{% if program_dict.chart_dict.wide_bool %} body-wide{% endif %}">
-            <div class="perf">
-              <div class="sec-t">Cumulative return · TWR</div>
-              {% set chart_dict = program_dict.chart_dict %}
-              {% if chart_dict.available_bool %}
-              <svg class="chart" viewBox="0 0 {{ chart_dict.width_int }} {{ chart_dict.height_int }}" role="img" aria-label="{{ program_dict.name_str }} return since start: {{ chart_dict.end_label_str }}">
-                {% for tick_dict in chart_dict.tick_list %}<line x1="{{ chart_dict.plot_left }}" y1="{{ tick_dict.y }}" x2="{{ chart_dict.plot_right }}" y2="{{ tick_dict.y }}" stroke="{{ '#CBD5E1' if tick_dict.zero_bool else '#E2E8F0' }}" stroke-width="1"></line><text x="{{ chart_dict.plot_left - 5 }}" y="{{ tick_dict.y + 4 }}" text-anchor="end" font-size="11" fill="#64748B">{{ tick_dict.label_str }}</text>{% endfor %}
-                {% for month_dict in chart_dict.month_list %}<text x="{{ month_dict.x }}" y="{{ chart_dict.height_int - 4 }}" font-size="11" fill="#64748B">{{ month_dict.label_str }}</text>{% endfor %}
-                <path d="{{ chart_dict.area_str }}" fill="{{ program_dict.color_str }}" fill-opacity=".09" stroke="none"></path>
-                <path d="{{ chart_dict.path_str }}" fill="none" stroke="{{ program_dict.color_str }}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></path>
-                <circle cx="{{ chart_dict.end_x }}" cy="{{ chart_dict.end_y }}" r="4" fill="{{ program_dict.color_str }}" stroke="#FFFFFF" stroke-width="2"></circle>
-                <text x="{{ chart_dict.end_x + 7 }}" y="{{ chart_dict.end_y + 4 }}" font-size="12" font-weight="600" fill="#0F172A">{{ chart_dict.end_label_str }}</text>
-              </svg>
-              {% else %}<p class="na">{{ chart_dict.reason_str }}</p>{% endif %}
-            </div>
+        <section class="sec" aria-label="Return since start">
+          <div class="sh"><b>Return since start</b><span>Time-weighted (TWR)</span></div>
+          {% set chart_dict = report_dict.chart_dict %}
+          {% if chart_dict.available_bool %}
+          <svg class="chart" viewBox="0 0 {{ chart_dict.width_int }} {{ chart_dict.height_int }}" role="img" aria-label="Return since start: {% for line_dict in chart_dict.line_list %}{{ line_dict.name_str }} {{ line_dict.label_str }}{% if not loop.last %}, {% endif %}{% endfor %}">
+            {% for tick_dict in chart_dict.tick_list %}<line x1="{{ chart_dict.plot_left }}" y1="{{ tick_dict.y }}" x2="{{ chart_dict.plot_right }}" y2="{{ tick_dict.y }}" stroke="{{ '#CBD5E1' if tick_dict.zero_bool else '#EEF1F5' }}" stroke-width="1"></line><text x="{{ chart_dict.plot_left - 7 }}" y="{{ tick_dict.y + 4 }}" text-anchor="end" font-size="12" fill="#64748B">{{ tick_dict.label_str }}</text>{% endfor %}
+            {% for month_dict in chart_dict.month_list %}<text x="{{ month_dict.x }}" y="{{ chart_dict.height_int - 5 }}" font-size="12" fill="#64748B">{{ month_dict.label_str }}</text>{% endfor %}
+            {% for line_dict in chart_dict.line_list %}{% if line_dict.area_str %}<path d="{{ line_dict.area_str }}" fill="{{ line_dict.color_str }}" fill-opacity=".1" stroke="none"></path>{% endif %}<path d="{{ line_dict.path_str }}" fill="none" stroke="{{ line_dict.color_str }}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></path>{% endfor %}
+            {% for line_dict in chart_dict.line_list %}{% if line_dict.leader_bool %}<line x1="{{ line_dict.end_x + 5 }}" y1="{{ line_dict.end_y }}" x2="{{ line_dict.label_x - 2 }}" y2="{{ line_dict.label_y }}" stroke="#CBD5E1" stroke-width="1"></line><rect x="{{ line_dict.label_x }}" y="{{ line_dict.label_y - 5 }}" width="10" height="10" rx="2" fill="{{ line_dict.color_str }}"></rect><text x="{{ line_dict.label_x + 15 }}" y="{{ line_dict.label_y + 4.5 }}" font-size="14" font-weight="600" fill="#0F172A">{{ line_dict.label_name_str }} {{ line_dict.label_str }}</text>{% else %}<text x="{{ line_dict.label_x }}" y="{{ line_dict.label_y + 4.5 }}" font-size="14" font-weight="600" fill="#0F172A">{{ line_dict.label_str }}</text>{% endif %}<circle cx="{{ line_dict.end_x }}" cy="{{ line_dict.end_y }}" r="4" fill="{{ line_dict.color_str }}" stroke="#FFFFFF" stroke-width="2"></circle>{% endfor %}
+          </svg>
+          {% else %}<p class="plain">{{ chart_dict.reason_str }}</p>{% endif %}
+        </section>
+
+        <section class="sec" aria-label="Holdings">
+          <div class="sh"><b>Holdings</b><span>Weights on {{ report_dict.close_label_str }}</span></div>
+          <div class="holds{% if not report_dict.single_program_bool %} holds-two{% endif %}">
+            {% for program_dict in report_dict.program_list %}
             {% set holding_dict = program_dict.holding_dict %}
-            {% if holding_dict.available_bool and report_dict.single_program_bool %}
-            <div class="hold">
-              <div class="sec-t">Holdings</div>
-              <div class="hrow">
+            <article aria-label="{{ program_dict.name_str }} program">
+              {% if not report_dict.single_program_bool %}<div class="hname"><span class="psw" style="background:{{ program_dict.color_str }}"></span>{{ program_dict.name_str }}</div>{% endif %}
+              {% if holding_dict.available_bool %}
+              <div class="hold">
                 <svg viewBox="0 0 104 104" role="img" aria-label="{{ holding_dict.aria_str }}">
-                  {% for segment_dict in holding_dict.segment_list %}<path d="{{ segment_dict.d_str }}" fill="none" stroke="{{ segment_dict.color_str }}" stroke-width="16"></path>{% endfor %}
+                  {% for segment_dict in holding_dict.segment_list %}<path d="{{ segment_dict.d_str }}" fill="none" stroke="{{ segment_dict.color_str }}" stroke-width="14"></path>{% endfor %}
                 </svg>
-                <div class="hl">
-                  {% for item_dict in holding_dict.legend_list %}<div class="hi"><span class="sw" style="background:{{ item_dict.color_str }}"></span><span class="nm">{{ item_dict.name_str }}</span><span class="pc">{{ item_dict.pct_str }}</span>{% if item_dict.detail_str %}<span class="tk">{{ item_dict.detail_str }}</span>{% endif %}</div>{% endfor %}
+                <div class="leg{% if report_dict.single_program_bool and holding_dict.legend_list | length > 5 %} leg-two{% endif %}">
+                  {% for item_dict in holding_dict.legend_list %}<div class="li"><span class="k" style="background:{{ item_dict.color_str }}"></span><span>{{ item_dict.name_str }}</span><span class="tk">{{ item_dict.detail_str }}</span><span class="pc">{{ item_dict.pct_str }}</span></div>{% endfor %}
                 </div>
               </div>
+              {% elif holding_dict.paper_note_str %}<p class="plain">{{ holding_dict.paper_note_str }}</p>{% endif %}
+            </article>
+            {% endfor %}
+          </div>
+        </section>
+
+        {% if not report_dict.details_bool %}
+        <section class="sec" aria-label="Return by month">
+          <div class="sh"><b>Return by month</b><span>Time-weighted, %</span></div>
+          {% include "_monthly_report_months.html" %}
+        </section>
+        {% if report_dict.activity_list %}
+        <section class="sec" aria-label="Activity">
+          <div class="sh"><b>{{ report_dict.month_word_str }} activity</b></div>
+          <div class="act">{% for item_dict in report_dict.activity_list %}<span>{{ item_dict.label_str }}<b>{{ item_dict.value_str }}</b></span>{% endfor %}</div>
+        </section>
+        {% endif %}
+        {% if report_dict.flow_dict.reason_str %}<p class="plain">{{ report_dict.flow_dict.reason_str }}</p>{% endif %}
+        {% endif %}
+      </div>
+
+      <footer class="foot"><span>{{ report_dict.period_label_str }}{% if report_dict.details_bool %} · Summary{% endif %}</span></footer>
+    </section>
+
+    {% if report_dict.details_bool %}
+    <section class="pg" aria-label="Details">
+      {% if report_dict.draft_bool %}<div class="mr-draft">Draft · {{ report_dict.draft_reason_str }}</div>{% endif %}
+      {% if report_dict.is_demo_bool %}<div class="mr-demo">DEMONSTRATION · synthetic data</div>{% endif %}
+      <div class="dark-head"><span>{% if report_dict.client_name_str %}<b>{{ report_dict.client_name_str }}</b> · {% endif %}{{ report_dict.period_label_str }} · Details</span><span>{{ report_dict.brand_name_str }}</span></div>
+      <div class="in">
+        {% if report_dict.month_table_dict.row_list %}
+        <section class="sec" aria-label="Return by month">
+          <div class="sh"><b>Return by month</b><span>Time-weighted, %</span></div>
+          {% include "_monthly_report_months.html" %}
+        </section>
+        {% endif %}
+
+        {% for program_dict in report_dict.program_list if not program_dict.holding_dict.available_bool and program_dict.pod_holding_list %}
+        <section class="sec" aria-label="{{ program_dict.name_str }} signed holdings by Pod">
+          <div class="sh"><b>{{ program_dict.name_str }} · signed holdings by Pod</b></div>
+          <div class="signed">
+            {% for pod_dict in program_dict.pod_holding_list %}
+            <div>
+              <div class="hname"><span class="psw" style="background:{{ pod_dict.color_str }}"></span>{{ pod_dict.name_str }}</div>
+              <table>
+                <thead><tr><th>Ticker</th>{% if pod_dict.name_bool %}<th class="l">Name</th>{% endif %}<th>Weight</th></tr></thead>
+                <tbody>{% for row_dict in pod_dict.row_list %}<tr{% if row_dict.muted_bool %} class="muted"{% endif %}><td class="tk-cell">{{ row_dict.symbol_str }}</td>{% if pod_dict.name_bool %}<td class="l">{{ row_dict.name_str }}</td>{% endif %}<td>{{ row_dict.weight_str }}</td></tr>{% endfor %}</tbody>
+              </table>
             </div>
-            {% endif %}
+            {% endfor %}
           </div>
-          {% if not holding_dict.available_bool and holding_dict.paper_note_str %}<p class="na">{{ holding_dict.paper_note_str }}</p>{% endif %}
-        </article>
+        </section>
         {% endfor %}
-      </section>
 
-      <footer class="foot"><div class="foot-in"><span>{{ report_dict.period_label_str }} · Summary</span></div></footer>
-    </section>
-
-    <section class="pg pg2" aria-label="Details">
-      {% if report_dict.art_url_str %}<img class="strip" src="{{ report_dict.art_url_str }}" alt="">{% endif %}
-      <div class="head{% if report_dict.art_url_str %} head-art{% endif %}"><span>{% if report_dict.client_name_str %}<b>{{ report_dict.client_name_str }}</b> · {% endif %}{{ report_dict.period_label_str }}</span><span>{{ report_dict.brand_name_str }}</span></div>
-      <h2 class="h2">Details</h2>
-      {% if report_dict.draft_bool %}<p class="detail-status">Draft · {{ report_dict.draft_reason_str }}</p>{% endif %}
-      {% if report_dict.is_demo_bool %}<p class="detail-status">DEMONSTRATION · synthetic data</p>{% endif %}
-
-      {% if report_dict.month_table_dict.row_list %}
-      <section class="block" aria-label="Returns by month">
-        <div class="sec-t">TWR by month, %</div>
-        {% include "_monthly_report_months.html" %}
-      </section>
-      {% endif %}
-
-      {% if not report_dict.single_program_bool and report_dict.program_list | selectattr('holding_dict.available_bool') | list %}
-      <section class="block" aria-label="Holdings by program">
-        <div class="sec-t">Holdings by program · verified closing values</div>
-        <div class="two">
-        {% for program_dict in report_dict.program_list if program_dict.holding_dict.available_bool %}
+        <section class="sec capflow" aria-label="Capital account and money in and out">
           <div>
-            <div class="ph"><span class="psw" style="background:{{ program_dict.color_str }}"></span>{{ program_dict.name_str }}</div>
-            <table><thead><tr><th>Asset class</th><th>Weight</th></tr></thead><tbody>
-            {% for item_dict in program_dict.holding_dict.legend_list %}<tr><td>{{ item_dict.name_str }}{% if item_dict.detail_str %}<span class="holding-detail">{{ item_dict.detail_str }}</span>{% endif %}</td><td>{{ item_dict.pct_str }}</td></tr>{% endfor %}
-            </tbody></table>
+            <div class="sh"><b>Capital account</b><span>{{ report_dict.month_word_str }}</span></div>
+            <table class="cap-table"><tbody>{% for row_dict in report_dict.bridge_row_list %}<tr><td>{{ row_dict.label_str }}</td><td>{{ row_dict.value_str }}</td></tr>{% endfor %}</tbody></table>
           </div>
-        {% endfor %}
-        </div>
-      </section>
-      {% endif %}
-      {% for program_dict in report_dict.program_list if not program_dict.holding_dict.available_bool and program_dict.pod_holding_list %}
-      <section class="block" aria-label="{{ program_dict.name_str }} signed holdings by pod">
-        <div class="sec-t">{{ program_dict.name_str }} · signed holdings by pod</div>
-        <div class="two">
-          {% for pod_dict in program_dict.pod_holding_list %}
           <div>
-            <div class="ph"><span class="psw" style="background:{{ pod_dict.color_str }}"></span>{{ pod_dict.name_str }}</div>
-            <table>
-              <thead><tr><th>Ticker</th>{% if pod_dict.name_bool %}<th class="l">Name</th>{% endif %}<th>Weight</th></tr></thead>
-              <tbody>{% for row_dict in pod_dict.row_list %}<tr{% if row_dict.muted_bool %} class="muted"{% endif %}><td class="tk">{{ row_dict.symbol_str }}</td>{% if pod_dict.name_bool %}<td class="l">{{ row_dict.name_str }}</td>{% endif %}<td>{{ row_dict.weight_str }}</td></tr>{% endfor %}</tbody>
-            </table>
+            <div class="sh"><b>Money in and out</b><span>{{ report_dict.month_word_str }}</span></div>
+            {% if report_dict.flow_dict.line_list %}
+            <table class="flows"><tbody>{% for line_dict in report_dict.flow_dict.line_list %}<tr><td>{{ line_dict.date_str }}</td><td class="wrap">{{ line_dict.kind_str }}</td><td class="wrap mute">{{ line_dict.pod_str }}</td><td class="{{ line_dict.tone_str }}">{{ line_dict.value_str }}</td></tr>{% endfor %}</tbody></table>
+            {% elif report_dict.flow_dict.reason_str %}<p class="plain">{{ report_dict.flow_dict.reason_str }}</p>
+            {% else %}<p class="plain">None this month.</p>{% endif %}
           </div>
-          {% endfor %}
-        </div>
-      </section>
-      {% endfor %}
+        </section>
 
-      {% if report_dict.flow_dict.row_list %}
-      <section class="block" aria-label="Money in and out">
-        <div class="sec-t">Program capital movements · {{ report_dict.month_name_str }}</div>
-        <table>
-          <thead><tr><th>Date</th><th class="l">What</th>{% for name_dict in report_dict.flow_dict.pod_name_list %}<th>{{ name_dict.head_str }}{% if name_dict.alias_str %}<span class="pa">{{ name_dict.alias_str }}</span>{% endif %}</th>{% endfor %}<th>Total</th></tr></thead>
-          <tbody>
-            {% for row_dict in report_dict.flow_dict.row_list %}<tr><td>{{ row_dict.date_str }}</td><td class="l">{{ row_dict.kind_str }}</td>{% for cell_dict in row_dict.cell_list %}<td class="{{ cell_dict.tone_str }}">{{ cell_dict.value_str }}</td>{% endfor %}<td class="{{ row_dict.total_tone_str }}">{{ row_dict.total_str }}</td></tr>{% endfor %}
-          </tbody>
-        </table>
-      </section>
-      {% endif %}
+        {% if report_dict.activity_list %}
+        <section class="sec" aria-label="Activity">
+          <div class="sh"><b>{{ report_dict.month_word_str }} activity</b></div>
+          <div class="act">{% for item_dict in report_dict.activity_list %}<span>{{ item_dict.label_str }}<b>{{ item_dict.value_str }}</b></span>{% endfor %}</div>
+        </section>
+        {% endif %}
+      </div>
 
-      {% if report_dict.flow_dict.reason_str %}<p class="detail-status">{{ report_dict.flow_dict.reason_str }}</p>{% endif %}
-
-      {% if report_dict.activity_list %}
-      <section class="block" aria-label="Activity">
-        <div class="sec-t">{{ report_dict.month_name_str }} · posted activity</div>
-        <div class="act">{% for item_dict in report_dict.activity_list %}<span>{{ item_dict.label_str }} <b>{{ item_dict.value_str }}</b></span>{% endfor %}</div>
-      </section>
-      {% endif %}
-
-      <footer class="foot"><div class="foot-in"><span>{{ report_dict.period_label_str }} · Details</span></div></footer>
+      <footer class="foot"><span>{{ report_dict.period_label_str }} · Details</span></footer>
     </section>
+    {% endif %}
   </main>
   {% endif %}
 </body>

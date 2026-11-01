@@ -36,7 +36,7 @@ from alpha.live.dashboard_v4.tools import build_tools_page_dict, resolve_tools_t
 from alpha.live.dashboard_v4.tools_actions import ToolsActionService, register_tools_action_routes
 from alpha.live.dashboard_v4.tools_execution import SyntheticToolsActionProvider
 from alpha.live.dashboard_v4.missing_trades import load_missing_trades_dict, read_completion_event_list
-from alpha.live.dashboard_v4.monthly_report import build_monthly_report_dict
+from alpha.live.dashboard_v4.monthly_report import build_monthly_report_dict, report_art_name_str
 from alpha.live.dashboard_v4.report_programs import SUGGESTED_PROGRAM_TUPLE, ReportProgramStore, ReportProgramReadError, register_program_route
 from alpha.live.dashboard_v4.report_archive import ReportArchiveStore, ReportArchiveError, ReportArchiveNotFoundError
 from alpha.live.dashboard_v3.actions import validate_action_request
@@ -817,10 +817,9 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             workspace_dict, snapshot_obj = workspace_snapshot_fn()
 
         def art_url_str(value_str):
-            # Optional picture of the month: static/report_art/<YYYY-MM>.webp|jpg|png.
-            art_root_obj = Path(flask_app_obj.static_folder) / "report_art"
-            return next((url_for("static", filename=f"report_art/{value_str}{suffix_str}") for suffix_str in (".webp", ".jpg", ".png")
-                if (art_root_obj / f"{value_str}{suffix_str}").is_file()), "")
+            # Picture of the month: static/report_art/<YYYY-MM>.webp|jpg|png, or the nearest one.
+            art_name_str = report_art_name_str(Path(flask_app_obj.static_folder) / "report_art", value_str)
+            return url_for("static", filename="report_art/" + art_name_str) if art_name_str else ""
 
         report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=acquisition_ts,
             month_str=month_str, database_path_str=database_path_str, alias_by_pod_dict=load_alias_by_pod_dict(database_path_str),
@@ -885,8 +884,8 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             css_str = (static_root_obj / "monthly_report.css").read_text(encoding="utf-8")
             html_str = html_str.replace('<link rel="stylesheet" href="' + url_for("static", filename="monthly_report.css") + '">',
                 "<style>" + css_str + "</style>")
-            font_path_obj = Path(__file__).resolve().parent.parent / "dashboard_v3/static/fonts/IBMPlexSans-latin.woff2"
-            html_str = html_str.replace(url_for("assets", filename="fonts/IBMPlexSans-latin.woff2"),
+            font_path_obj = static_root_obj / "fonts/HankenGrotesk-latin.woff2"
+            html_str = html_str.replace(url_for("static", filename="fonts/HankenGrotesk-latin.woff2"),
                 "data:font/woff2;base64," + base64.b64encode(font_path_obj.read_bytes()).decode("ascii"))
             if report_dict["art_url_str"]:
                 art_path_obj = static_root_obj / "report_art" / Path(report_dict["art_url_str"]).name

@@ -3,13 +3,13 @@
 The report at `/monthly-report` uses saved broker evidence. It does not place
 orders, move capital, import broker data or deploy anything. Recommended cadence:
 once per completed calendar month, after statements reconcile. An unfinished
-month is a printable draft. Ordinary one- and two-program examples use two A4
-pages; larger books may continue onto additional pages without hiding rows.
+month is a printable draft. One Pod prints on one A4 page; more Pods add a Details
+page; larger books may continue onto additional pages without hiding rows.
 
 ## Meaning and scope
 
 - Headline NAV, dollar profit and TWR cover the **programs only**: the strategy
-  Pods, the same scope as the Performance page. Program cards cover their own
+  Pods, the same scope as the Performance page. Program rows cover their own
   Pods. Other accounts such as VAULT are named on page 1 but never counted:
   IBKR translates their shekel cash to USD, so their USD change is mostly the
   exchange rate, not a result (owner decision 2026-10-27).
@@ -19,7 +19,7 @@ pages; larger books may continue onto additional pages without hiding rows.
 - Values use the approved USD-base statement contract. A statement actually
   denominated in ILS is unsupported. Showing VAULT in shekels would need IBKR's
   cash report by currency in the Flex query, which is not configured.
-- `Opening capital + net movements` includes the initial measured value and
+- `Net capital` includes the initial measured value and
   subsequent capital/scope movements. It is not a lifetime deposit total.
 - Dollar profit includes recorded costs, income and FX. It is not TWR multiplied
   by contributions. Posted activity is explanatory: never add it to profit again.
@@ -79,11 +79,15 @@ program: the change shows in every report built afterwards, while saved reports
 keep the names they were issued with. There is no dated reassignment. Corrupt
 mappings withhold the report.
 
-Holdings require same-close positions **and independently saved cash**, summing
-to broker NAV within one cent. NAV minus positions is not proof of cash.
-Missing/stale/unreconciled holdings are omitted with a printed note; complete
-NAV-based performance can still be issued. Any short or negative cash disables
-the holdings donut and uses signed holdings in Details. Current-month capital
+Holdings require same-close IBKR Open Positions in the same saved import as the
+NAV row. That statement's NAV minus its positions prints as `Cash and accruals`,
+or `T-bills and cash` when T-bill funds share the class; it is not presented as
+proven cash (owner decision 2026-11-01). The fallback saved portfolio capture
+must still reconcile to NAV within one cent. Missing or stale holdings are left
+out with one plain sentence on the page and the technical reason on the operator's
+screen and in the saved evidence; complete NAV-based performance can still be
+issued. Any short or a negative remainder of 0.1% or more of the Pod disables the
+holdings donut and lists signed holdings in Details. Current-month capital
 movements use cents; more than 12 rows are folded into an explicitly labeled
 earlier-movements row within that month.
 
@@ -189,3 +193,81 @@ Overview tests still fail as before; they also fail at `a4e810c`. Real Flex
 numbers for September and October are unchanged. A two-Pod sample with a Vault
 prints on two pages with no Vault amount, and a program change through the
 panel was checked in the demo browser.
+
+## Owner update - 2026-11-01: the Dusk layout
+
+Chosen by the owner over several mockup rounds (band, then Dusk). Leading values:
+elegance, simplicity, ease of reading, and the bottom line first. Accounting,
+engine, archive and the Performance page are unchanged; only the page changed.
+
+- Page 1: the picture band, a dark panel with the name and the bottom line (value,
+  the month, since start, net capital, one more row when money moved), the return
+  chart, holdings. Removed: the Pod donut, card frames, the Opening/Closing strip
+  (now `Capital account` in Details) and filler sentences.
+- One Pod = one page. More Pods, or signed holdings to list, add a Details page:
+  months with Pod rows, capital account, money in and out, activity.
+- The money-moved row comes from the ledger behind `Net capital`, so the row and
+  that figure agree. A Pod entering on a month's first session counts in that
+  month; a Pod closing on a month's last day counts in the next, because it was
+  still in that month's value. The client's very first day is not money moved.
+- The table under the panel goes one level down: programs when there are two or
+  more, otherwise Pods still holding money plus any that closed this month, so the
+  rows add up to the month; otherwise nothing. The chart draws one line per program
+  and gives way to the table, the money-moved row, a draft bar and a long sub line,
+  down to 120 px, so a page stays on one sheet. Three or four programs may continue
+  on a further sheet; a program's name stays with its holdings.
+- A long program name is cut in the chart label only; the table shows it in full.
+- Four type sizes only: 48, 22, 14 and 12 px (40 for a value over ten characters).
+  The font is Hanken Grotesk, bundled in `static/fonts` and embedded in saved copies.
+- A name stored in capitals reads as a name; any other spelling stays as typed.
+- `Return by month` has one row per year, newest first, with Jan to Dec and the
+  year's linked return, so it serves any number of years; a first year's return is
+  the return since start. Pods are listed under the report's year. With one Pod and
+  more than three years the table moves to a Details page.
+- Activity lines that round to zero are hidden. Six or more holdings classes on one
+  program use two columns.
+- Holdings show tickers with no leverage multiple (owner decision 2026-11-01). Weights
+  are by value, so a leveraged fund's market exposure is larger than its weight.
+- Without the since-start report, `Since start` shows a dash and the chart is left
+  out, for every program; a program's own month is never shown in their place.
+
+### Pictures
+
+The report finds `static/report_art/<YYYY-MM>.jpg|webp|png` by itself: the newest
+picture not after the month, otherwise the oldest, so a report never stops for a
+missing picture. Saved reports embed theirs and never change.
+
+1. Make the pictures once a year in ChatGPT or Gemini from one fixed prompt, so
+   they read as a series. Save them in a folder, named by month (`2026-11.png`).
+2. Run `python scripts/prepare_report_art.py <folder>`. It crops each to the band
+   (1588 x 352), saves a JPEG of about 200 KB and refuses a source under 1200 px
+   wide. A full-size picture makes a 4.5 MB PDF; the band makes about 300 KB.
+3. Commit the files. Each client's next pull brings them; no restart is needed for
+   a picture alone. A set of 12 avoids pulling `main` onto live machines monthly.
+
+Fixed prompt, changing only the scene:
+
+```text
+Pointillist painting made of thousands of small pastel dots, calm and quiet, at dusk.
+Scene: [THE MONTH'S SCENE, for example a harbor in early winter].
+One warm street lamp near the left side. Pink and peach sky, amber lights, deep teal water along the bottom edge.
+Wide 16:9 image, at least 1600 pixels wide. Keep everything important in the middle 40% of the height, because the top and bottom will be cropped.
+No people in close-up, no text, no logos, no signature, nothing about money or markets.
+```
+
+### Validation
+
+Tier 3 by path; no order, sizing, price, state or schema path changed, and only
+`app.py` imports `monthly_report`. A separate review compared the committed module
+with the new one over 17 synthetic books: every money, bridge, flow, program, holding,
+month and chart-end value was identical. Its findings were fixed and re-checked; the
+new money-moved row tied to `Net capital` within $0.11 across 70 books. The year
+table came after that review and is covered by tests and the page checks below.
+
+2,833 Live Ops V4, report, client reporting and required live tests pass. The two
+golden Overview tests still fail, on `/` and `/overview/money?period=All` only, and
+they fail the same way without this change. Through the real route, 25 page shapes
+were measured and printed in Edge: one Pod is one sheet and more Pods two; three or
+four programs continue on a third. The two real IBKR exports printed at 316-360 KB,
+and September matched the figures verified on 2026-10-26. A saved copy from the demo
+is self-contained (320 KB, no links out, no scripts). Not run on a client's VPS yet.
