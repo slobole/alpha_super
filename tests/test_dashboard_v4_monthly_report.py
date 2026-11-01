@@ -252,9 +252,9 @@ def test_other_accounts_stay_apart_from_programs_and_activity_reads_the_month(tm
     value_dict = _money_value_dict(report_dict)
     assert value_dict["Value on August 31"][0] == _money_str(page_dict["report_dict"]["closing_nav_float"])
     assert report_dict["program_list"][0]["value_str"] == _money_str(page_dict["report_dict"]["closing_nav_float"])
-    # The vault is named, never counted: its USD change would mostly be the exchange rate.
+    # The vault is never counted: its USD change would mostly be the exchange rate.
     assert value_dict["Since Aug 3, 2026"][0] == _money_str(page_dict["report_dict"]["pnl_float"], signed_bool=True)
-    assert report_dict["scope_note_str"] == "Vault is held separately and is not included."
+    assert report_dict["scope_line_dict"] == {"label_str": "An account held separately is not included.", "amount_str": ""}
     # One program, two Pods: the table goes down to the Pods, and each Pod's month adds up to the whole.
     breakdown_dict = report_dict["breakdown_dict"]
     assert breakdown_dict["title_str"] == "Pod" and [row_dict["name_str"] for row_dict in breakdown_dict["row_list"]] == ["Pod 1 · U···100", "Pod 2 · U···200"]
@@ -281,7 +281,7 @@ def test_other_accounts_stay_apart_from_programs_and_activity_reads_the_month(tm
     html_str = app_obj.test_client().get("/monthly-report?month=2026-08").get_data(as_text=True)
     page_str = html_str[html_str.index('<main class="mr-pages"'):]
     assert '<h1 class="h1">August 2026</h1>' in page_str and "sample_user" not in html_str
-    assert "$50,100" not in page_str and "Vault is held separately and is not included." in page_str
+    assert "$50,100" not in page_str and "An account held separately is not included." in page_str and "Vault" not in page_str
     assert "<b>Pod 1 · U···100</b>" in page_str and "Since Aug 3, 2026" in page_str
     # The client's page says it plainly; the technical reason stays on the operator's screen bar.
     assert "Holdings are not included in this report." in page_str and "Holdings on Aug 31" not in page_str
@@ -492,7 +492,7 @@ def test_many_years_move_the_table_of_one_pod_to_a_details_page(monkeypatch):
 
 def _page_heights_tuple(legend_row_list=(4,), **keyword_dict):
     return _page_height_tuple(**{"art_bool": True, "banner_int": 0, "movement_bool": False, "sub_str": "Monthly report", "client_name_str": "Dana Levi",
-        "scope_note_bool": False, "breakdown_row_int": 0, "legend_list_list": [[{"name_str": "Gold", "detail_str": "GLD"}] * row_int for row_int in legend_row_list],
+        "scope_line_bool": False, "breakdown_row_int": 0, "legend_list_list": [[{"name_str": "Gold", "detail_str": "GLD"}] * row_int for row_int in legend_row_list],
         "details_bool": False, "year_row_int": 1, "activity_list": [{"label_str": "Commissions", "value_str": "$12.65"}], "flow_note_bool": False, **keyword_dict})
 
 
@@ -512,7 +512,7 @@ def test_the_chart_takes_the_room_the_rest_of_the_page_leaves():
     assert height_int(breakdown_row_int=2, legend_row_list=[5], details_bool=True) > 250
     assert height_int(breakdown_row_int=4, legend_row_list=[5], details_bool=True) < height_int(breakdown_row_int=2, legend_row_list=[5], details_bool=True)
     # Whatever else grows, the chart gives way, and never below a size that can be read.
-    crowded_dict = {"year_row_int": 3, "movement_bool": True, "banner_int": 1, "scope_note_bool": True}
+    crowded_dict = {"year_row_int": 3, "movement_bool": True, "banner_int": 1, "scope_line_bool": True}
     assert 120 <= height_int(**crowded_dict) < 208
     # A long name or sub line wraps beside the monogram, and the chart makes room for the extra line.
     two_year_dict = {"year_row_int": 2}
@@ -533,7 +533,7 @@ FOUR_PODS_DICT = {"details_bool": True, "breakdown_row_int": 4, "legend_row_list
     (FOUR_PODS_DICT, 210),
     ({**FOUR_PODS_DICT, "banner_int": 1}, 181),
     ({**FOUR_PODS_DICT, "movement_bool": True}, 179),
-    ({**FOUR_PODS_DICT, "scope_note_bool": True}, 185),
+    ({**FOUR_PODS_DICT, "scope_line_bool": True}, 185),
     ({**FOUR_PODS_DICT, "legend_row_list": [2]}, 240),
     ({**FOUR_PODS_DICT, "legend_row_list": [0]}, 280),
     ({"art_bool": False, "details_bool": True, "breakdown_row_int": 3, "legend_row_list": [5, 3, 2]}, 240),
@@ -549,9 +549,9 @@ def test_a_crowded_page_takes_room_from_the_picture_after_the_chart():
     # An ordinary page keeps the whole picture.
     assert _page_heights_tuple() == (208, 176)
     # One Pod, two years, money moved, a Vault note, five classes and five costs that wrap.
-    assert _page_heights_tuple(legend_row_list=[5], year_row_int=2, movement_bool=True, scope_note_bool=True, activity_list=_cost_list("$1,234.56")) == (120, 141)
+    assert _page_heights_tuple(legend_row_list=[5], year_row_int=2, movement_bool=True, scope_line_bool=True, activity_list=_cost_list("$1,234.56")) == (120, 141)
     # Six Pods with a Vault note and money moved.
-    assert _page_heights_tuple(legend_row_list=[5], details_bool=True, breakdown_row_int=6, movement_bool=True, scope_note_bool=True) == (120, 143)
+    assert _page_heights_tuple(legend_row_list=[5], details_bool=True, breakdown_row_int=6, movement_bool=True, scope_line_bool=True) == (120, 143)
     # Past that the picture stops at a thin band, and the page continues on a further sheet.
     assert _page_heights_tuple(legend_row_list=[8, 8, 8, 8], details_bool=True, breakdown_row_int=9, movement_bool=True, banner_int=2) == (120, 96)
 
@@ -584,7 +584,7 @@ def test_the_chart_budget_is_fed_by_what_the_page_prints(monkeypatch):
     report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-08",
         database_path_str="unused.sqlite3", program_by_pod_dict={"pod_taa": "Growth", "pod_ndx": "Steady"}, art_url_fn=lambda month_str: "/art.jpg")
     assert seen_dict == {"art_bool": True, "banner_int": 0, "movement_bool": True, "sub_str": report_dict["sub_str"], "client_name_str": "Dana Levi",
-        "scope_note_bool": True, "breakdown_row_int": 2, "legend_list_list": [program_dict["holding_dict"]["legend_list"] for program_dict in report_dict["program_list"]],
+        "scope_line_bool": True, "breakdown_row_int": 2, "legend_list_list": [program_dict["holding_dict"]["legend_list"] for program_dict in report_dict["program_list"]],
         "details_bool": True, "year_row_int": 2, "activity_list": report_dict["activity_list"], "flow_note_bool": False}
     assert report_dict["sub_str"] and all(seen_dict["legend_list_list"]) and seen_dict["activity_list"]
     assert report_dict["art_height_int"] == 176 and report_dict["chart_dict"]["height_int"] < 280
@@ -606,6 +606,51 @@ def test_months_that_passed_with_no_number_are_shaded_and_months_to_come_are_not
     assert passed_list({"2026-03": .01, "2026-04": -.01}, ["2026"]) == [True, True, False, False, True, True] + [False] * 6
     # A past year has passed in full.
     assert passed_list({"2025-11": .01}, ["2026", "2025"]) == [True] * 10 + [False, True]
+
+
+def test_accounts_held_apart_show_their_cash_under_no_name_and_change_no_other_number(monkeypatch, tmp_path):
+    workspace_dict, snapshot_obj = _sample_tuple()
+
+    def report_dict():
+        return build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-08", database_path_str=str(tmp_path / "none.sqlite3"))
+
+    plain_dict = report_dict()
+    assert plain_dict["scope_line_dict"] == {"label_str": "An account held separately is not included.", "amount_str": ""}
+    seen_list = []
+
+    def cash_dict(database_path_str, nav_row_obj, *, query_name_str, as_of_ts):
+        seen_list.append((nav_row_obj.account_route_str, nav_row_obj.market_date_str, query_name_str))
+        return {"available_bool": True, "balance_list": [("ILS", Decimal("4100000.4")), ("USD", Decimal("-12000"))]}
+
+    monkeypatch.setattr(monthly_report, "load_close_cash_dict", cash_dict)
+    shown_dict = report_dict()
+    # Read for the account at the programs' close, and printed in whole units of each currency.
+    assert seen_list == [("U900", "2026-08-31", "TEST_NAV")]
+    expected_dict = {"label_str": "Held separately, not included:", "amount_str": "ILS 4,100,000 and USD −12,000"}
+    assert shown_dict["scope_line_dict"] == expected_dict
+    for key_str in ("money_row_list", "breakdown_dict", "bridge_row_list", "activity_list", "chart_dict", "month_table_dict"):
+        assert shown_dict[key_str] == plain_dict[key_str], key_str
+    # The line reads the same whatever the account's IBKR alias.
+    workspace_dict["client_dict"]["accounts"][2]["display_name"] = "vault"
+    assert report_dict()["scope_line_dict"] == expected_dict
+
+
+def test_the_line_for_accounts_held_apart_adds_up_by_currency_or_gives_no_amount(monkeypatch):
+    balance_by_route_dict = {"U900": [("ILS", Decimal("100")), ("USD", Decimal("5"))], "U901": [("USD", Decimal("7")), ("EUR", Decimal("1"))], "U902": None}
+    monkeypatch.setattr(monthly_report, "load_close_cash_dict", lambda database_path_str, nav_row_obj, **keyword_dict: {
+        "available_bool": balance_by_route_dict[nav_row_obj.account_route_str] is not None, "balance_list": balance_by_route_dict[nav_row_obj.account_route_str] or []})
+    snapshot_obj = SimpleNamespace(row_tuple=[SimpleNamespace(account_route_str=route_str, market_date_str="2026-08-31") for route_str in balance_by_route_dict])
+
+    def line_dict(*route_list, database_path_str="saved.sqlite3"):
+        return monthly_report._scope_line_dict([{"account_route": route_str} for route_str in route_list], snapshot_obj, "2026-08-31",
+            query_name_str="TEST_NAV", as_of_ts=SAMPLE_AS_OF_TS, database_path_str=database_path_str)
+
+    assert line_dict() == {}
+    assert line_dict("U900", "U901")["amount_str"] == "ILS 100 and USD 12 and EUR 1"
+    # A total that would miss an account is not a total.
+    assert line_dict("U900", "U902") == {"label_str": "Accounts held separately are not included.", "amount_str": ""}
+    assert line_dict("U902") == {"label_str": "An account held separately is not included.", "amount_str": ""}
+    assert line_dict("U900", database_path_str=None) == {"label_str": "An account held separately is not included.", "amount_str": ""}
 
 
 def test_the_chart_legend_names_the_measure_in_the_colour_of_a_lone_line():

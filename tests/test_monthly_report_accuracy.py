@@ -120,7 +120,7 @@ def test_vault_fx_gain_never_enters_the_programs_report():
     # Cash held in shekels is translated by IBKR; its USD change is the exchange rate, not the programs.
     for key_str in ("money_row_list", "bridge_row_list", "program_list", "breakdown_dict", "chart_dict", "activity_list", "month_table_dict"):
         assert fx_dict[key_str] == base_dict[key_str], key_str
-    assert fx_dict["scope_note_str"] == "Vault is held separately and is not included."
+    assert fx_dict["scope_line_dict"] == {"label_str": "An account held separately is not included.", "amount_str": ""}
     assert "+$300" not in _printed_body_str(fx_dict) and "$50,300" not in _printed_body_str(fx_dict)
     assert sum(float(row_dict["share_str"].rstrip("%")) for row_dict in fx_dict["breakdown_dict"]["row_list"]) == pytest.approx(100, abs=.15)
 
@@ -248,7 +248,7 @@ def test_printed_body_omits_method_section_but_keeps_missing_evidence_and_partia
     workspace_dict, snapshot_obj = _sample_tuple()
     report_dict = _report_dict(workspace_dict, snapshot_obj)
     body_str = _printed_body_str(report_dict)
-    for text_str in ("Holdings are not included in this report.", "Since Aug 3, 2026", "USD", "Vault is held separately"):
+    for text_str in ("Holdings are not included in this report.", "Since Aug 3, 2026", "USD", "An account held separately is not included."):
         assert text_str in body_str
     # The technical reason stays with the operator: the screen bar and the saved evidence.
     assert "Holdings on Aug 31" not in body_str and "Holdings on Aug 31 were not saved." in report_dict["evidence_dict"]["note_list"]

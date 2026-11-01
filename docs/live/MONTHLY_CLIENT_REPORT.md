@@ -238,6 +238,13 @@ engine, archive and the Performance page are unchanged; only the page changed.
   paper (owner decision 2026-11-01). The operator's screen keeps the reason, the button
   stays `Print draft` and it cannot be saved as final. The amber bar prints only for
   data that does not tie, in any month.
+- Accounts held apart (any Flex account with no strategy, whatever its IBKR alias) stay
+  out of every number and get one quiet line under the table, naming no account: their
+  cash in each currency, from IBKR's Cash Report in the same statement as their NAV, for
+  example `Held separately, not included: ILS 4,100,000 and USD 3,000` (owner decision
+  2026-11-01). With no Cash Report, with positions in an account, or when the cash does
+  not reach its NAV, the line gives no amount: `An account held separately is not
+  included.`
 - A month that passed with no number in its row is lightly shaded; months still to
   come stay white (owner decision 2026-11-01).
 - `Return by month` has one row per year, newest first, with Jan to Dec and the
@@ -309,3 +316,7 @@ The last round (`TWR` as a legend, no holdings date, no bar on a month not final
 changed display only and had no separate reviews. 2,850 tests pass, with the same two
 golden Overview failures. The 38 page shapes hold their sheets; four programs now fit
 on two, with no room to spare.
+
+The account-held-apart line was checked on a real export with Cash Report: the reader
+gave the balance by currency on 22 of 22 days, cash matched the account's NAV within
+its accruals, and the report's other figures matched the printed copy from the VPS.

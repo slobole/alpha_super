@@ -220,3 +220,63 @@ def test_position_count_limit_is_enforced(tmp_path, monkeypatch):
     monkeypatch.setattr(pod_holdings, "POSITION_LIMIT_INT", 1)
     source_tuple = _source_tuple([_position_dict(), _position_dict(symbol="BBB", conid="102")])
     assert not _load_dict(_database_path(tmp_path, source_tuple), source_tuple[1])["available_bool"]
+
+
+def _cash_source_tuple(row_list, *, position_list=(), section_bool=True, ending_str="1050"):
+    root_obj = ElementTree.Element("FlexQueryResponse", queryName="TEST_NAV")
+    statements_obj = ElementTree.SubElement(root_obj, "FlexStatements", count="1")
+    statement_obj = ElementTree.SubElement(statements_obj, "FlexStatement", accountId="U_TEST_A")
+    ElementTree.SubElement(statement_obj, "AccountInformation", accountId="U_TEST_A", currency="USD")
+    ElementTree.SubElement(statement_obj, "ChangeInNAV", accountId="U_TEST_A", currency="USD",
+        fromDate="20260904", toDate="20260904", startingValue="1000", endingValue=ending_str, twr="5")
+    section_obj = ElementTree.SubElement(statement_obj, "OpenPositions")
+    for position_dict in position_list:
+        ElementTree.SubElement(section_obj, "OpenPosition", **position_dict)
+    if section_bool:
+        section_obj = ElementTree.SubElement(statement_obj, "CashReport")
+        for row_dict in row_list:
+            ElementTree.SubElement(section_obj, row_dict.pop("tag_str", "CashReportCurrency"), **{"accountId": "U_TEST_A", "fromDate": "20260904", "toDate": "20260904", **row_dict})
+    raw_xml_str = ElementTree.tostring(root_obj, encoding="unicode")
+    nav_row_obj = parse_broker_nav_import(raw_xml_str, allowed_account_set={"U_TEST_A"}, query_name_str="TEST_NAV",
+        source_import_id_int=1, source_checksum_str=hashlib.sha256(raw_xml_str.encode()).hexdigest())[0]
+    return raw_xml_str, nav_row_obj
+
+
+def _cash_dict(source_tuple, **override_dict):
+    return pod_holdings.parse_close_cash_dict(*source_tuple, **{"query_name_str": "TEST_NAV", "as_of_ts": AS_OF_TS, **override_dict})
+
+
+def test_closing_cash_comes_by_currency_largest_first_without_the_base_summary():
+    result_dict = _cash_dict(_cash_source_tuple([{"currency": "BASE_SUMMARY", "endingCash": "1050"},
+        {"currency": "USD", "endingCash": "50"}, {"currency": "ILS", "endingCash": "3700"}, {"currency": "EUR", "endingCash": "0.2"}]))
+    assert result_dict == {"available_bool": True, "balance_list": [("ILS", Decimal("3700")), ("USD", Decimal("50"))]}
+
+
+@pytest.mark.parametrize("source_tuple", [
+    # No section, no currency, or nothing but dust: nothing to say.
+    _cash_source_tuple([], section_bool=False),
+    _cash_source_tuple([{"currency": "BASE_SUMMARY", "endingCash": "1050"}]),
+    _cash_source_tuple([{"currency": "ILS", "endingCash": "0.4"}]),
+    # Something else sits in the account, so its cash is not the whole of it.
+    _cash_source_tuple([{"currency": "ILS", "endingCash": "3700"}], position_list=[_position_dict(position="2", positionValue="200")]),
+    _cash_source_tuple([{"currency": "BASE_SUMMARY", "endingCash": "900"}, {"currency": "ILS", "endingCash": "3700"}]),
+    # Rows that are not this account's, this day's, or clearly one currency's.
+    _cash_source_tuple([{"currency": "ILS", "endingCash": "3700", "accountId": "U_TEST_B"}]),
+    _cash_source_tuple([{"currency": "ILS", "endingCash": "3700", "toDate": "20260903"}]),
+    _cash_source_tuple([{"currency": "ILS", "endingCash": "3700"}, {"currency": "ILS", "endingCash": "1"}]),
+    _cash_source_tuple([{"currency": "shekel", "endingCash": "3700"}]),
+    _cash_source_tuple([{"currency": "ILS", "endingCash": "NaN"}]),
+    _cash_source_tuple([{"currency": "ILS", "endingCash": "3700", "tag_str": "SomethingElse"}]),
+])
+def test_closing_cash_is_withheld_when_it_is_not_clearly_the_whole_account(source_tuple):
+    assert _cash_dict(source_tuple) == {"available_bool": False, "balance_list": []}
+
+
+def test_closing_cash_is_read_from_the_saved_source_of_the_nav_row(tmp_path):
+    source_tuple = _cash_source_tuple([{"currency": "ILS", "endingCash": "3700"}])
+    database_path_obj = _database_path(tmp_path, source_tuple)
+    assert pod_holdings.load_close_cash_dict(str(database_path_obj), source_tuple[1], query_name_str="TEST_NAV", as_of_ts=AS_OF_TS) == {
+        "available_bool": True, "balance_list": [("ILS", Decimal("3700"))]}
+    # Today's statement is not a finalized close, and another query's is not this one.
+    assert not pod_holdings.load_close_cash_dict(str(database_path_obj), source_tuple[1], query_name_str="OTHER", as_of_ts=AS_OF_TS)["available_bool"]
+    assert not pod_holdings.load_close_cash_dict(str(database_path_obj), source_tuple[1], query_name_str="TEST_NAV", as_of_ts=datetime(2026, 9, 4, 15, tzinfo=UTC))["available_bool"]

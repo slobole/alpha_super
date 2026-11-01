@@ -96,7 +96,7 @@
           </tbody></table>
         </section>
         {% endif %}
-        {% if report_dict.scope_note_str %}<p class="scope-note">{{ report_dict.scope_note_str }}</p>{% endif %}
+        {% if report_dict.scope_line_dict %}<p class="scope-note">{{ report_dict.scope_line_dict.label_str }}{% if report_dict.scope_line_dict.amount_str %} <b>{{ report_dict.scope_line_dict.amount_str }}</b>{% endif %}</p>{% endif %}
 
         <section class="sec" aria-label="Return since start">
           <div class="sh"><b>Return since start</b></div>

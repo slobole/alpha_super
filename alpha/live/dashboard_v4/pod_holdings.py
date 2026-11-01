@@ -147,7 +147,60 @@ def parse_close_holdings_dict(raw_xml_str, nav_row_obj, *, query_name_str, as_of
         return unavailable_dict
 
 
-def load_close_holdings_dict(database_path_str, nav_row_obj, *, query_name_str, as_of_ts):
+def parse_close_cash_dict(raw_xml_str, nav_row_obj, *, query_name_str, as_of_ts):
+    """The closing cash by currency from the statement of the NAV row, for an account holding only cash.
+
+    IBKR field meanings: https://www.ibkrguides.com/reportingreference/reportguide/cash%20reportfq.htm
+    The balance stands for the whole account, so open positions, or cash that does not
+    reach the account's NAV, leave it unavailable rather than partly true.
+    """
+    unavailable_dict = {"available_bool": False, "balance_list": []}
+    if not _scope_valid_bool(nav_row_obj, query_name_str, as_of_ts) or not isinstance(raw_xml_str, str):
+        return unavailable_dict
+    try:
+        raw_bytes = raw_xml_str.encode("utf-8")
+        if (len(raw_bytes) > XML_BYTE_LIMIT_INT or "<!DOCTYPE" in raw_xml_str.upper() or "<!ENTITY" in raw_xml_str.upper()
+                or hashlib.sha256(raw_bytes).hexdigest() != nav_row_obj.source_checksum_str):
+            return unavailable_dict
+        nav_list = parse_broker_nav_import(raw_xml_str, allowed_account_set={nav_row_obj.account_route_str},
+            query_name_str=query_name_str, source_import_id_int=nav_row_obj.source_import_id_int,
+            source_checksum_str=nav_row_obj.source_checksum_str)
+        if [row_obj for row_obj in nav_list if row_obj.market_date_str == nav_row_obj.market_date_str] != [nav_row_obj]:
+            return unavailable_dict
+        compact_date_str = nav_row_obj.market_date_str.replace("-", "")
+        statement_list = [statement_obj for statement_obj in ElementTree.fromstring(raw_xml_str).findall(".//FlexStatement")
+            if statement_obj.get("accountId") == nav_row_obj.account_route_str
+            and any(nav_obj.get("fromDate") == compact_date_str and nav_obj.get("toDate") == compact_date_str
+                for nav_obj in statement_obj.findall("ChangeInNAV"))]
+        if len(statement_list) != 1:
+            return unavailable_dict
+        section_list = statement_list[0].findall("CashReport")
+        if len(section_list) != 1 or any(_decimal_obj(position_obj.attrib, "position") != 0
+                for position_obj in statement_list[0].findall(".//OpenPosition")):
+            return unavailable_dict
+        balance_dict, base_decimal = {}, None
+        for row_obj in section_list[0]:
+            attribute_dict, currency_str = row_obj.attrib, row_obj.get("currency", "")
+            if (row_obj.tag != "CashReportCurrency" or attribute_dict.get("accountId") != nav_row_obj.account_route_str
+                    or attribute_dict.get("toDate") != compact_date_str):
+                return unavailable_dict
+            if currency_str == "BASE_SUMMARY":
+                base_decimal = _decimal_obj(attribute_dict, "endingCash")
+            elif len(currency_str) == 3 and currency_str.isalpha() and currency_str.isupper() and currency_str not in balance_dict:
+                balance_dict[currency_str] = _decimal_obj(attribute_dict, "endingCash")
+            else:
+                return unavailable_dict
+        # Accrued interest aside, the cash is the account; otherwise something else sits in it.
+        if base_decimal is not None and abs(base_decimal - nav_row_obj.closing_nav_decimal) > abs(nav_row_obj.closing_nav_decimal) * Decimal(".01"):
+            return unavailable_dict
+        balance_list = sorted(((currency_str, value_decimal) for currency_str, value_decimal in balance_dict.items() if round(value_decimal) != 0),
+            key=lambda pair_tuple: -abs(pair_tuple[1]))
+        return {"available_bool": bool(balance_list), "balance_list": balance_list}
+    except (ClientReportingError, ElementTree.ParseError, ValueError, TypeError, KeyError, InvalidOperation, OverflowError):
+        return unavailable_dict
+
+
+def load_close_holdings_dict(database_path_str, nav_row_obj, *, query_name_str, as_of_ts, parse_fn=None):
     """Read the NAV source by identity, with no older-import/date fallback."""
     unavailable_dict = _unavailable_dict("Closing position data could not be verified.")
     if not _scope_valid_bool(nav_row_obj, query_name_str, as_of_ts):
@@ -190,7 +243,12 @@ def load_close_holdings_dict(database_path_str, nav_row_obj, *, query_name_str, 
                 from_date_obj, to_date_obj = _date_obj(newer_obj[0]), _date_obj(newer_obj[1])
                 if from_date_obj > to_date_obj or from_date_obj <= _date_obj(nav_row_obj.market_date_str) <= to_date_obj:
                     return unavailable_dict
-            return parse_close_holdings_dict(import_obj["raw_xml_str"], nav_row_obj,
+            return (parse_fn or parse_close_holdings_dict)(import_obj["raw_xml_str"], nav_row_obj,
                 query_name_str=query_name_str, as_of_ts=as_of_ts)
     except (OSError, sqlite3.Error, ValueError, TypeError, KeyError, OverflowError):
         return unavailable_dict
+
+
+def load_close_cash_dict(database_path_str, nav_row_obj, *, query_name_str, as_of_ts):
+    """The account's closing cash, read from its NAV source the same way as its holdings."""
+    return load_close_holdings_dict(database_path_str, nav_row_obj, query_name_str=query_name_str, as_of_ts=as_of_ts, parse_fn=parse_close_cash_dict)

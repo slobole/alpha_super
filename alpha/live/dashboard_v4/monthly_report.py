@@ -1,7 +1,7 @@
 """Monthly client report: the client's programs, from the canonical accounting and daily TWR.
 
-Read-only. Other accounts (such as VAULT, often cash in shekels) are named but
-never converted into the report's USD numbers. Holdings need saved same-close
+Read-only. Other accounts (often cash in shekels) show their cash in its own
+currency and are never converted into the report's USD numbers. Holdings need saved same-close
 positions, or are left out; what the statement's NAV leaves is cash and accruals.
 """
 
@@ -21,7 +21,7 @@ from alpha.live.client_reporting import CAPITAL_FIELD_TUPLE, ClientReportingErro
 from alpha.live.client_reporting import content_hash_str
 from alpha.live.dashboard_v4.performance import build_performance_page_dict
 from alpha.live.dashboard_v4.pod_broker_holdings import load_broker_holdings_dict
-from alpha.live.dashboard_v4.pod_holdings import load_close_holdings_dict
+from alpha.live.dashboard_v4.pod_holdings import load_close_cash_dict, load_close_holdings_dict
 from alpha.live.dashboard_v4.positions_history import report_scope_tuple
 from alpha.live.dashboard_v4.strategy_scope import strategy_workspace_dict
 from alpha.live.scheduler_utils import get_exchange_calendar_obj
@@ -460,7 +460,7 @@ def _chart_dict(series_list, *, height_int):
     return result_dict
 
 
-def _page_height_tuple(*, art_bool, banner_int, movement_bool, sub_str, client_name_str, scope_note_bool, breakdown_row_int,
+def _page_height_tuple(*, art_bool, banner_int, movement_bool, sub_str, client_name_str, scope_line_bool, breakdown_row_int,
                        legend_list_list, details_bool, year_row_int, activity_list, flow_note_bool):
     """The chart's height and the picture's, with everything else on the page on one sheet.
 
@@ -473,7 +473,7 @@ def _page_height_tuple(*, art_bool, banner_int, movement_bool, sub_str, client_n
 
     # Beside the monogram the name wraps from about 37 wide characters, the sub line from about 63.
     used_float = (ART_HEIGHT_INT if art_bool else 18) + 29 * banner_int + 230 + 31 * movement_bool + 20 * (len(sub_str) > 62) + 26 * (len(client_name_str) > 36)
-    used_float += (44 + 33.5 * breakdown_row_int if breakdown_row_int else 0) + 24.5 * scope_note_bool + 55.5 + 55.5 + 51.5 + 8
+    used_float += (44 + 33.5 * breakdown_row_int if breakdown_row_int else 0) + 24.5 * scope_line_bool + 55.5 + 55.5 + 51.5 + 8
     if len(legend_list_list) == 1:
         legend_list = legend_list_list[0]
         if len(legend_list) > 5:
@@ -494,6 +494,29 @@ def _page_height_tuple(*, art_bool, banner_int, movement_bool, sub_str, client_n
             used_float += 76 + 24.5 * (row_float > 674)
     room_float = 1123 - used_float - 16
     return int(max(120, min(280 if details_bool else 208, room_float))), int(max(96, ART_HEIGHT_INT - max(0., 120 - room_float)))
+
+
+def _scope_line_dict(account_list, snapshot_obj, close_str, *, query_name_str, as_of_ts, database_path_str):
+    """One quiet line for the accounts held apart from the programs: their cash in each currency, in no total.
+
+    Any Flex account without a strategy is one, whatever its IBKR alias, so the line names none.
+    A total that would miss an account is not a total, so it then gives no amount.
+    """
+    if not account_list:
+        return {}
+    balance_dict = {}
+    for account_dict in account_list:
+        nav_row_list = [row_obj for row_obj in snapshot_obj.row_tuple
+            if row_obj.account_route_str == account_dict["account_route"] and row_obj.market_date_str == close_str]
+        cash_dict = (load_close_cash_dict(database_path_str, nav_row_list[0], query_name_str=query_name_str, as_of_ts=as_of_ts)
+            if database_path_str and len(nav_row_list) == 1 else {})
+        if not cash_dict.get("available_bool"):
+            return {"label_str": ("An account held separately is" if len(account_list) == 1 else "Accounts held separately are") + " not included.", "amount_str": ""}
+        for currency_str, value_decimal in cash_dict["balance_list"]:
+            balance_dict[currency_str] = balance_dict.get(currency_str, Decimal(0)) + value_decimal
+    return {"label_str": "Held separately, not included:", "amount_str": " and ".join(
+        f"{currency_str} {'−' if value_decimal < 0 else ''}{abs(_rounded_decimal(value_decimal, '1')):,}"
+        for currency_str, value_decimal in sorted(balance_dict.items(), key=lambda pair_tuple: -abs(pair_tuple[1])))}
 
 
 def _class_str(symbol_str):
@@ -886,11 +909,12 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
     month_report_dict = month_report_dict or {}
     since_report_dict = since_report_dict or {}
     summary_month_dict, summary_since_dict = month_report_dict, since_report_dict
-    # Other accounts are named only: their USD value would mostly be the shekel rate, not the programs.
-    other_name_list = list(dict.fromkeys(account_dict["display_name"] for account_dict in workspace_dict["client_dict"]["accounts"]
-        if account_dict.get("role") == "reserve" and account_dict["effective_from"] <= to_str
-        and (account_dict.get("effective_to") or "9999-12-31") >= from_str))
     close_str = summary_month_dict.get("closing_date_str") or summary_since_dict.get("closing_date_str") or to_str
+    # Other accounts stay out of every number: their USD value would mostly be the shekel rate, not the programs.
+    scope_line_dict = _scope_line_dict([account_dict for account_dict in workspace_dict["client_dict"]["accounts"]
+        if account_dict.get("role") == "reserve" and account_dict["effective_from"] <= to_str
+        and (account_dict.get("effective_to") or "9999-12-31") >= from_str], snapshot_obj, close_str,
+        query_name_str=workspace_dict["client_dict"]["query_name"], as_of_ts=as_of_ts, database_path_str=database_path_str)
     month_suffix_str = "" if complete_bool else f" · to {_short_day_str(close_str)}"
     month_word_str = calendar.month_name[month_obj.month]
     result_dict.update(available_bool=True, period_label_str=result_dict["month_label_str"] + month_suffix_str,
@@ -1082,7 +1106,7 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
     is_demo_bool = workspace_dict["client_dict"].get("is_demo") is True
     height_int, result_dict["art_height_int"] = _page_height_tuple(art_bool=bool(result_dict["art_url_str"]),
         banner_int=bool(problem_str) + is_demo_bool, movement_bool=movement_bool, sub_str=result_dict["sub_str"],
-        client_name_str=result_dict["client_name_str"], scope_note_bool=bool(other_name_list),
+        client_name_str=result_dict["client_name_str"], scope_line_bool=bool(scope_line_dict),
         breakdown_row_int=len(breakdown_dict["row_list"]) if breakdown_dict else 0,
         legend_list_list=[program_dict["holding_dict"]["legend_list"] for program_dict in program_list],
         details_bool=result_dict["details_bool"], year_row_int=sum(row_dict["class_str"] == "prog" for row_dict in month_row_list),
@@ -1096,8 +1120,7 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
         "Opening capital is the value at the start of measurement, not lifetime deposits. "
         "Initial/final months may be partial; each program's measurement dates are shown. "
         "Posted income/costs are already included in investment gains, together with accrual changes.")
-    result_dict["scope_note_str"] = (" and ".join(other_name_list) + (" is" if len(other_name_list) == 1 else " are")
-        + " held separately and " + ("is" if len(other_name_list) == 1 else "are") + " not included." if other_name_list else "")
+    result_dict["scope_line_dict"] = scope_line_dict
     result_dict["fee_note_str"] = str(workspace_dict["client_dict"].get("fee_basis") or "Recorded broker costs are included.")
     result_dict["generated_at_str"] = as_of_ts.isoformat()
     result_dict["evidence_dict"] = {"month_report_hash_str": summary_month_dict.get("report_hash_str"),
