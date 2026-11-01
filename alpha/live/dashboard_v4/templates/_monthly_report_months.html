@@ -2,7 +2,7 @@
           <thead><tr><th></th>{% for label_str in report_dict.month_table_dict.label_list %}<th>{{ label_str }}</th>{% endfor %}<th class="ss">Year</th></tr></thead>
           <tbody>
             {% for row_dict in report_dict.month_table_dict.row_list %}
-            <tr class="{{ row_dict.class_str }}"><td>{{ row_dict.name_str }}</td>{% for cell_dict in row_dict.cell_list %}<td class="{{ cell_dict.tone_str }}">{{ cell_dict.value_str }}</td>{% endfor %}<td class="ss {{ row_dict.year_return_tone_str }}">{{ row_dict.year_return_str }}</td></tr>
+            <tr class="{{ row_dict.class_str }}"><td>{{ row_dict.name_str }}</td>{% for cell_dict in row_dict.cell_list %}<td class="{{ cell_dict.tone_str }}{% if cell_dict.passed_bool %} passed{% endif %}">{{ cell_dict.value_str }}</td>{% endfor %}<td class="ss {{ row_dict.year_return_tone_str }}">{{ row_dict.year_return_str }}</td></tr>
             {% endfor %}
           </tbody>
         </table>

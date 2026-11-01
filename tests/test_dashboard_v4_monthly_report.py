@@ -373,6 +373,8 @@ def test_one_pod_is_one_page_with_everything_on_it(tmp_path):
     page_str = html_str[html_str.index('<main class="mr-pages"'):]
     assert page_str.count('class="pg"') == 1 and "Return by month" in page_str and "Return (%)" in page_str and "August activity" in page_str
     assert page_str.count(">TWR</text>") == 1 and "Time-weighted" not in page_str
+    # Jan to Jul passed before the first number; Sep to Dec are still to come.
+    assert page_str.count(' passed"') == 7
     assert page_str.count("Commissions and fees charged by Interactive Brokers") == 1
     assert "Capital account" not in page_str and "· Details" not in page_str and "· Summary" not in page_str
 
@@ -459,7 +461,7 @@ def test_each_year_gets_a_row_newest_first_and_the_reports_year_lists_the_pods()
     assert _year_list("2023-05-01", "2026-08") == ["2026", "2025", "2024", "2023"] and _year_list("2026-08-03", "2026-08") == ["2026"]
     return_dict = {"2025-11": .01, "2025-12": .02, "2026-01": -.01}
     pod_list = [{"head_str": "Pod 1 · U···100", "month_return_dict": {"2025-12": .03, "2026-01": .01}}, {"head_str": "Pod 2 · U···200", "month_return_dict": {"2025-11": .02}}]
-    row_list = _year_row_list("Growth", return_dict, pod_list, ["2026", "2025", "2024"], report_year_str="2026", year_known_bool=True, one_pod_bool=False)
+    row_list = _year_row_list("Growth", return_dict, pod_list, ["2026", "2025", "2024"], report_month_str="2026-12", year_known_bool=True, one_pod_bool=False)
     # 2024 has nothing to show; Pod 2 had no month in the report's year.
     assert [(row_dict["class_str"], row_dict["name_str"], row_dict["year_return_str"]) for row_dict in row_list] == [
         ("prog", "Growth 2026", "−1.0"), ("pod", "Pod 1 · U···100", "+1.0"), ("prog", "Growth 2025", "+3.0")]
@@ -467,10 +469,10 @@ def test_each_year_gets_a_row_newest_first_and_the_reports_year_lists_the_pods()
     assert [cell_dict["value_str"] for cell_dict in row_list[0]["cell_list"]][:2] == ["−1.0", ""]
     assert row_list[0]["year_return_tone_str"] == "neg" and row_list[0]["cell_list"][0]["tone_str"] == "neg"
     # One Pod: the year alone names the row. The report's year always has a row, even empty.
-    row_list = _year_row_list("Growth", {}, [], ["2026"], report_year_str="2026", year_known_bool=True, one_pod_bool=True)
+    row_list = _year_row_list("Growth", {}, [], ["2026"], report_month_str="2026-12", year_known_bool=True, one_pod_bool=True)
     assert [(row_dict["name_str"], row_dict["year_return_str"]) for row_dict in row_list] == [("2026", "—")]
     # A program that closed last year has no empty row for this one.
-    row_list = _year_row_list("Steady", {"2025-11": .01}, [], ["2026", "2025"], report_year_str="2026", year_known_bool=True, one_pod_bool=False)
+    row_list = _year_row_list("Steady", {"2025-11": .01}, [], ["2026", "2025"], report_month_str="2026-12", year_known_bool=True, one_pod_bool=False)
     assert [row_dict["name_str"] for row_dict in row_list] == ["Steady 2025"]
 
 
@@ -593,6 +595,17 @@ def test_the_chart_budget_is_fed_by_what_the_page_prints(monkeypatch):
     workspace_dict, snapshot_obj = _one_pod_tuple(extra_event_dict={("U100", "2026-08-12"): {"linkingAdjustments": "NaN"}})
     report_dict = build_monthly_report_dict(workspace_dict, snapshot_obj, SimpleNamespace(), as_of_ts=SAMPLE_AS_OF_TS, month_str="2026-08")
     assert report_dict["flow_dict"]["reason_str"] and seen_dict["flow_note_bool"] is True and seen_dict["details_bool"] is False and seen_dict["banner_int"] == 1
+
+
+def test_months_that_passed_with_no_number_are_shaded_and_months_to_come_are_not():
+    def passed_list(return_dict, year_list):
+        row_list = _year_row_list("Growth", return_dict, [], year_list, report_month_str="2026-06", year_known_bool=True, one_pod_bool=True)
+        return [cell_dict["passed_bool"] for cell_dict in row_list[0]["cell_list"]]
+
+    # Before the start and after the last number: shaded. From July on: still to come.
+    assert passed_list({"2026-03": .01, "2026-04": -.01}, ["2026"]) == [True, True, False, False, True, True] + [False] * 6
+    # A past year has passed in full.
+    assert passed_list({"2025-11": .01}, ["2026", "2025"]) == [True] * 10 + [False, True]
 
 
 def test_the_chart_legend_names_the_measure_in_the_colour_of_a_lone_line():

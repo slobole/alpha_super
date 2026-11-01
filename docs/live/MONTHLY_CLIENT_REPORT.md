@@ -238,6 +238,8 @@ engine, archive and the Performance page are unchanged; only the page changed.
   paper (owner decision 2026-11-01). The operator's screen keeps the reason, the button
   stays `Print draft` and it cannot be saved as final. The amber bar prints only for
   data that does not tie, in any month.
+- A month that passed with no number in its row is lightly shaded; months still to
+  come stay white (owner decision 2026-11-01).
 - `Return by month` has one row per year, newest first, with Jan to Dec and the
   year's linked return, so it serves any number of years; a first year's return is
   the return since start. Pods are listed under the report's year. With one Pod and

@@ -94,6 +94,7 @@ html, body { margin: 0; }
 .mt tr.pod td { color: #475569; }
 .mt tr.pod td:first-child { padding-left: 14px; }
 .mt td:first-child { white-space: normal; }
+.mt td.passed { background: #F1F4F6; }
 .mt th, .mt td { width: 41px; }
 .mt-wide th, .mt-wide td { width: 46px; }
 .pg .mt th:first-child, .pg .mt td:first-child { width: auto; }

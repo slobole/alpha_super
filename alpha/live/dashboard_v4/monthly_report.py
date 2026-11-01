@@ -772,29 +772,31 @@ def _year_return_float(return_dict, year_str):
     return math.prod(1 + value_float for value_float in value_list) - 1 if value_list else None
 
 
-def _month_row_dict(class_str, name_str, return_dict, year_float, month_list):
+def _month_row_dict(class_str, name_str, return_dict, year_float, month_list, report_month_str):
     return {"class_str": class_str, "name_str": name_str, "year_return_str": _percent_str(year_float, suffix_str=""),
         "year_return_tone_str": _percent_tone_str(year_float),
         "cell_list": [{"value_str": _percent_str(return_dict[month_str], suffix_str="") if month_str in return_dict else "",
-            "tone_str": _percent_tone_str(return_dict.get(month_str))} for month_str in month_list]}
+            "tone_str": _percent_tone_str(return_dict.get(month_str)),
+            # A month that passed with no number reads apart from one still to come.
+            "passed_bool": month_str <= report_month_str and month_str not in return_dict} for month_str in month_list]}
 
 
-def _year_row_list(name_str, return_dict, pod_list, year_list, *, report_year_str, year_known_bool, one_pod_bool):
+def _year_row_list(name_str, return_dict, pod_list, year_list, *, report_month_str, year_known_bool, one_pod_bool):
     """One row per year, newest first, with the Pods under the report's year.
 
     With one Pod the program's name is already in the sub line, so the year alone names the row.
     """
-    row_list = []
+    row_list, report_year_str = [], report_month_str[:4]
     for year_str in year_list:
         # With no history at all the report's year still says so; a closed program skips the years after it.
         if not any(month_str.startswith(year_str) for month_str in return_dict) and (return_dict or year_str != report_year_str):
             continue
         month_list = [f"{year_str}-{month_int:02d}" for month_int in range(1, 13)]
         row_list.append(_month_row_dict("prog", year_str if one_pod_bool else f"{name_str} {year_str}", return_dict,
-            _year_return_float(return_dict, year_str) if year_known_bool else None, month_list))
+            _year_return_float(return_dict, year_str) if year_known_bool else None, month_list, report_month_str))
         if year_str == report_year_str:
             row_list += [_month_row_dict("pod", pod_dict["head_str"], pod_dict["month_return_dict"],
-                    _year_return_float(pod_dict["month_return_dict"], year_str) if year_known_bool else None, month_list)
+                    _year_return_float(pod_dict["month_return_dict"], year_str) if year_known_bool else None, month_list, report_month_str)
                 for pod_dict in pod_list if any(month_str in pod_dict["month_return_dict"] for month_str in month_list)]
     return row_list
 
@@ -1006,7 +1008,7 @@ def build_monthly_report_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
             **_breakdown_cell_dict(program_value_float, active_total_float, month_pnl_float, month_return_float, since_float)})
         # Without the since-start report a program and its Pods have the month alone: no figure for the year.
         month_row_list += _year_row_list(name_str, _monthly_return_dict(daily_list), [] if one_pod_bool else member_list, year_list,
-            report_year_str=month_str[:4], year_known_bool=bool(since_report_dict), one_pod_bool=one_pod_bool)
+            report_month_str=month_str, year_known_bool=bool(since_report_dict), one_pod_bool=one_pod_bool)
     # The table under the summary is one level down: programs when there are several, else Pods.
     # A Pod that closed this month keeps its row, so the rows add up to the month above them.
     month_pod_list = [pod_dict for pod_dict in pod_list if pod_dict["active_bool"] or pod_dict["close_str"] >= from_str]
