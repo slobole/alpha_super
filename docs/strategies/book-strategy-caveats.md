@@ -175,3 +175,22 @@ Books of the 2026-10-05 fund-products study ([record](../research/FUND_PRODUCTS_
 | The weeks after the window are not out of sample | Note | 2026-08-20 to 2026-10-02: GR1 1.1%, Monthly 3.9% | Fund products record 2026-10-05 |
 | The engine BIL pod is not BIL total return | Note | 1.08% vs 1.61% a year from 2012 (withholding, no reinvestment) | Fund products record 2026-10-05 |
 <!-- fund-products-20261005:end -->
+
+## MR capsule with liquidity sizing (wired, templates disabled)
+
+Test of 2026-11-01 ([record](../research/GROWTH_MR_PRODUCTS_20261101.md), independent review in `results/scout/growth_mr_products_20261101/review/REVIEW.md`). DV2 and HPI, VIX gate, BIL parking, entry = 10% x sqrt(ADV63 over a rolling typical candidate), between half and double, stocks capped at 99% of NAV. Book = TAA 1N 50 / MR 30 / CORE5 20.
+
+| Caveat | Direction | Size | Evidence |
+|---|---|---|---|
+| The rule is not normalised: real entries are larger than 1/N's | Note | Mean m 1.18 in DV2, 1.35 in HPI. Of +1.01 points of book CAGR, +0.58 is size, +0.43 liquidity; of +0.046 of Sharpe, +0.022 and +0.024 | Review, confirmed on the Lab |
+| The liquidity part is concentrated in time | Optimistic | t 1.7; flat without 2020 and 2024-26 | Growth MR products 2026-11-01 |
+| The whole gain has a few big years | Optimistic | 2020 about a third of the summed gaps, with 2025 about half; 2010-19 alone +0.014 of Sharpe, t 1.4 | Growth MR products 2026-11-01 |
+| Selected on history already studied | Optimistic | Family p 0.06 among 13 sizing rules, 0.10 studentised among 3,213 sleeves. Plan on half the gain | Review |
+| Most of the Max DD gain sits on the 2008 proxy | Optimistic | Book 1.6 points, 0.6 on real TAA data. Alone the sized capsule falls further than 1/N in 2012-19, 2022 and 2023-26 | Review |
+| Larger single names | Risk | One name reaches about 24% of a pod, against about 13% at 1/N | Review |
+| Same rules, not the same holdings | Note | Larger entries fill the book sooner: DV2 4,974 entries against 4,656, HPI 3,026 against 2,556; 32% and 31% of entry days buy a different set of names | Runs to 2026-10-30 |
+| Near the cap the dollars and sometimes the names depend on the account | Live gap | A small gap between live and backtest can change a capped entry or a skip; at 1/N it cannot | Build review |
+| Capacity at the open costs more than the route model's $5M suggests | Optimistic | Route model $5M against $2.5M of book. The Bench engine recommends $250K for DV2 and $100K for HPI per pod (1/N $100K each), and costs the book 0.6 points a year at $1.67M, about 1.5 at $5M and 3.2 at $13.3M, in both forms; sizing still leads at every size | Bench capacity, last 5 years, pre-TCA |
+| The close route is worse, not just untested | Optimistic | Entries and exits at the next close: DV2 11.6% / 0.71 against 19.2% / 1.06, HPI 7.2% / 0.59 against 14.6% / 1.05. The route model's $25M and $10M assumed that route | Bench Timing |
+| The 1/N pod is not a quick fallback | Live | A pod cannot move between the forms: the account must be flat, BIL included, and restart under a new pod id | Build review |
+| Wired, not enabled | Status | Real modules, disabled templates and tests; no paper days and no fills. Record in `docs/live/MR_CAPSULE_LIQ_SIZING_WIRING_20261101.md` | Build 2026-11-01 |
