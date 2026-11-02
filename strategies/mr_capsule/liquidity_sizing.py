@@ -25,7 +25,9 @@ docs/strategies/book-strategy-caveats.md):
 - issue: most of the book's Max DD gain sits on the 2008 proxy for TAA (1.6 points, 0.6 on real TAA data), and the
   sized capsule alone falls further than 1/N in 2012-19, 2022 and 2023-26; bias: optimistic; impact: medium.
 - issue: one name can reach about 24% of a pod against about 13% at 1/N; bias: n/a; impact: more single-name risk.
-- issue: only the open route is backtested. Capacity above about $5M of book assumes moving stock orders to the close.
+- issue: at the open the Bench capacity engine (last 5 years, central cost, pre-TCA) recommends $250K for DV2 and $100K for HPI (1/N:
+  $100K each) and costs the capsule about 2 points a year at $250K per pod and 6 at $1M, in both forms; sizing still leads at every
+  size. Entries and exits at the next close lose about 7.5 points a year in each pod. bias: n/a; impact: high at fund scale.
 - issue: near the cap the dollars, and sometimes the names, depend on the account at Close_T, unlike 1/N: a small gap
   between live and backtest can change a capped entry or a skip. The nightly check therefore compares m / 10, which
   does not depend on the account; a skip on one side only still shows as a difference.

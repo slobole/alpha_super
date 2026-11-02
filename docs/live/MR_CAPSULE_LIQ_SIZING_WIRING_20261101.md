@@ -137,8 +137,9 @@ shows as a difference: near the cap a small account gap can cause one. See `docs
 
 ## Known limits
 
-- **Only the open route is backtested.** Capacity above about $5M of book assumes moving stock orders to the close, which has no
-  backtest. Do not quote the higher figure without that study.
+- **Capacity.** The $5M of book at the top of this document is the research route model, whose bar is cost under a quarter of
+  the excess return. The Bench capacity engine is stricter and shows the cost of that size: see the section below. Do not quote
+  $5M without it, and do not quote the higher figures that assume stock orders at the close.
 - **Small accounts.** A 5% entry rounds to zero shares at half the share price a 10% entry would. No order goes out, the close
   reports no exception, and BIL stays sized as if the dollars were spent until the next weekly sweep. Fund-scale pods are
   not affected. There is no capsule minimum capital, at 1/N or sized.
@@ -147,6 +148,34 @@ shows as a difference: near the cap a small account gap can cause one. See `docs
   identities. This document is the record for these two.
 - **Memory.** The size frame adds one column per stock to the signal frame. Peak memory of one decision on a fresh real snapshot
   is the same in both forms (below), about 4.3 GB. Several serves building at once on one VPS were not tested.
+
+## Capacity on the Bench engine
+
+Market on open, last 5 years, central cost estimate (40 bps at 1% of daily volume), pre-TCA. MR stock and BIL orders only: TAA and
+CORE5 costs are not in it. Book size assumes 30% in the capsule, so each pod holds 15% of the book. The capsule row averages the two
+pods' annual returns. From `capacity_compare.py`.
+
+| Per pod | Book | 1/N capsule | Sized capsule | Sized lead (points) | Capsule cost, 1/N and sized (points a year) | Cost in the book (points a year) |
+|---|---|---|---|---|---|---|
+| Before cost | | 16.6% | 22.1% | 5.6 | | |
+| $100K | $0.67M | 15.6% | 21.2% | 5.6 | 0.7, 0.7 | 0.2 |
+| $250K | $1.67M | 14.6% | 20.0% | 5.5 | 2.0, 2.0 | 0.6 |
+| $500K | $3.3M | 13.0% | 18.3% | 5.3 | 3.6, 3.7 | 1.1 |
+| $1M | $6.7M | 10.6% | 15.7% | 5.1 | 6.1, 6.4 | 1.9 |
+| $2M | $13.3M | 6.6% | 11.5% | 4.9 | 10.1, 10.7 | 3.2 |
+| $5M | $33M | -4.2% | 0.0% | 4.3 | 20.9, 22.1 | 6.6 |
+
+| Engine result | DV2 1/N | DV2 sized | HPI 1/N | HPI sized |
+|---|---|---|---|---|
+| Recommended | $100K | $250K | $100K | $100K |
+| Break-even bracket | $0.5M to $1M | $2M to $5M | $0.5M to $1M | $1M to $2M |
+
+- **Sizing leads at every size, and the lead barely shrinks.** The cost is nearly the same in both forms, so it does not change the
+  choice of form. It changes what a fund can expect: at $5M of book, about 1.5 points a year below the gross numbers.
+- **The 5-year lead is flattering.** Over the whole history the lead before cost is 2.6 points, 17.0% against 14.4%. Planning on half
+  the gain stands. The full-history window gives no cost figure at these sizes: thin early orders fall outside the model's range.
+- **The higher capacity at the close is not available.** Timing now tests it. With entries and exits at the next close, sized DV2 falls
+  from 19.2% / 1.06 / -23.9% to 11.6% / 0.71 / -38.7%, and sized HPI from 14.6% / 1.05 / -19.8% to 7.2% / 0.59 / -35.6%.
 
 ## Bench Timing button
 
@@ -157,9 +186,11 @@ session to find the end of the week, so the weekly BIL sweep would never fire an
 error. `prepare_pod_for_timing_analysis` does both, and the next session is a calendar label only.
 
 The check is that the default cell, next open for entries and exits, equals the Bench run. On all four pods in
-`tests/test_strategy_mr_capsule_timing.py`, and on real data for sized DV2: 10,100 of 10,100 fills, final NAV equal to
-under a cent (`timing_check_strategy_mr_dv2_vix_gated_liq_bil.json`). Within a day Timing fills exits first and Bench in
-placement order, so the rows are compared without the same-day order.
+`tests/test_strategy_mr_capsule_timing.py`. On real data, in `timing_check_*.json`: sized DV2 10,100 of 10,100 fills, 1/N DV2
+10,695 of 10,695, 1/N HPI 6,958 of 6,958, each with final NAV equal to under a cent. For sized HPI the full 9-cell run's default row
+equals Vanilla on return, Sharpe and drawdown. Within a day Timing fills exits first and Bench in placement order, so the rows are
+compared without the same-day order. Vanilla, Capacity, Risk and Timing all finished on both sized pods on real data. Stress skips
+every capsule pod, 1/N included: none is on its list of supported strategies.
 
 Two limits of the other cells, in the shared analyzer and unchanged here: when entries fill before delayed exits it caps
 new entries by a free-slot count that also counts BIL as a position, and it treats a BIL buy as an entry. Read those cells as
