@@ -411,6 +411,71 @@ def test_historical_run_resolves_the_declared_start_and_entry_slot_weight(tmp_pa
     assert maps_dict["entry_weight_by_date_dict"] == {("2026-10-12", "AAA"): 0.2}
 
 
+def test_sized_capsule_reference_uses_each_entry_s_recorded_weight(tmp_path, monkeypatch):
+    import pandas as pd
+    from alpha.live import reference_compare
+    from strategies.mr_capsule.dv2_vix_gated_liq import DV2VixGatedLiquidityStrategy
+
+    strategy_obj = DV2VixGatedLiquidityStrategy(name="reference", benchmarks=[], capital_base=1000)
+    # A recorded order that never filled does not count (CCC).
+    strategy_obj.entry_weight_by_date_dict = {("2026-10-12", "AAA"): 0.13, ("2026-10-12", "BBB"): 0.11, ("2026-10-12", "CCC"): 0.07}
+    monkeypatch.setattr(reference_compare, "run_auto_reference_strategy", lambda **kwargs: strategy_obj)
+    monkeypatch.setattr(reference_compare, "build_reference_maps_dict", lambda strategy_obj: {
+        "reference_strategy_obj": strategy_obj, "equity_by_date_dict": {"2026-10-12": 1000}, "realized_weight_history_df": pd.DataFrame(),
+        "transaction_map_dict": {("2026-10-12", "AAA"): {"quantity_float": 5}, ("2026-10-12", "BBB"): {"quantity_float": 5}}})
+    release_obj = _target(tmp_path / "absent", "pod_a", "strategies.mr_capsule.strategy_mr_dv2_vix_gated_liq_bil:X", "U1").release_obj
+    maps_dict = bc.run_reference_maps_dict(release_obj, start_str=None, end_str="2026-10-12", capital_float=1000, output_dir_path=tmp_path / "reference")
+    assert maps_dict["entry_weight_by_date_dict"] == {("2026-10-12", "AAA"): 0.13, ("2026-10-12", "BBB"): 0.11}
+
+
+def test_sized_capsule_tolerance_applies_only_when_asked():
+    decision_dict = {"decision_book_type_str": "incremental_entry_exit_book", "entry_target_weight_map_dict": {"AAA": 0.1305}, "exit_asset_list": []}
+    kwarg_dict = dict(reference_weight_map_dict={}, reference_trade_map_dict={"AAA": 5.0}, reference_entry_weight_map_dict={"AAA": 0.13})
+    assert bc.compare_decision_dict(decision_dict, **kwarg_dict)["status_str"] == "differs"
+    sized_dict = bc.compare_decision_dict(decision_dict, entry_weight_tolerance_float=bc.SIZED_ENTRY_WEIGHT_TOLERANCE_FLOAT, entry_weight_basis_str="Sized.", **kwarg_dict)
+    assert sized_dict["status_str"] == "same" and sized_dict["basis_str"] == "Sized."
+    assert bc.compare_decision_dict({**decision_dict, "entry_target_weight_map_dict": {"AAA": 0.1320}}, entry_weight_tolerance_float=bc.SIZED_ENTRY_WEIGHT_TOLERANCE_FLOAT, **kwarg_dict)["status_str"] == "differs"
+    # The same day, the backtest bought a name live skipped: a real difference.
+    assert bc.compare_decision_dict(decision_dict, entry_weight_tolerance_float=bc.SIZED_ENTRY_WEIGHT_TOLERANCE_FLOAT, reference_weight_map_dict={},
+                                    reference_trade_map_dict={"AAA": 5.0, "BBB": 5.0}, reference_entry_weight_map_dict={"AAA": 0.13, "BBB": 0.07})["status_str"] == "differs"
+
+
+@pytest.mark.parametrize("strategy_str,entry_dict,metadata_dict,reference_dict,buy_list,status_str", [
+    pytest.param("dv2_vix_gated_liq_bil", {"AAA": 0.03}, {"liquidity_entry_wanted_weight_dict": {"AAA": 0.13}}, {"AAA": 0.13}, ["AAA"], "same", id="capped_by_the_account_same_size"),
+    pytest.param("dv2_vix_gated_liq_bil", {"AAA": 0.1305}, {"liquidity_entry_wanted_weight_dict": {"AAA": 0.1305}}, {"AAA": 0.13}, ["AAA"], "same", id="inside_the_tolerance"),
+    pytest.param("dv2_vix_gated_liq_bil", {"AAA": 0.135}, {"liquidity_entry_wanted_weight_dict": {"AAA": 0.135}}, {"AAA": 0.13}, ["AAA"], "differs", id="size_differs"),
+    pytest.param("dv2_vix_gated_liq_bil", {}, {"liquidity_entry_wanted_weight_dict": {}, "liquidity_skipped_entry_list": ["AAA"]}, {"AAA": 0.13}, ["AAA"], "differs", id="live_skipped"),
+    pytest.param("dv2_vix_gated_liq_bil", {"AAA": 0.13}, {"liquidity_entry_wanted_weight_dict": {"AAA": 0.13}}, {}, [], "differs", id="backtest_skipped"),
+    pytest.param("dv2_vix_gated_bil", {"AAA": 0.1}, {}, {"AAA": 0.1}, ["AAA"], "same", id="one_over_n_keeps_its_contract"),
+    pytest.param("dv2_vix_gated_bil", {"AAA": 0.1005}, {}, {"AAA": 0.1}, ["AAA"], "differs", id="one_over_n_keeps_its_tolerance"),
+])
+def test_nightly_check_reads_a_sized_pod_by_its_size_before_the_cap(tmp_path, monkeypatch, strategy_str, entry_dict, metadata_dict, reference_dict, buy_list, status_str):
+    import pandas as pd
+    from alpha.live import reference_compare
+
+    db_path = tmp_path / "pod.sqlite3"
+    with sqlite3.connect(db_path) as connection:
+        connection.executescript("""
+            CREATE TABLE decision_plan (decision_plan_id_int INTEGER PRIMARY KEY, decision_book_type_str TEXT,
+                entry_target_weight_json_str TEXT, full_target_weight_json_str TEXT, exit_asset_json_str TEXT,
+                snapshot_metadata_json_str TEXT);
+            CREATE TABLE vplan (vplan_id_int INTEGER PRIMARY KEY, pod_id_str TEXT, decision_plan_id_int INTEGER,
+                target_execution_timestamp_str TEXT, pod_budget_float REAL, status_str TEXT);
+            CREATE TABLE vplan_fill (fill_record_id_int INTEGER PRIMARY KEY, vplan_id_int INTEGER, asset_str TEXT,
+                fill_amount_float REAL, fill_price_float REAL, official_open_price_float REAL, fill_timestamp_str TEXT);
+            INSERT INTO vplan VALUES (10, 'pod_a', 1, '2026-11-02T14:30:00+00:00', 100000, 'completed');
+        """)
+        connection.execute("INSERT INTO decision_plan VALUES (1, 'incremental_entry_exit_book', ?, '{}', '[]', ?)", (json.dumps(entry_dict), json.dumps(metadata_dict)))
+    monkeypatch.setattr(reference_compare, "inspect_auto_reference_support_dict", lambda release_obj: {"supported_bool": True})
+    monkeypatch.setattr(bc, "run_reference_maps_dict", lambda *args, **kwargs: {
+        "transaction_map_dict": {("2026-11-02", asset_str): {"quantity_float": 5.0} for asset_str in buy_list}, "realized_weight_history_df": pd.DataFrame(),
+        "equity_by_date_dict": {"2026-11-02": 100000.0}, "entry_weight_by_date_dict": {("2026-11-02", asset_str): weight_float for asset_str, weight_float in reference_dict.items()}})
+    target = _target(db_path, "pod_a", f"strategies.mr_capsule.strategy_mr_{strategy_str}", "U1")
+    pod_dict = bc.check_pod_dict(target, as_of_date_str="2026-11-03", live_return_dict={}, previous_pod_dict=None, cache_dir_path=tmp_path, reference_bool=True, refresh_ruler_bool=False, month_end_bool=False)
+    assert pod_dict["decision_dict"]["status_str"] == status_str
+    assert ("before the cap" in pod_dict["decision_dict"]["basis_str"]) is ("_liq_" in strategy_str)
+
+
 def test_malformed_ruler_never_discards_the_valid_nightly_check(tmp_path, monkeypatch):
     import pandas as pd
     from alpha.live import reference_compare

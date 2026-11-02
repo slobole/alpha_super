@@ -46,6 +46,8 @@ RELEASE_TEMPLATE_PATH_TUPLE: tuple[Path, ...] = (
     Path("docs/live/release_templates/pod_mr_dv2_vix_gated_spmo_daily_moo.yaml.example"),
     Path("docs/live/release_templates/pod_mr_hpi_vote_vix_gated_cash_daily_moo.yaml.example"),
     Path("docs/live/release_templates/pod_mr_hpi_vote_vix_gated_bil_daily_moo.yaml.example"),
+    Path("docs/live/release_templates/pod_mr_dv2_vix_gated_liq_bil_daily_moo.yaml.example"),
+    Path("docs/live/release_templates/pod_mr_hpi_vote_vix_gated_liq_bil_daily_moo.yaml.example"),
     Path("docs/live/release_templates/pod_mr_hpi_vote_vix_gated_spmo_daily_moo.yaml.example"),
     Path("docs/live/release_templates/pod_ndx_atr_normalized_vxn_scaled_sector_cap_monthly_open.yaml.example"),
     Path("docs/live/release_templates/pod_ndx_natr20_vxn_scaled_sector_cap_monthly_open.yaml.example"),
@@ -216,7 +218,7 @@ def test_release_template_parses_and_starts_disabled(template_path_obj: Path):
     if core5_template_bool:
         assert release_obj.broker_client_id_int == 47
     elif release_obj.strategy_import_str.startswith("strategies.mr_capsule."):
-        assert release_obj.broker_client_id_int in range(41, 47)
+        assert release_obj.broker_client_id_int in (*range(41, 47), 51, 52)
     elif release_obj.strategy_import_str in NDX_E2_STRATEGY_IMPORT_TUPLE:
         assert release_obj.broker_client_id_int in (48, 49)
     elif release_obj.strategy_import_str == "strategies.dv2.strategy_mr_dv2_industry_etf:DVO2IndustryEtfStrategy":

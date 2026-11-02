@@ -1,0 +1,25 @@
+# MR capsule, BIL parking, each entry sized by liquidity (docs/research/GROWTH_MR_PRODUCTS_20261101.md): the DV2-G and
+# HPI-G rules of mr_capsule_bil.yaml with another rule for entry dollars, 50/50, reset to 50/50 once a year.
+# History 2004-2026 has been examined many times; about half of the gain over 1/N is entry size and half liquidity,
+# and the rule was picked from 13: plan on half the gain. See the caveats in strategies/mr_capsule/liquidity_sizing.py.
+# max_workers_int 1: the two pods load Norgate one after the other (parallel loads have hung on this machine).
+name_str: "mr_capsule_liq_bil"
+capital_base_float: 1e+06
+backtest_start_date_str: "2004-01-01"
+end_date_str: null
+allocation_policy_str: fixed
+max_workers_int: 1
+rebalance:
+  frequency_str: annually
+  policy_str: fixed
+save_pod_artifacts_bool: true
+regression_benchmark_symbol_str: "$SPX"
+
+pods:
+  - pod_id_str: pod_mr_dv2_gated_liq_bil
+    strategy_import_str: strategies.mr_capsule.strategy_mr_dv2_vix_gated_liq_bil
+    weight_float: 0.5
+
+  - pod_id_str: pod_mr_hpi_vote_gated_liq_bil
+    strategy_import_str: strategies.mr_capsule.strategy_mr_hpi_vote_vix_gated_liq_bil
+    weight_float: 0.5

@@ -273,19 +273,21 @@ def build_hpi_capsule_execution_timing_analysis_inputs(
     spmo_parking_enabled_bool: bool,
 ) -> dict[str, object]:
     """Inputs for ExecutionTimingAnalysis; a timing variant moves the stock and the parking fills alike."""
+    from strategies.mr_capsule.timing_hook import prepare_pod_for_timing_analysis
+
     pricing_data_df, universe_df = load_hpi_capsule_pricing_data(None)
     vix_close_ser = load_vix_close_ser(None)
     # *** CRITICAL*** the same post-warm-up execution calendar as the Bench run (2004 onward).
     calendar_idx = pricing_data_df.index[pricing_data_df.index >= pd.Timestamp("2004-01-01")]
 
     def strategy_factory_fn() -> HPIVoteVixGatedStrategy:
-        return build_hpi_capsule_strategy(
+        return prepare_pod_for_timing_analysis(build_hpi_capsule_strategy(
             strategy_name_str=strategy_name_str,
             parking_enabled_bool=parking_enabled_bool,
             spmo_parking_enabled_bool=spmo_parking_enabled_bool,
             universe_df=universe_df,
             vix_close_ser=vix_close_ser,
-        )
+        ), pricing_data_df.index)
 
     return {
         "strategy_factory_fn": strategy_factory_fn,

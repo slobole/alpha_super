@@ -76,6 +76,11 @@ The MR capsule templates (`pod_mr_*`) ship as disabled `paper` releases; `live`
 is allowed. Neither CORE5 nor the capsule needs a margin attestation in YAML
 (owner decision 2026-10-11: the accounts are margin accounts). An older YAML
 that still has `margin_account_confirmed_bool` keeps working; the key is ignored.
+The two `*_liq_bil` templates are the BIL pods with each entry sized by liquidity
+([wiring](../MR_CAPSULE_LIQ_SIZING_WIRING_20261101.md)). They use the same data profiles and the same account
+contract as the 1/N BIL pods. Run one form per account: a pod cannot adopt the holdings of the other form.
+Before reverting the code to a version without these two identities, move any YAML that names them out of the
+releases root, even a disabled one: every serve parses the whole root, so it would stop the NDX and TAA serves too.
 
 | Template | Wired strategy | Data profile |
 |---|---|---|

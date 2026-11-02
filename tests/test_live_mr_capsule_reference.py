@@ -9,16 +9,20 @@ import pytest
 from alpha.live import reference_compare
 from alpha.live.dashboard_v3.client_comparison import saved_comparison_dict
 from strategies.mr_capsule.dv2_vix_gated import DV2VixGatedStrategy
+from strategies.mr_capsule.dv2_vix_gated_liq import DV2VixGatedLiquidityStrategy
 from strategies.mr_capsule.hpi_vote_vix_gated import HPIVoteVixGatedStrategy
+from strategies.mr_capsule.hpi_vote_vix_gated_liq import HPIVoteVixGatedLiquidityStrategy
 from strategies.hpi.stateful_long import ENTRY_HORIZON_VOTE_STR, TURNOVER_FIELD_STR
 from test_live_reference_compare import _build_release
 
 
-def _capsule_dividend_day(pod_str):
+def _capsule_dividend_day(pod_str, mode_str="bil"):
     if pod_str == "dv2_vix_gated":
-        strategy_obj = DV2VixGatedStrategy(name="capsule_reference", benchmarks=[], capital_base=100000.0)
+        strategy_class = DV2VixGatedLiquidityStrategy if mode_str == "liq_bil" else DV2VixGatedStrategy
+        strategy_obj = strategy_class(name="capsule_reference", benchmarks=[], capital_base=100000.0)
     else:
-        strategy_obj = HPIVoteVixGatedStrategy(
+        strategy_class = HPIVoteVixGatedLiquidityStrategy if mode_str == "liq_bil" else HPIVoteVixGatedStrategy
+        strategy_obj = strategy_class(
             name="capsule_reference", benchmarks=[], capital_base=100000.0, ranking_field_str=TURNOVER_FIELD_STR,
             entry_mode_str=ENTRY_HORIZON_VOTE_STR,
         )
@@ -37,17 +41,18 @@ def _capsule_dividend_day(pod_str):
 
 
 @pytest.mark.parametrize("pod_str", ["dv2_vix_gated", "hpi_vote_vix_gated"])
-def test_capsule_reference_disables_dividends_and_preserves_dashboard_warning(pod_str, monkeypatch, tmp_path):
-    research_strategy_obj = _capsule_dividend_day(pod_str)
+@pytest.mark.parametrize("mode_str", ["bil", "liq_bil"])
+def test_capsule_reference_disables_dividends_and_preserves_dashboard_warning(pod_str, mode_str, monkeypatch, tmp_path):
+    research_strategy_obj = _capsule_dividend_day(pod_str, mode_str)
     assert len(research_strategy_obj.get_dividend_ledger()) == 1  # same held BIL really accrues outside the context
     assert research_strategy_obj.cash > research_strategy_obj._capital_base
-    strategy_import_str = f"strategies.mr_capsule.strategy_mr_{pod_str}_bil"
+    strategy_import_str = f"strategies.mr_capsule.strategy_mr_{pod_str}_{mode_str}"
     module_obj = importlib.import_module(strategy_import_str)
     captured_strategy_list = []
     captured_accounting_list = []
 
     def fake_run_variant(backtest_start_date_str, capital_base_float, end_date_str):
-        strategy_obj = _capsule_dividend_day(pod_str)
+        strategy_obj = _capsule_dividend_day(pod_str, mode_str)
         captured_strategy_list.append(strategy_obj)
         captured_accounting_list.append(dict(strategy_obj._accounting_policy_dict))
         return strategy_obj
