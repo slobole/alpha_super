@@ -17,10 +17,6 @@ The 50/50 book is `portfolios/mr_capsule_liq_bil.yaml`. Evidence and the decisio
 measured gain at book level: about +0.5 points of CAGR and +0.02 Sharpe, with about $5M instead of $2.5M of open-auction
 capacity.
 
-Those two records and the sized section of `docs/strategies/book-strategy-caveats.md` were uncommitted in the main checkout
-when this was written, so they are not on this branch. Commit them with this work; adding them here would make the merge
-refuse to overwrite the untracked copies.
-
 ## Frozen rule
 
 ```text
