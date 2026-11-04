@@ -5,6 +5,7 @@ from dataclasses import replace
 
 from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR, validated_core5_target_share_dict
 from alpha.live.dv2_ind_adapter import DV2_IND_STRATEGY_IMPORT_STR, validate_dv2_ind_execution_contract
+from alpha.live.flow_vote_adapter import FLOW_VOTE_STRATEGY_IMPORT_STR, validated_flow_vote_target_share_dict
 
 from alpha.live.models import (
     BrokerOrderRequest,
@@ -22,7 +23,7 @@ def _broker_order_type_from_execution_policy_str(execution_policy_str: str) -> s
         return "MOO"
     if execution_policy_str == "next_open_market":
         return "MKT"
-    if execution_policy_str == "same_day_moc":
+    if execution_policy_str in ("same_day_moc", "next_close_moc"):
         return "MOC"
     raise ValueError(f"Unsupported execution_policy_str '{execution_policy_str}'.")
 
@@ -261,7 +262,9 @@ def _build_full_target_weight_vplan(
 ) -> VPlan:
     fixed_target_share_dict = (
         validated_core5_target_share_dict(decision_plan_obj, release_obj, broker_snapshot_obj.position_amount_map)
-        if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR else None
+        if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR else
+        validated_flow_vote_target_share_dict(decision_plan_obj, release_obj, broker_snapshot_obj.position_amount_map)
+        if release_obj.strategy_import_str == FLOW_VOTE_STRATEGY_IMPORT_STR else None
     )
     touched_asset_list = get_touched_asset_list_for_decision_plan(
         decision_plan_obj,
@@ -310,7 +313,7 @@ def _build_full_target_weight_vplan(
 
         target_weight_float = float(decision_plan_obj.full_target_weight_map_dict.get(asset_str, 0.0))
         # Existing books: TargetShares_i = floor(Weight_i * PodBudget / live_ref).
-        # *** CRITICAL*** CORE5 uses already frozen trunc(NAV_Close_T*w/Close_T)
+        # *** CRITICAL*** CORE5 and the Flow Vote use already frozen trunc(NAV_Close_T*w/Close_T)
         # shares; the current quote only estimates execution notional.
         target_share_float = float(
             math.floor((target_weight_float * pod_budget_float) / live_reference_price_float)

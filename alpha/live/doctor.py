@@ -11,8 +11,9 @@ from types import SimpleNamespace
 
 from alpha.live import scheduler_utils, strategy_host
 from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR
+from alpha.live.flow_vote_adapter import FLOW_VOTE_STRATEGY_IMPORT_STR
 from alpha.live.daily_reconcile import DAILY_TERMINAL_STATUS_SET, is_daily_reconcile_release_bool
-from alpha.live.guarded_dispatch import moo_dispatch_deadline_ts
+from alpha.live.guarded_dispatch import dispatch_deadline_ts
 from alpha.live.execution_engine import (
     build_broker_order_request_list_from_vplan,
     build_vplan,
@@ -450,9 +451,10 @@ def inspect_persisted_lifecycle_read_only_dict(
                         or (latest_vplan_dict and latest_vplan_dict["decision_plan_id_int"]
                             != latest_decision_plan_dict["decision_plan_id_int"])):
                     raise ValueError("Daily lifecycle requires matching saved decision and VPlan.")
+                # The daily pods trade in an auction: the opening one, or the closing one for the Flow Vote.
                 if (target_execution_timestamp_ts.tzinfo is None or as_of_ts.tzinfo is None
-                        or str(lifecycle_row_dict["execution_policy_str"]) != "next_open_moo"
-                        or release_obj.execution_policy_str != "next_open_moo"):
+                        or release_obj.execution_policy_str not in ("next_open_moo", "next_close_moc")
+                        or str(lifecycle_row_dict["execution_policy_str"]) != release_obj.execution_policy_str):
                     raise ValueError("Daily lifecycle requires aware timestamps and its MOO policy.")
                 metadata_dict = json.loads(str(latest_decision_plan_dict.get("snapshot_metadata_json_str") or "{}"))
                 dispatch_dict = metadata_dict.get("opening_dispatch_result_dict", {})
@@ -470,8 +472,9 @@ def inspect_persisted_lifecycle_read_only_dict(
                     target_execution_timestamp_ts, release_obj.session_calendar_id_str).date()
                 close_timestamp_ts = scheduler_utils.get_session_close_timestamp_ts(
                     session_date_obj, release_obj.session_calendar_id_str)
-                deadline_timestamp_ts = moo_dispatch_deadline_ts(SimpleNamespace(
-                    target_execution_timestamp_ts=target_execution_timestamp_ts))
+                deadline_timestamp_ts = dispatch_deadline_ts(SimpleNamespace(
+                    target_execution_timestamp_ts=target_execution_timestamp_ts,
+                    execution_policy_str=release_obj.execution_policy_str))
                 uncertain_send_bool = str(latest_vplan_dict.get("status_str") or "") == "submitting"
                 daily_detail_dict = {
                     "daily_cycle_bool": True,
@@ -1191,7 +1194,7 @@ def _compute_doctor_verdict_impl(
     detail_dict["decision_plan_dict"] = _decision_plan_dict(decision_plan_obj)
     if (
         is_daily_reconcile_release_bool(release_obj)
-        and as_of_ts >= moo_dispatch_deadline_ts(decision_plan_obj)
+        and as_of_ts >= dispatch_deadline_ts(decision_plan_obj)
     ) or scheduler_utils.is_execution_window_expired_bool(
         decision_plan_obj.execution_policy_str,
         decision_plan_obj.target_execution_timestamp_ts,
@@ -1425,17 +1428,18 @@ def _compute_doctor_verdict_impl(
         broker_position_map_dict=broker_snapshot_obj.position_amount_map,
     )
     try:
-        if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
+        if release_obj.strategy_import_str in (CORE5_STRATEGY_IMPORT_STR, FLOW_VOTE_STRATEGY_IMPORT_STR):
             # *** CRITICAL *** match the runner's frozen Close_T price contract.
-            # Later quotes must neither resize nor block CORE5's frozen targets.
+            # Later quotes must neither resize nor block CORE5's or the Flow Vote's frozen targets.
             close_price_dict = dict(decision_plan_obj.snapshot_metadata_dict["sizing_close_price_map_dict"])
+            frozen_source_str = "core5.frozen_close_t" if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR else "flow_vote.frozen_close_t"
             live_price_snapshot_obj = LivePriceSnapshot(
                 account_route_str=decision_plan_obj.account_route_str,
                 snapshot_timestamp_ts=decision_plan_obj.signal_timestamp_ts,
-                price_source_str="core5.frozen_close_t",
+                price_source_str=frozen_source_str,
                 asset_reference_price_map=close_price_dict,
                 asset_reference_source_map_dict={
-                    asset_str: "core5.frozen_close_t" for asset_str in close_price_dict
+                    asset_str: frozen_source_str for asset_str in close_price_dict
                 },
             )
         else:

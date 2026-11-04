@@ -690,22 +690,32 @@ pre_close_15m            -> session close - 15 minutes
 
 Current supported `execution_policy_str` values:
 - `next_open_moo`
+- `next_open_market`
 - `same_day_moc`
 - `next_month_first_open`
+- `next_close_moc` (reserved for the Month-End Flow Vote)
 
 Current target execution rules:
 
 ```text
-next_open_moo        -> next session open
-same_day_moc         -> same session close
+next_open_moo         -> next session open
+next_open_market      -> next session open
+same_day_moc          -> same session close
 next_month_first_open -> first next-month session open
+next_close_moc        -> next session close
 ```
 
-Current submission rules:
+Current submission rules (scheduler_utils.build_submission_timestamp_ts):
 
 ```text
-submission_timestamp = target_execution_timestamp - 10 minutes
+next_open_moo, next_month_first_open -> target open - 6m30s
+next_open_market                     -> target open
+same_day_moc                         -> target close - 10 minutes
+next_close_moc                       -> target close - 20 minutes
 ```
+
+Guarded daily pods also stop before a broker cutoff (guarded_dispatch.dispatch_deadline_ts): the open minus
+2 minutes for opening auctions, the close minus 15 minutes for `next_close_moc`.
 
 For `pre_close_15m`, the signal timestamp is:
 

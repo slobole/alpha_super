@@ -19,6 +19,7 @@ from pathlib import Path
 
 from alpha.live import scheduler_utils
 from alpha.live.daily_reconcile import DAILY_STRATEGY_IMPORT_TUPLE, DAILY_TERMINAL_STATUS_SET
+from alpha.live.guarded_dispatch import MOC_DISPATCH_CUTOFF_MINUTES_INT
 from alpha.live.dashboard_v3.filters import MARKET_TIMEZONE_OBJ
 from alpha.live.ops_report import parse_timestamp_ts
 
@@ -232,6 +233,9 @@ def _read_daily_cycle_dict(connection_obj, release_obj, decision_plan_id_int, as
         next_label_ts = scheduler_utils.get_next_session_label_ts(signal_label_ts, calendar_id_str)
         cutoff_ts = (scheduler_utils.get_session_open_timestamp_ts(next_label_ts, calendar_id_str)
             - timedelta(minutes=DECISION_CUTOFF_MINUTES_INT)).astimezone(UTC)
+        if release_obj.execution_policy_str == "next_close_moc":
+            cutoff_ts = (scheduler_utils.get_session_close_timestamp_ts(next_label_ts, calendar_id_str)
+                - timedelta(minutes=MOC_DISPATCH_CUTOFF_MINUTES_INT)).astimezone(UTC)
         match_obj = next((row_obj for row_obj in recent_list
             if _session_date_str(row_obj["signal_timestamp_str"]) == signal_date_str), None)
         signal_session_dict = {"session_date_str": signal_date_str, "decision_cutoff_timestamp_str": cutoff_ts.isoformat(),
@@ -245,7 +249,8 @@ def _read_daily_cycle_dict(connection_obj, release_obj, decision_plan_id_int, as
         "completion_request_list": [], "pod_alert_list": [],
         "execution_alert_list": [], "post_close_report_dict": {}, "open_previous_list": [],
         "open_previous_truncated_bool": False, "last_closed_dict": {}, "signal_session_dict": signal_session_dict,
-        "session_close_timestamp_str": None, "next_open_timestamp_str": _next_open_ts(as_of_ts, calendar_id_str).isoformat()}
+        "session_close_timestamp_str": None, "next_open_timestamp_str": _next_open_ts(as_of_ts, calendar_id_str).isoformat(),
+        "execution_policy_str": release_obj.execution_policy_str}
     if selected_obj is None:
         # A daily pod before its first saved decision: only the owed decision applies.
         result_dict["current_bool"] = True

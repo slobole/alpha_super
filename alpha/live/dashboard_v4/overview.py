@@ -178,7 +178,7 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
         monthly_bool = policy_str == "next_month_first_open" or row_dict.get("signal_clock_str") == "month_end_snapshot_ready"
         swap_bool = row_dict.get("signal_clock_str") == "month_swap_snapshot_ready"
         cadence_str = ("Monthly" if monthly_bool else "Twice a month" if swap_bool else "Daily") if policy_str else "—"
-        session_str = "Close" if policy_str == "same_day_moc" else "First open" if monthly_bool else "Open"
+        session_str = "Close" if policy_str in ("same_day_moc", "next_close_moc") else "First open" if monthly_bool else "Open"
         name_str = account_dict.get("display_name") or strategy_display_name_str(row_dict)
         required_dict = row_dict.get("required_action_dict") or {}
         next_dict = build_next_operation_dict(row_dict, cycle_dict, now_ts=as_of_ts, action_required_bool=action_required_bool)

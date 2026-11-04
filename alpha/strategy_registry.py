@@ -80,11 +80,17 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     "strategies.momentum.strategy_mo_atr_normalized_ndx:AtrNormalizedNdxStrategy": MaturityTier.WIRED,
     "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy": MaturityTier.LIVE,
     # ── pm-ready: may join a book, not connected to live ────────────────────
+    # Frozen VRP RSI2 sleeve: PM engine plumbing only; fund adoption still requires
+    # the shadow, measured-fill, exit-failsafe and tax gates in SPEC_FROZEN.md.
+    "strategies.vix_stuff.strategy_vrp_svxy_vixm_rsi2": MaturityTier.PM_READY,
     # Owner demotion 2026-09-30: retain portfolio eligibility without a live route.
     "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit": MaturityTier.PM_READY,
     # Five analyzers and capital/benchmark/determinism checks passed 2026-09-13.
     # MOC and fixed TLT borrow remain research execution assumptions.
     "strategies.taa_beyond_6040.strategy_taa_month_end_rebalancing_flow": MaturityTier.PM_READY,
+    # Month-End Flow Vote (2026-11-01 study, docs/research/EOM_TRADABLE_20261101.md), wired 2026-11-04 with the new
+    # next_close_moc route (docs/live/FLOW_VOTE_MOC_WIRING_20261104.md): disabled template, no account, no paper days.
+    "strategies.taa_beyond_6040.strategy_taa_month_end_flow_vote": MaturityTier.WIRED,
     # Crisis Trend Core and VIXM backwardation were demoted to RESEARCH on
     # 2026-09-28 by owner decision after the readiness audit
     # (docs/research/STRATEGY_READINESS_AUDIT_20260928.md, section 10): CTC no

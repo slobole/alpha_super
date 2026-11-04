@@ -71,6 +71,7 @@ from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR, build_core5_deci
 from alpha.live.models import DecisionPlan, LiveRelease, PodState
 from alpha.live.dv2_ind_adapter import DV2_IND_STRATEGY_IMPORT_STR, build_dv2_ind_decision_plan
 from alpha.live.momentum_legs_adapter import MOMENTUM_LEGS_STRATEGY_IMPORT_TUPLE, build_momentum_legs_decision_plan
+from alpha.live.flow_vote_adapter import FLOW_VOTE_STRATEGY_IMPORT_STR, build_flow_vote_decision_plan
 from alpha.live.mr_capsule_adapter import MR_CAPSULE_STRATEGY_IMPORT_TUPLE, build_mr_capsule_decision_plan
 from alpha.live.ndx_e2_adapter import NDX_E2_STRATEGY_IMPORT_TUPLE, build_ndx_e2_decision_plan
 from data.norgate_loader import build_data_source_metadata_dict, use_norgate_data_profile
@@ -92,6 +93,7 @@ FULL_TARGET_DECISION_STRATEGY_IMPORT_SET: set[str] = {
     *NDX_E2_STRATEGY_IMPORT_TUPLE,
     *MOMENTUM_LEGS_STRATEGY_IMPORT_TUPLE,
     CORE5_STRATEGY_IMPORT_STR,
+    FLOW_VOTE_STRATEGY_IMPORT_STR,
     "strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash",
     "strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash",
     "strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash",
@@ -1258,6 +1260,8 @@ def build_decision_plan_for_release(
             return build_mr_capsule_decision_plan(release_obj, as_of_ts, pod_state_obj)
         if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
             return build_core5_decision_plan(release_obj, as_of_ts, pod_state_obj)
+        if release_obj.strategy_import_str == FLOW_VOTE_STRATEGY_IMPORT_STR:
+            return build_flow_vote_decision_plan(release_obj, as_of_ts, pod_state_obj)
         if release_obj.strategy_import_str == "strategies.dv2.strategy_mr_dv2:DVO2Strategy":
             return _build_dv2_decision_plan(release_obj, as_of_ts, pod_state_obj)
         if (

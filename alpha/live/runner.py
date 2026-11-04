@@ -24,7 +24,8 @@ from alpha.live.core5_adapter import (
 )
 from alpha.live.dv2_ind_adapter import DV2_IND_STRATEGY_IMPORT_STR, validate_dv2_ind_execution_contract
 from alpha.live.dispatch_state import is_guarded_release_bool, record_dispatch_failure
-from alpha.live.guarded_dispatch import is_transient_broker_error_bool, moo_dispatch_deadline_ts
+from alpha.live.flow_vote_adapter import FLOW_VOTE_STRATEGY_IMPORT_STR, require_flow_vote_position_match, validate_flow_vote_release
+from alpha.live.guarded_dispatch import dispatch_deadline_ts, is_transient_broker_error_bool
 from alpha.live.execution_engine import (
     build_broker_order_request_list_from_vplan,
     build_vplan,
@@ -2554,7 +2555,7 @@ def expire_stale_decision_plans(
         ):
             continue
         if not _mark_unsubmitted_decision_terminal(state_store_obj, release_obj, int(decision_plan_obj.decision_plan_id_int or 0), "expired"):
-            reason_counter_obj["dv2_ind_prior_cycle_unresolved" if release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR else "core5_prior_cycle_unresolved" if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR else "mr_capsule_prior_cycle_unresolved"] += 1
+            reason_counter_obj["dv2_ind_prior_cycle_unresolved" if release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR else "core5_prior_cycle_unresolved" if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR else "flow_vote_prior_cycle_unresolved" if release_obj.strategy_import_str == FLOW_VOTE_STRATEGY_IMPORT_STR else "mr_capsule_prior_cycle_unresolved"] += 1
             continue
         latest_vplan_obj = state_store_obj.get_latest_vplan_for_decision(int(decision_plan_obj.decision_plan_id_int or 0))
         if latest_vplan_obj is not None and latest_vplan_obj.status_str == "ready":
@@ -2693,12 +2694,13 @@ def build_decision_plans(
         except (ValueError, RuntimeError) as exception_obj:
             capsule_bool = release_obj.strategy_import_str.startswith("strategies.mr_capsule.")
             momentum_leg_bool = release_obj.strategy_import_str in MOMENTUM_LEGS_STRATEGY_IMPORT_TUPLE
-            if release_obj.strategy_import_str not in (CORE5_STRATEGY_IMPORT_STR, DV2_IND_STRATEGY_IMPORT_STR) and not capsule_bool and not momentum_leg_bool:
+            if release_obj.strategy_import_str not in (CORE5_STRATEGY_IMPORT_STR, DV2_IND_STRATEGY_IMPORT_STR, FLOW_VOTE_STRATEGY_IMPORT_STR) and not capsule_bool and not momentum_leg_bool:
                 raise
             skipped_decision_plan_count_int += 1
             reason_code_str = ("dv2_ind_decision_blocked" if release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR
                 else "momentum_leg_decision_blocked" if momentum_leg_bool
-                else "mr_capsule_decision_blocked" if capsule_bool else "core5_decision_blocked")
+                else "mr_capsule_decision_blocked" if capsule_bool
+                else "flow_vote_decision_blocked" if release_obj.strategy_import_str == FLOW_VOTE_STRATEGY_IMPORT_STR else "core5_decision_blocked")
             if capsule_bool:
                 from alpha.live.mr_capsule_adapter import CapsuleHoldingMismatchError
                 if isinstance(exception_obj, CapsuleHoldingMismatchError):
@@ -2739,8 +2741,9 @@ def build_decision_plans(
             continue
 
         inserted_decision_plan_obj = state_store_obj.insert_decision_plan(decision_plan_obj)
-        if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
-            for warning_str in inserted_decision_plan_obj.snapshot_metadata_dict.get("core5_warning_code_list", []):
+        if release_obj.strategy_import_str in (CORE5_STRATEGY_IMPORT_STR, FLOW_VOTE_STRATEGY_IMPORT_STR):
+            for warning_str in inserted_decision_plan_obj.snapshot_metadata_dict.get(
+                    "core5_warning_code_list" if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR else "flow_vote_warning_code_list", []):
                 log_event("decision_plan_warning", _build_decision_plan_log_payload_dict(
                     release_obj, inserted_decision_plan_obj, as_of_ts,
                     {"severity_str": "warning", "reason_code_str": warning_str}), log_path_str=log_path_str)
@@ -2873,17 +2876,20 @@ def build_vplans(
         guarded_build_bool = is_guarded_release_bool(release_obj)
         if guarded_build_bool:
             try:
-                if as_of_ts >= moo_dispatch_deadline_ts(decision_plan_obj):
-                    raise ValueError("Opening dispatch deadline passed; reviewed recovery is required.")
+                if as_of_ts >= dispatch_deadline_ts(decision_plan_obj):
+                    raise ValueError(("Closing" if decision_plan_obj.execution_policy_str == "next_close_moc" else "Opening")
+                        + " dispatch deadline passed; reviewed recovery is required.")
                 visible_account_route_set = broker_adapter_obj.get_visible_account_route_set()
                 guarded_session_ready_bool = broker_adapter_obj.is_session_ready(decision_plan_obj.account_route_str)
                 guarded_session_mode_str = broker_adapter_obj.get_session_mode_str(decision_plan_obj.account_route_str)
                 guarded_snapshot_obj = (
                     broker_adapter_obj.get_core5_account_snapshot(decision_plan_obj.account_route_str)
                     if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR
+                    else broker_adapter_obj.get_flow_vote_account_snapshot(decision_plan_obj.account_route_str)
+                    if release_obj.strategy_import_str == FLOW_VOTE_STRATEGY_IMPORT_STR
                     else broker_adapter_obj.get_capsule_account_snapshot(decision_plan_obj.account_route_str))
             except Exception as exception_obj:
-                retry_bool = is_transient_broker_error_bool(exception_obj) and as_of_ts < moo_dispatch_deadline_ts(decision_plan_obj)
+                retry_bool = is_transient_broker_error_bool(exception_obj) and as_of_ts < dispatch_deadline_ts(decision_plan_obj)
                 reason_str = "build_retry_pending" if retry_bool else "opening_build_parked"
                 if not retry_bool:
                     _mark_unsubmitted_decision_terminal(state_store_obj, release_obj,
@@ -3018,9 +3024,10 @@ def build_vplans(
                 trace_enabled_bool=trace_enabled_bool,
                 trace_log_root_path_str=trace_log_root_path_str,
             )
-            if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
+            if release_obj.strategy_import_str in (CORE5_STRATEGY_IMPORT_STR, FLOW_VOTE_STRATEGY_IMPORT_STR):
                 blocked_action_count_int += 1
-                reason_counter_obj["core5_frozen_position_mismatch"] += 1
+                reason_counter_obj["core5_frozen_position_mismatch" if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR
+                    else "flow_vote_frozen_position_mismatch"] += 1
                 state_store_obj.mark_decision_plan_status(int(decision_plan_obj.decision_plan_id_int), "blocked")
                 continue
         if broker_snapshot_obj.net_liq_float <= 0.0:
@@ -3054,16 +3061,17 @@ def build_vplans(
                     account_route_str=decision_plan_obj.account_route_str,
                     snapshot_timestamp_ts=as_of_ts, price_source_str="dv2_ind.empty_intent",
                     asset_reference_price_map={})
-            elif release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
-                # CORE5 quantities were frozen at Close_T. Quotes are optional
+            elif release_obj.strategy_import_str in (CORE5_STRATEGY_IMPORT_STR, FLOW_VOTE_STRATEGY_IMPORT_STR):
+                # CORE5 and Flow Vote quantities were frozen at Close_T. Quotes are optional
                 # diagnostics, not a dependency or a reason to resize/block them.
                 close_price_dict = dict(decision_plan_obj.snapshot_metadata_dict["sizing_close_price_map_dict"])
+                frozen_source_str = "core5.frozen_close_t" if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR else "flow_vote.frozen_close_t"
                 live_price_snapshot_obj = LivePriceSnapshot(
                     account_route_str=decision_plan_obj.account_route_str,
                     snapshot_timestamp_ts=decision_plan_obj.signal_timestamp_ts,
-                    price_source_str="core5.frozen_close_t",
+                    price_source_str=frozen_source_str,
                     asset_reference_price_map=close_price_dict,
-                    asset_reference_source_map_dict={asset_str: "core5.frozen_close_t" for asset_str in close_price_dict})
+                    asset_reference_source_map_dict={asset_str: frozen_source_str for asset_str in close_price_dict})
             else:
                 live_price_snapshot_obj = broker_adapter_obj.get_live_price_snapshot(
                     decision_plan_obj.account_route_str,
@@ -3349,9 +3357,10 @@ def submit_ready_vplans(
         guarded_dispatch_bool = is_guarded_release_bool(release_obj)
         if guarded_dispatch_bool:
             broker_order_request_list = build_broker_order_request_list_from_vplan(vplan_obj)
-            if as_of_ts >= moo_dispatch_deadline_ts(vplan_obj):
+            if as_of_ts >= dispatch_deadline_ts(vplan_obj):
                 reason_str = record_dispatch_failure(state_store_obj, release_obj, vplan_obj,
-                    broker_order_request_list, ValueError("MOO dispatch deadline has passed."),
+                    broker_order_request_list, ValueError(("MOC" if vplan_obj.execution_policy_str == "next_close_moc" else "MOO")
+                        + " dispatch deadline has passed."),
                     as_of_ts, before_send_bool=True)
                 blocked_action_count_int += 1
                 reason_counter_obj[reason_str] += 1
@@ -3365,7 +3374,7 @@ def submit_ready_vplans(
             reason_counter_obj["submission_window_expired"] += 1
             if release_obj.strategy_import_str.startswith("strategies.mr_capsule."):
                 state_store_obj.block_unsubmitted_daily_cycle(int(vplan_obj.decision_plan_id_int), "expired")
-            elif release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
+            elif release_obj.strategy_import_str in (CORE5_STRATEGY_IMPORT_STR, FLOW_VOTE_STRATEGY_IMPORT_STR):
                 state_store_obj.block_unsubmitted_daily_cycle(int(vplan_obj.decision_plan_id_int), "expired")
             else:
                 state_store_obj.mark_vplan_status(int(vplan_obj.vplan_id_int or 0), "expired")
@@ -3425,6 +3434,30 @@ def submit_ready_vplans(
                     broker_order_request_list, exception_obj, as_of_ts, before_send_bool=True)
                 reason_counter_obj[reason_str] += 1
                 log_event(core5_block_reason_str, _build_vplan_log_payload_dict(release_obj, vplan_obj, as_of_ts, {"error_str": str(exception_obj)}), log_path_str=log_path_str)
+                continue
+        if release_obj.strategy_import_str == FLOW_VOTE_STRATEGY_IMPORT_STR:
+            flow_vote_block_reason_str = "flow_vote_pre_submit_account_changed"
+            try:
+                # *** CRITICAL*** Never send at or after the closing cutoff: a late MOC is rejected or becomes a later trade.
+                if as_of_ts >= dispatch_deadline_ts(vplan_obj):
+                    raise ValueError("Flow Vote MOC submission cutoff has passed.")
+                if not release_obj.enabled_bool:
+                    raise ValueError("Flow Vote release is disabled.")
+                validate_flow_vote_release(release_obj)
+                fresh_flow_vote_snapshot_obj = broker_adapter_obj.get_flow_vote_account_snapshot(vplan_obj.account_route_str)
+                if fresh_flow_vote_snapshot_obj.account_route_str != vplan_obj.account_route_str:
+                    raise ValueError("Flow Vote snapshot belongs to another account.")
+                require_flow_vote_position_match(vplan_obj.current_broker_position_map, fresh_flow_vote_snapshot_obj.position_amount_map)
+                if fresh_flow_vote_snapshot_obj.open_order_id_list:
+                    raise ValueError("Flow Vote account has outstanding orders before submission.")
+                # As CORE5 (owner decision 2026-10-11): no margin, funding or borrow preview. IBKR's own checks accept or
+                # reject each order; the daily close records a rejected intent as an exception and the next decision catches up.
+            except Exception as exception_obj:
+                blocked_action_count_int += 1
+                reason_str = record_dispatch_failure(state_store_obj, release_obj, vplan_obj,
+                    broker_order_request_list, exception_obj, as_of_ts, before_send_bool=True)
+                reason_counter_obj[reason_str] += 1
+                log_event(flow_vote_block_reason_str, _build_vplan_log_payload_dict(release_obj, vplan_obj, as_of_ts, {"error_str": str(exception_obj)}), log_path_str=log_path_str)
                 continue
         if release_obj.strategy_import_str.startswith("strategies.mr_capsule."):
             # *** CRITICAL *** A saved VPlan may wait after it was built. Recheck
@@ -3505,7 +3538,7 @@ def submit_ready_vplans(
         try:
             if guarded_dispatch_bool:
                 broker_order_request_list = [replace(request_obj,
-                    submission_deadline_timestamp_str=moo_dispatch_deadline_ts(vplan_obj).isoformat())
+                    submission_deadline_timestamp_str=dispatch_deadline_ts(vplan_obj).isoformat())
                     for request_obj in broker_order_request_list]
             if release_obj.strategy_import_str in MR_CAPSULE_STRATEGY_IMPORT_TUPLE:
                 broker_order_request_list.sort(key=lambda request_obj: (
@@ -3857,6 +3890,9 @@ def eod_snapshot(
             broker_adapter_for_release_obj.get_core5_account_snapshot(
                 release_obj.account_route_str, include_portfolio_valuation_bool=release_obj.mode_str == "live")
             if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR
+            else broker_adapter_for_release_obj.get_flow_vote_account_snapshot(
+                release_obj.account_route_str, include_portfolio_valuation_bool=release_obj.mode_str == "live")
+            if release_obj.strategy_import_str == FLOW_VOTE_STRATEGY_IMPORT_STR
             else broker_adapter_for_release_obj.get_capsule_account_snapshot(
                 release_obj.account_route_str, include_portfolio_valuation_bool=release_obj.mode_str == "live")
             if (release_obj.strategy_import_str.startswith("strategies.mr_capsule.") or release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR)
@@ -3864,7 +3900,7 @@ def eod_snapshot(
             if release_obj.mode_str == "live"
             else broker_adapter_for_release_obj.get_account_snapshot(release_obj.account_route_str))
         requires_close_snapshot_bool = (
-            release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR
+            release_obj.strategy_import_str in (CORE5_STRATEGY_IMPORT_STR, FLOW_VOTE_STRATEGY_IMPORT_STR)
             or release_obj.strategy_import_str.startswith("strategies.mr_capsule.")
             or release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR
         )
@@ -3882,7 +3918,7 @@ def eod_snapshot(
                 or broker_snapshot_obj.open_order_id_list
             ):
                 blocked_action_count_int += 1
-                reason_code_str = "dv2_ind_eod_source_untrusted" if release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR else "mr_capsule_eod_source_untrusted" if release_obj.strategy_import_str.startswith("strategies.mr_capsule.") else "core5_eod_source_untrusted"
+                reason_code_str = "dv2_ind_eod_source_untrusted" if release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR else "mr_capsule_eod_source_untrusted" if release_obj.strategy_import_str.startswith("strategies.mr_capsule.") else "flow_vote_eod_source_untrusted" if release_obj.strategy_import_str == FLOW_VOTE_STRATEGY_IMPORT_STR else "core5_eod_source_untrusted"
                 reason_counter_obj[reason_code_str] += 1
                 log_event(reason_code_str, _build_release_log_payload_dict(release_obj, as_of_ts, {"broker_snapshot_timestamp_str": broker_snapshot_obj.snapshot_timestamp_ts.isoformat(), "open_order_id_list": broker_snapshot_obj.open_order_id_list}), log_path_str=log_path_str)
                 continue

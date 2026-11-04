@@ -12,6 +12,7 @@ from alpha.live import runner, scheduler_utils
 from alpha.live.daily_reconcile import (
     DAILY_TERMINAL_STATUS_SET,
     _exception_list as build_daily_exception_list,
+    daily_settlement_timestamp_ts,
     is_daily_reconcile_release_bool,
 )
 from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR
@@ -221,7 +222,9 @@ def get_scheduler_decision(
                 dispatched_bool = current_vplan_obj is not None and current_vplan_obj.status_str in {"submitting", "submitted", "parked"}
                 if (as_of_ts >= target_ts - timedelta(minutes=2) or dispatched_bool
                         or latest_decision_plan_obj.status_str in {"expired", "blocked"}):
-                    reconcile_due_ts = min(close_ts, target_ts + timedelta(seconds=reconcile_grace_seconds_int))
+                    reconcile_due_ts = (daily_settlement_timestamp_ts(latest_decision_plan_obj, release_obj.session_calendar_id_str)
+                        if latest_decision_plan_obj.execution_policy_str == "next_close_moc"
+                        else min(close_ts, target_ts + timedelta(seconds=reconcile_grace_seconds_int)))
                     daily_check_dict = _build_daily_check_dict(
                         state_store_obj, release_obj, latest_decision_plan_obj, current_vplan_obj, as_of_ts=as_of_ts)
                     matched_wait_bool = daily_check_dict is not None and bool(daily_check_dict["match_bool"])

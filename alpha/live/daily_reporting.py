@@ -9,7 +9,7 @@ import json
 import math
 
 from alpha.live import scheduler_utils
-from alpha.live.daily_reconcile import is_daily_reconcile_release_bool
+from alpha.live.daily_reconcile import daily_settlement_timestamp_ts, is_daily_reconcile_release_bool
 
 
 REPORT_ATTEMPT_LEASE = timedelta(minutes=30)
@@ -212,7 +212,8 @@ def claim_post_close_report_attempt(state_store_obj, release_obj, decision_plan_
     if not is_daily_reconcile_release_bool(release_obj):
         raise ValueError("Post-close reporting is limited to CORE5 and MR capsule.")
     close_ts = _session_close_ts(decision_plan_obj.target_execution_timestamp_ts, release_obj.session_calendar_id_str)
-    if as_of_ts < close_ts:
+    # The closing-auction prints arrive after the bell: a Flow Vote report waits for the settlement time.
+    if as_of_ts < daily_settlement_timestamp_ts(decision_plan_obj, release_obj.session_calendar_id_str):
         return False
     with state_store_obj._connect() as connection_obj:
         connection_obj.execute("""CREATE TABLE IF NOT EXISTS daily_post_close_report (

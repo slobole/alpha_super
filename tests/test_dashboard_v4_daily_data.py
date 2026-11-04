@@ -25,7 +25,7 @@ TOP_KEY_SET = {"status_str", "reason_str", "as_of_timestamp_str", "current_bool"
     "opening_dispatch_dict", "execution_result_dict", "completion_request_list",
     "pod_alert_list", "execution_alert_list", "post_close_report_dict", "open_previous_list",
     "open_previous_truncated_bool", "last_closed_dict", "signal_session_dict", "session_close_timestamp_str",
-    "next_open_timestamp_str"}
+    "next_open_timestamp_str", "execution_policy_str"}
 WATCHDOG_KIND_TO_STATUS_DICT = {"decision_incomplete": "no_decision", "opening_not_dispatched": "not_sent",
     "opening_dispatch_unconfirmed": "dispatch_unconfirmed", "cycle_open_after_close": "open_after_close"}
 # Writers stamp some rows with wall time; tests read at fixed 2026-10 instants.

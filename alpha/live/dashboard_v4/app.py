@@ -431,7 +431,7 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         cycle_list = pod_page_dict["cycle_list"]
         for item_dict in cycle_list:
             item_dict["url_str"] = pod_url_str(cycle=item_dict["cycle_key_str"], tab="plan")
-            session_str = "Close" if item_dict.get("execution_policy_str") == "same_day_moc" else "Open"
+            session_str = "Close" if item_dict.get("execution_policy_str") in ("same_day_moc", "next_close_moc") else "Open"
             date_str = item_dict.get("session_date_str") or "Unknown date"
             item_dict["label_str"] = date_str + " · " + session_str
         selected_index_int = next((index_int for index_int, item_dict in enumerate(cycle_list) if item_dict["cycle_key_str"] == selected_cycle_str), -1)

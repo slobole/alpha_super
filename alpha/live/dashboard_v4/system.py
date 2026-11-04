@@ -15,7 +15,7 @@ PHASE_LABEL_DICT = {"build_decision_plan": "Decision", "build_vplan": "Plan",
     "submit_vplan": "Submit", "post_execution_reconcile": "Position check",
     "eod_snapshot": "EOD", "expire_stale": "Expired plans", "idle_probe": "Saved state"}
 POLICY_LABEL_DICT = {"next_open_moo": "Next open", "next_open_market": "Next open",
-    "next_month_first_open": "First open of month", "same_day_moc": "At the close"}
+    "next_month_first_open": "First open of month", "same_day_moc": "At the close", "next_close_moc": "Next close"}
 
 
 def _timestamp_ts(value_obj):

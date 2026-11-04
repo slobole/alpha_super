@@ -37,6 +37,8 @@ from collections import Counter
 from datetime import datetime, timedelta
 
 from alpha.live.daily_watchdog import OPENING_DISPATCH_GRACE_MINUTES_INT
+from alpha.live.guarded_dispatch import MOC_DISPATCH_CUTOFF_MINUTES_INT
+from alpha.live.scheduler_utils import DEFAULT_CLOSE_SUBMISSION_LEAD_MINUTES_INT
 from alpha.live.dashboard_v3.filters import MARKET_TIMEZONE_OBJ
 from alpha.live.dashboard_v4.cycle import _step_dict, _timestamp_dt
 
@@ -119,7 +121,14 @@ def build_daily_steps_and_status(pod_row_dict, data_step_dict, *, now_dt: dateti
     target_dt = _timestamp_dt(decision_dict.get("target_execution_timestamp_str"))
     close_dt = _timestamp_dt(daily_dict.get("session_close_timestamp_str"))
     cutoff_dt = _timestamp_dt(signal_dict.get("decision_cutoff_timestamp_str"))
-    send_dt = target_dt - DISPATCH_LEAD if target_dt is not None else None
+    closing_bool = daily_dict.get("execution_policy_str") == "next_close_moc"
+    # A closing batch is sent at the close minus 20 and may not be sent at or after the close minus 15: show the send,
+    # count the grace from the cutoff. An opening batch keeps its one time, the open minus two.
+    dispatch_cutoff_dt = (target_dt - (timedelta(minutes=MOC_DISPATCH_CUTOFF_MINUTES_INT) if closing_bool else DISPATCH_LEAD)
+        if target_dt is not None else None)
+    send_dt = (target_dt - timedelta(minutes=DEFAULT_CLOSE_SUBMISSION_LEAD_MINUTES_INT)
+        if closing_bool and target_dt is not None else dispatch_cutoff_dt)
+    auction_str = "closing" if closing_bool else "opening"
     if decision_dict and (target_dt is None or close_dt is None):
         return _unknown_result_dict(now_dt)
     data_ready_bool = data_step_dict.get("state_str") == "Done"
@@ -144,8 +153,10 @@ def build_daily_steps_and_status(pod_row_dict, data_step_dict, *, now_dt: dateti
     attempted_int = _int(dispatch_dict.get("attempted_count_int"))
     never_int = _int(dispatch_dict.get("never_dispatched_count_int"))
     incomplete_bool = reason_str == "opening_dispatch_incomplete"
-    deadline_dt = _timestamp_dt(dispatch_dict.get("dispatch_deadline_timestamp_str")) or send_dt
-    grace_bool = target_dt is not None and check_dt >= target_dt + OPENING_GRACE
+    deadline_dt = _timestamp_dt(dispatch_dict.get("dispatch_deadline_timestamp_str")) or dispatch_cutoff_dt
+    # The grace runs from the open for an opening batch and from the send cutoff (close minus 15) for a closing one.
+    grace_anchor_dt = dispatch_cutoff_dt if closing_bool else target_dt
+    grace_bool = grace_anchor_dt is not None and check_dt >= grace_anchor_dt + OPENING_GRACE
     unsent_plan_bool = vplan_status_str in {None, "ready"} and decision_status_str in UNDISPATCHED_DECISION_STATUS_SET
     exception_list = result_dict.get("exception_list") or []
     exception_count_int = _int(result_dict.get("exception_count_int")) or len(exception_list)
@@ -175,12 +186,12 @@ def build_daily_steps_and_status(pod_row_dict, data_step_dict, *, now_dt: dateti
             "Orders may already be live. Check broker orders and fills before any action; do not resend.")
     elif subject_dict and incomplete_bool and attempted_int and never_int:
         status_dict = _status_dict("partly_sent", f"Partly sent ({attempted_int} of {attempted_int + never_int})",
-            f"{never_int} opening order{'s' if never_int != 1 else ''} never reached the broker. "
+            f"{never_int} {auction_str} order{'s' if never_int != 1 else ''} never reached the broker. "
             "Check broker orders; do not resend. The day closes from holdings.")
     elif subject_dict and ((incomplete_bool and not attempted_int) or (unsent_plan_bool and grace_bool)
             or vplan_status_str in {"blocked", "expired"}):
         status_dict = _status_dict("not_sent", "Not sent",
-            "The opening batch never reached the broker. Do not resend: the day closes from holdings with exceptions.")
+            f"The {auction_str} batch never reached the broker. Do not resend: the day closes from holdings with exceptions.")
     elif subject_dict and reason_str == "dispatch_retry_pending" and deadline_dt is not None and check_dt < deadline_dt:
         status_dict = _status_dict("retrying_send", "Retrying send",
             "Transient broker error · retry before " + _hm_str(deadline_dt, now_dt) + " ET")
@@ -195,12 +206,13 @@ def build_daily_steps_and_status(pod_row_dict, data_step_dict, *, now_dt: dateti
     elif subject_dict and vplan_status_str == "submitted" and check_dt < close_dt:
         completing_str = (" · completing exit " + ", ".join(completion_asset_list) + " (MKT)") if completion_asset_list else ""
         status_dict = _status_dict("trading", "Trading" + completing_str,
-            "Opening orders sent · closes " + _hm_str(close_dt, now_dt) + " ET")
+            auction_str.capitalize() + " orders sent · closes " + _hm_str(close_dt, now_dt) + " ET")
     elif subject_dict and vplan_status_str == "submitting":
-        status_dict = _status_dict("sending", "Sending", "The opening batch is being sent.")
+        status_dict = _status_dict("sending", "Sending", f"The {auction_str} batch is being sent.")
     elif subject_dict and unsent_plan_bool and not grace_bool:
         plan_str = f"Plan #{vplan_dict['vplan_id_int']}" if vplan_dict else f"Decision #{decision_dict.get('decision_plan_id_int')}"
-        status_dict = _status_dict("ready", "Ready · sends " + _hm_str(send_dt, now_dt), plan_str + " · trades at the open")
+        status_dict = _status_dict("ready", "Ready · sends " + _hm_str(send_dt, now_dt),
+            plan_str + (" · trades at the close" if closing_bool else " · trades at the open"))
     elif owed_bool and data_ready_bool and check_dt < cutoff_dt:
         status_dict = _status_dict("deciding", "Deciding", "Data ready · decision due " + _hm_str(cutoff_dt, now_dt) + " ET")
     else:
@@ -241,7 +253,8 @@ def build_daily_steps_and_status(pod_row_dict, data_step_dict, *, now_dt: dateti
     elif terminal_bool or grace_bool or decision_status_str in {"blocked", "expired"}:
         plan_dict = _step_dict("Plan", "Late", "No plan", now_dt)
     else:
-        plan_dict = _step_dict("Plan", "Planned", "Builds before the open", now_dt, planned_dt=submission_dt)
+        plan_dict = _step_dict("Plan", "Planned", "Builds before the close" if closing_bool else "Builds before the open",
+            now_dt, planned_dt=submission_dt)
 
     sent_int, ack_int = _int(vplan_dict.get("sent_order_count_int")), _int(vplan_dict.get("ack_count_int"))
     count_str = f"{sent_int} sent · {ack_int} ack"
@@ -283,7 +296,7 @@ def build_daily_steps_and_status(pod_row_dict, data_step_dict, *, now_dt: dateti
     elif check_dt >= target_dt:
         fill_dict = _step_dict("Fill", "Now", fill_fact_str, now_dt, planned_dt=target_dt)
     else:
-        fill_dict = _step_dict("Fill", "Planned", "Fills at the open", now_dt, planned_dt=target_dt)
+        fill_dict = _step_dict("Fill", "Planned", "Fills at the close" if closing_bool else "Fills at the open", now_dt, planned_dt=target_dt)
     if completion_asset_list and not terminal_bool:
         fill_dict["detail_str"] = "Completing exit " + ", ".join(completion_asset_list) + " (MKT)"
 

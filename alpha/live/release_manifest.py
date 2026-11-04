@@ -13,6 +13,8 @@ from alpha.live.momentum_legs_adapter import MOMENTUM_LEGS_STRATEGY_IMPORT_TUPLE
 from alpha.live.mr_capsule_adapter import MR_CAPSULE_PROFILE_TUPLE, MR_CAPSULE_STRATEGY_IMPORT_TUPLE, validate_mr_capsule_release
 from alpha.live.ndx_e2_adapter import NDX_E2_STRATEGY_IMPORT_TUPLE, validate_ndx_e2_release
 from alpha.live.dv2_ind_adapter import DV2_IND_STRATEGY_IMPORT_STR, validate_dv2_ind_release
+from alpha.live.flow_vote_adapter import FLOW_VOTE_EXECUTION_POLICY_STR, FLOW_VOTE_STRATEGY_IMPORT_STR, validate_flow_vote_release
+from data.flow_vote_snapshot_contract import FLOW_VOTE_PROFILE_STR
 from data.dv2_ind_snapshot_contract import DV2_IND_PROFILE_STR
 from data.momentum_legs_snapshot_contract import MOMENTUM_LEGS_PROFILE_TUPLE
 from alpha.live.order_clerk import validate_account_route_matches_mode
@@ -28,6 +30,7 @@ SUPPORTED_STRATEGY_IMPORT_TUPLE: tuple[str, ...] = (
     *MOMENTUM_LEGS_STRATEGY_IMPORT_TUPLE,
     *MR_CAPSULE_STRATEGY_IMPORT_TUPLE,
     CORE5_STRATEGY_IMPORT_STR,
+    FLOW_VOTE_STRATEGY_IMPORT_STR,
     "strategies.dv2.strategy_mr_dv2:DVO2Strategy",
     *HPI_STRATEGY_IMPORT_TUPLE,
     "strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash",
@@ -41,6 +44,7 @@ SUPPORTED_EXECUTION_POLICY_TUPLE: tuple[str, ...] = (
     "next_open_market",
     "same_day_moc",
     "next_month_first_open",
+    FLOW_VOTE_EXECUTION_POLICY_STR,
 )
 SUPPORTED_MODE_TUPLE: tuple[str, ...] = ("incubation", "paper", "live")
 SUPPORTED_SIGNAL_CLOCK_TUPLE: tuple[str, ...] = scheduler_utils.SUPPORTED_SIGNAL_CLOCK_TUPLE
@@ -50,6 +54,7 @@ SUPPORTED_DATA_PROFILE_TUPLE: tuple[str, ...] = (
     *MOMENTUM_LEGS_PROFILE_TUPLE,
     *MR_CAPSULE_PROFILE_TUPLE,
     CORE5_PROFILE_STR,
+    FLOW_VOTE_PROFILE_STR,
     "norgate_eod_sp500_pit",
     HPI_SP500_PROFILE_STR,
     "norgate_eod_etf_plus_vix_helper",
@@ -255,6 +260,12 @@ def validate_release_manifest(release_obj: LiveRelease, *, require_live_qualific
         validate_core5_release(release_obj, require_live_qualification_bool=require_live_qualification_bool)
     elif release_obj.data_profile_str == CORE5_PROFILE_STR:
         raise ValueError("The CORE5 data profile is reserved for Adaptive Macro CORE5.")
+    if release_obj.strategy_import_str == FLOW_VOTE_STRATEGY_IMPORT_STR:
+        validate_flow_vote_release(release_obj)
+    elif release_obj.data_profile_str == FLOW_VOTE_PROFILE_STR:
+        raise ValueError("The Flow Vote data profile is reserved for the Month-End Flow Vote.")
+    elif release_obj.execution_policy_str == FLOW_VOTE_EXECUTION_POLICY_STR:
+        raise ValueError("next_close_moc is reserved for the Month-End Flow Vote.")
     if release_obj.strategy_import_str not in SUPPORTED_STRATEGY_IMPORT_TUPLE:
         raise ValueError(
             "Unsupported strategy_import_str "
@@ -532,6 +543,15 @@ def validate_release_list(release_list: list[LiveRelease]) -> None:
         ):
             raise ValueError(
                 "A momentum capsule leg requires one dedicated account per leg. "
+                f"Enabled pods '{prior_release_obj.pod_id_str}' and '{release_obj.pod_id_str}' "
+                f"share account_route_str '{release_obj.account_route_str}' in mode '{release_obj.mode_str}'."
+            )
+        if prior_release_obj is not None and (
+            release_obj.strategy_import_str == FLOW_VOTE_STRATEGY_IMPORT_STR
+            or prior_release_obj.strategy_import_str == FLOW_VOTE_STRATEGY_IMPORT_STR
+        ):
+            raise ValueError(
+                "The Flow Vote requires one dedicated account per pod. "
                 f"Enabled pods '{prior_release_obj.pod_id_str}' and '{release_obj.pod_id_str}' "
                 f"share account_route_str '{release_obj.account_route_str}' in mode '{release_obj.mode_str}'."
             )

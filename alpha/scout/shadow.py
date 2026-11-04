@@ -48,6 +48,8 @@ SHADOW_PROVIDER_DICT: dict[str, str] = {
     "dv2_reaudition_20261002": "alpha.scout.specs.reaudition_shadow:shadow_daily_return_ser",
     "dv2_ndx_reaudition_20261002": "alpha.scout.specs.reaudition_shadow:shadow_daily_return_ser",
     "dv2_industry_etf_reaudition_20261002": "alpha.scout.specs.reaudition_shadow:shadow_daily_return_ser",
+    # Long SVXY (short volatility) / long VIXM with the RSI(2) boost, owner lock of 2026-11-03 (scripts/research/vrp_rsi2_build_20261103/).
+    "vrp_rsi2_locked_retro_20261103": "alpha.scout.specs.vrp_rsi2:shadow_daily_return_ser",
 }
 
 
