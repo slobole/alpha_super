@@ -856,7 +856,25 @@ def _build_mo_ibit_adaptive_momentum_regime_strategy_obj(
     return build_stress_test_strategy_obj(context_dict)
 
 
+def _load_vrp_svxy_vixm_rsi2_context_dict() -> dict[str, object]:
+    from strategies.vix_stuff.strategy_vrp_svxy_vixm_rsi2 import build_stress_test_context_dict
+
+    return build_stress_test_context_dict()
+
+
+def _build_vrp_svxy_vixm_rsi2_strategy_obj(context_dict: dict[str, object]) -> Strategy:
+    from strategies.vix_stuff.strategy_vrp_svxy_vixm_rsi2 import build_stress_test_strategy_obj
+
+    return build_stress_test_strategy_obj(context_dict)
+
+
 SUPPORTED_CRISIS_STRATEGY_SPEC_MAP: dict[str, CrisisStrategySpec] = {
+    "strategy_vrp_svxy_vixm_rsi2": CrisisStrategySpec(
+        strategy_key_str="strategy_vrp_svxy_vixm_rsi2",
+        load_context_fn=_load_vrp_svxy_vixm_rsi2_context_dict,
+        build_strategy_fn=_build_vrp_svxy_vixm_rsi2_strategy_obj,
+        full_history_replay_bool=True,
+    ),
     "strategy_mr_qpi_ibs_rsi_exit": CrisisStrategySpec(
         strategy_key_str="strategy_mr_qpi_ibs_rsi_exit",
         load_context_fn=_load_qpi_ibs_rsi_exit_context_dict,

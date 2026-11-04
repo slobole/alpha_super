@@ -253,6 +253,20 @@ for _name_str, _import_str in (
     GATED_SPEC_DICT[_name_str] = GatedSpec(_name_str, _import_str, _pickle_glob_str(_import_str), functools.partial(_run_hpi, _name_str))
 
 
+def _run_vrp_rsi2(capital_float: float):
+    from alpha.scout.specs import vrp_rsi2
+
+    inputs = vrp_rsi2.load_inputs()
+    return vrp_rsi2.simulate_config(inputs, vrp_rsi2.ENGINE_COST_MODEL, capital_float), inputs.close_df
+
+
+# Short SVXY / long VIXM with the RSI(2) boost (RESEARCH, 2026-11-03; alpha/scout/specs/vrp_rsi2.py): band-traded
+# full targets at the next open, at the engine's own costs.
+GATED_SPEC_DICT["vrp_rsi2"] = GatedSpec(
+    "vrp_rsi2", "strategies.vix_stuff.strategy_vrp_svxy_vixm_rsi2", _pickle_glob_str("strategies.vix_stuff.strategy_vrp_svxy_vixm_rsi2"), _run_vrp_rsi2,
+)
+
+
 def _engine_strategy(spec: GatedSpec, fresh_bool: bool, root_path: Path):
     if fresh_bool:
         module = importlib.import_module(spec.strategy_import_str)

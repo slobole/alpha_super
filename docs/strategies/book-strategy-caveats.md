@@ -68,6 +68,29 @@ small pod size. Capacity is at today's volume with opening-auction orders.
 | TLT short: borrow and margin | Account requirement | Borrow at 3% would cost -0.37 pp/yr | B-EOM-04 |
 | A live route needs close-auction orders submitted before the venue cutoff | Live risk | Not wired | Fix #23 |
 
+## VRP RSI2 sleeve — `strategy_vrp_svxy_vixm_rsi2`
+
+Build of 2026-11-03 ([record](../research/VRP_RSI2_BUILD_20261103.md)), owner lock. PM_READY (Candidate) for engine plumbing; forward shadow starts 2026-11-04. Fund adoption gates remain in force; not in a book.
+
+| Caveat | Direction | Size | Evidence |
+|---|---|---|---|
+| Chosen after seeing 2011-2026: RSI2 boost, 0.98 threshold, VIXM over VIXY | Optimistic | 460 prior trials; registered grid 429 cells; plan Sharpe about 0.70, not 0.93 | Ledger row 594, `SPEC_FROZEN.md` |
+| No threshold plateau | Optimistic | Contango threshold 0.96-1.05: Sharpe 0.82-1.01; 0.97 gives 0.82 | `research_checks.py` |
+| Book gain leans on the 2020 crash | Regime | Growth Plus, 10 points from CORE5: share 0.88 / 0.83, crash in T-bills 0.73 / 0.64 | `book_core5.py` |
+| One missed session is expensive | Live risk | Timing analyzer 2026-11-04: T+2 open 0.66 vs 0.92, closing auction 0.79; earlier check: one session late Sharpe 0.93 to 0.62, Feb 2018 -3% to -23%; IBKR cancelled MOO orders on 2026-11-02 | `research_checks.py` |
+| Fill cost not measured | Unmeasured | Book checks pass to 15 bp a side, fail at 20 bp | `book_core5.py` |
+| SVXY overnight gap | Tail | A doubling of front VIX futures is about -50% for SVXY, about -15% for the pod at a typical 0.3 weight | Arithmetic on -0.5x |
+| SVXY turnover sets capacity | Limit | House MOO model: 13.5 bp a side at a $250K pod, 18 bp at $500K, 24.5 bp at $1M; the 15 bp line is a $300-400K pod (about a $3-4M fund at 10 points); turnover 19x NAV a year | Capacity analyzer 2026-11-04, build record |
+| VIXM capacity and closure | Limit | VIXM ADV about $3.3M; a VIX-30 entry is 11% of ADV at a $10M fund; fund assets about $28-38M (2026-09 audit) | `research_checks.py`, readiness audit C-VIXM-03/04 |
+| VIXM opening print | Note, small here | VIXM filled at the T+1 close: 0.89 vs 0.93; first-day share of the leg's P&L 18% | `vixm_checks.py` |
+| K-1 and 1446(f) | Account requirement | Qualified notice 2026-02-26 covers SVXY and VIXM; brokers may rely, need not; K-1 for the fund unverified | Study record |
+| 2006-2011 proxy | Optimistic timing | VX futures settlements at the same close; post-2011 the proxy reads 0.67 vs the ETFs' 0.93 | `research_checks.py` |
+| PM history start | Explicit limit | Earliest supported start 2011-10-05; earlier books fail on missing SVXY bars | Engine calendar validation |
+| SPX source validation | Fixed 2026-11-04 | Rejects missing/nonfinite/non-positive SPX, including warmup; 3,981 audited dates valid, also without padding | Source audit and before/after replay in build record |
+| SVXY history halved before 2018-02-28 | Note | Keeps the same short-VIX exposure; live has no halving | Module docstring |
+| Idle cash at 0% in the engine | Conservative | 75% of NAV in cash; books add T-bills separately | Engine policy |
+| Not wired | Live risk | No data profile, adapter or MOO route; exit failsafe needed first | `SPEC_FROZEN.md` |
+
 ## Sector ETF IBS Downshock — `strategy_mr_us_sector_etf_ibs_downshock_vox_iyr`
 
 | Caveat | Direction | Size | Evidence |
