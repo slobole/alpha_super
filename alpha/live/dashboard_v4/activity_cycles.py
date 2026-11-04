@@ -82,7 +82,7 @@ def _project_list(overview_dict, pod_dict, source_dict, cycle_dict, *, as_of_ts,
         return row_list
     reconcile_ts = _timestamp_ts((source_dict.get("reconciliation_dict") or {}).get("created_timestamp_str"))
     policy_str = cycle_dict.get("execution_policy_str")
-    if reconcile_ts is None or not from_ts <= reconcile_ts <= as_of_ts or policy_str not in {"same_day_moc", "next_open_moo", "next_open_market", "next_month_first_open"}:
+    if reconcile_ts is None or not from_ts <= reconcile_ts <= as_of_ts or policy_str not in {"same_day_moc", "next_open_moo", "next_open_market", "next_month_first_open", "next_close_moc"}:
         return row_list
     timestamp_dict = {"Data": None,
         "Decide": _timestamp_ts(source_dict["decision_dict"].get("created_timestamp_str")),
@@ -110,7 +110,7 @@ def _project_list(overview_dict, pod_dict, source_dict, cycle_dict, *, as_of_ts,
             detail_str=step_list[4]["fact_str"], tab_str="exceptions" if exception_count_int else "reconcile")
     else:
         row_dict = _row_dict(pod_dict, cycle_dict, stage_str="cycle", timestamp_ts=reconcile_ts,
-            title_str=("Close" if policy_str == "same_day_moc" else "Open") + " cycle completed.",
+            title_str=("Close" if policy_str in ("same_day_moc", "next_close_moc") else "Open") + " cycle completed.",
             detail_str=step_list[4]["fact_str"] + " · Positions checked", tab_str="plan")
     row_dict["fold_candidate_bool"] = True  # Caller must retain/block on exact-cycle historical problems.
     title_dict = {"Data": "Data ready.", "Decide": "Decision saved.", "Plan": "Plan saved.",

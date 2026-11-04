@@ -30,6 +30,7 @@ import pandas as pd
 
 from alpha.live.models import LiveRelease
 from data.dv2_ind_snapshot_contract import DV2_IND_PROFILE_STR
+from data.flow_vote_snapshot_contract import FLOW_VOTE_PROFILE_STR
 from data.norgate_loader import is_snapshot_mode_enabled_bool, load_latest_snapshot_session_label_ts
 from data.norgate_snapshot_store import CORE5_PROFILE_STR, MR_CAPSULE_DV2_PROFILE_STR, MR_CAPSULE_HPI_PROFILE_STR, NDX_E2_PROFILE_STR
 
@@ -37,6 +38,8 @@ from data.norgate_snapshot_store import CORE5_PROFILE_STR, MR_CAPSULE_DV2_PROFIL
 DEFAULT_SUBMISSION_BUFFER_MINUTES_INT = 10
 DEFAULT_OPEN_SUBMISSION_LEAD_SECONDS_INT = (6 * 60) + 30
 DEFAULT_OPEN_MARKET_EXPIRY_GRACE_SECONDS_INT = 60
+# next_close_moc: submit 20 minutes before the next session's close; guarded_dispatch stops sends 15 minutes before it.
+DEFAULT_CLOSE_SUBMISSION_LEAD_MINUTES_INT = 20
 DEFAULT_SNAPSHOT_READY_BUFFER_MINUTES_INT = 10
 PRE_CLOSE_SIGNAL_BUFFER_MINUTES_INT = 15
 SUPPORTED_SESSION_CALENDAR_ID_TUPLE: tuple[str, ...] = ("XNYS", "XTSE", "XASX")
@@ -52,6 +55,7 @@ SIGNAL_CLOCK_ALIAS_MAP: dict[str, str] = {
 }
 DATA_PROFILE_HEARTBEAT_SYMBOL_MAP: dict[str, str] = {
     DV2_IND_PROFILE_STR: "$SPXTR",
+    FLOW_VOTE_PROFILE_STR: "$SPXTR",
     NDX_E2_PROFILE_STR: "$SPX",
     CORE5_PROFILE_STR: "$SPX",
     MR_CAPSULE_DV2_PROFILE_STR: "$SPX",
@@ -425,6 +429,14 @@ def build_submission_timestamp_ts(
         )
         return session_close_timestamp_ts - timedelta(minutes=DEFAULT_SUBMISSION_BUFFER_MINUTES_INT)
 
+    if release_obj.execution_policy_str == "next_close_moc":
+        # *** CRITICAL*** Decided at Close_T, sent into the NEXT session's closing auction; never the signal session's own close.
+        next_session_label_ts = get_next_session_label_ts(session_label_ts, release_obj.session_calendar_id_str)
+        return get_session_close_timestamp_ts(
+            next_session_label_ts,
+            release_obj.session_calendar_id_str,
+        ) - timedelta(minutes=DEFAULT_CLOSE_SUBMISSION_LEAD_MINUTES_INT)
+
     if release_obj.execution_policy_str == "next_month_first_open":
         first_next_month_session_label_ts = get_first_next_month_session_label_ts(
             session_label_ts,
@@ -453,6 +465,10 @@ def build_target_execution_timestamp_ts(
 
     if release_obj.execution_policy_str == "same_day_moc":
         return get_session_close_timestamp_ts(session_label_ts, release_obj.session_calendar_id_str)
+
+    if release_obj.execution_policy_str == "next_close_moc":
+        next_session_label_ts = get_next_session_label_ts(session_label_ts, release_obj.session_calendar_id_str)
+        return get_session_close_timestamp_ts(next_session_label_ts, release_obj.session_calendar_id_str)
 
     if release_obj.execution_policy_str == "next_month_first_open":
         first_next_month_session_label_ts = get_first_next_month_session_label_ts(

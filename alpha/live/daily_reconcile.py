@@ -1,8 +1,9 @@
-"""CORE5/capsule daily settlement from fresh holdings and all-client open orders.
+"""Daily settlement (CORE5, capsules, DV2-IND, Flow Vote) from fresh holdings and all-client open orders.
 
 Fills are reporting records. They never determine whether this cycle can close.
 """
 from dataclasses import asdict, dataclass, field
+from datetime import timedelta
 import json
 import math
 
@@ -11,12 +12,26 @@ from alpha.live.core5_adapter import CORE5_CONTRACT_STR, CORE5_STRATEGY_IMPORT_S
 from alpha.live.execution_engine import build_broker_order_request_list_from_vplan
 from alpha.live.models import BrokerOrderRequest, BrokerSnapshot
 from alpha.live.dv2_ind_adapter import DV2_IND_STRATEGY_IMPORT_STR
+from alpha.live.flow_vote_adapter import FLOW_VOTE_CONTRACT_STR, FLOW_VOTE_STRATEGY_IMPORT_STR
 from alpha.live.mr_capsule_adapter import MR_CAPSULE_STRATEGY_IMPORT_TUPLE
 
 
 DAILY_TERMINAL_STATUS_SET = {"completed", "completed_with_exceptions"}
-DAILY_STRATEGY_IMPORT_TUPLE = (*MR_CAPSULE_STRATEGY_IMPORT_TUPLE, DV2_IND_STRATEGY_IMPORT_STR, CORE5_STRATEGY_IMPORT_STR)
+DAILY_STRATEGY_IMPORT_TUPLE = (*MR_CAPSULE_STRATEGY_IMPORT_TUPLE, DV2_IND_STRATEGY_IMPORT_STR, FLOW_VOTE_STRATEGY_IMPORT_STR, CORE5_STRATEGY_IMPORT_STR)
 QUANTITY_TOLERANCE_FLOAT = 1e-9
+FROZEN_SHARE_CONTRACT_SET = frozenset({CORE5_CONTRACT_STR, FLOW_VOTE_CONTRACT_STR})
+# A closing-auction cycle settles after the auction prints, never at the close bell itself.
+MOC_SETTLEMENT_GRACE_SECONDS_INT = 300
+
+
+def daily_settlement_timestamp_ts(decision_plan_obj, session_calendar_id_str):
+    """When a daily cycle may close: the target session's close, or five minutes after it for next_close_moc."""
+    target_ts = decision_plan_obj.target_execution_timestamp_ts
+    close_ts = scheduler_utils.get_session_close_timestamp_ts(
+        scheduler_utils.to_market_timestamp_ts(target_ts, session_calendar_id_str).date(), session_calendar_id_str)
+    if decision_plan_obj.execution_policy_str == "next_close_moc":
+        return close_ts + timedelta(seconds=MOC_SETTLEMENT_GRACE_SECONDS_INT)
+    return close_ts
 
 
 @dataclass(frozen=True)
@@ -158,7 +173,7 @@ def _exception_list(decision_plan_obj, vplan_obj, snapshot_obj, *, vplan_sent_bo
         weight_dict = (decision_plan_obj.full_target_weight_map_dict if decision_plan_obj.decision_book_type_str == "full_target_weight_book"
             else decision_plan_obj.entry_target_weight_map_dict)
         share_dict = dict(decision_plan_obj.target_share_map_dict)
-        if decision_plan_obj.snapshot_metadata_dict.get("sizing_contract_str") == CORE5_CONTRACT_STR:
+        if decision_plan_obj.snapshot_metadata_dict.get("sizing_contract_str") in FROZEN_SHARE_CONTRACT_SET:
             share_dict.update(decision_plan_obj.snapshot_metadata_dict["fixed_target_share_map_dict"])
         share_dict.update({asset_str: 0.0 for asset_str in decision_plan_obj.exit_asset_set})
         if decision_plan_obj.rebalance_omitted_assets_to_zero_bool:
@@ -216,7 +231,8 @@ def reconcile_daily_cycle(state_store_obj, broker_adapter_obj, release_obj, deci
     daily_snapshot_obj = initial_daily_snapshot_obj or _refresh(broker_adapter_obj, release_obj, as_of_ts)
     _validate_snapshot(daily_snapshot_obj, release_obj, as_of_ts)
     completion_request_list, reporting_result_list = [], []
-    if as_of_ts >= close_ts:
+    # *** CRITICAL*** A closing-auction order is still working at the bell: settle only after the prints (close + grace).
+    if as_of_ts >= daily_settlement_timestamp_ts(decision_plan_obj, release_obj.session_calendar_id_str):
         owned_ref_set = load_daily_owned_order_ref_set(state_store_obj, release_obj, decision_plan_obj,
             daily_snapshot_obj.open_order_row_list)
         if any(row_dict.get("order_ref_str") in owned_ref_set for row_dict in daily_snapshot_obj.open_order_row_list):

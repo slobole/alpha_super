@@ -3,7 +3,7 @@
 TL;DR: these files are safe examples only. Real client release YAMLs live under
 `alpha/live/releases/<client_id>/` on each VPS and are ignored by Git.
 
-Daily pods (CORE5 and the MR capsule templates) go in the same folder as
+Daily pods (CORE5, the Month-End Flow Vote and the MR capsule templates) go in the same folder as
 NDX/TAA. Every serve reads all YAMLs under the root, so one rejected YAML stops
 every serve there, NDX/TAA included: validate the complete staged root first.
 See "Validate Staged Releases Before Copying Them Into The Active Root" in
@@ -72,6 +72,13 @@ decision 2026-10-11). For local forward tests,
 use `incubation` and a `SIM_` route; `paper` requires its own paper account.
 See [CORE5 wiring and deployment prerequisites](../CORE5_WIRING_20261005.md).
 
+The Month-End Flow Vote uses the same contract in the closing auction: a disabled `live` template, a dedicated
+USD margin account (its next-month leg holds TLT short), budget `1.0` and `auto_submit_enabled_bool: true`.
+It decides at Close_T and sends MOC orders into the NEXT session's close (`next_close_moc`): 20 minutes
+before that close, never at or after close minus 15 minutes. See
+[Flow Vote wiring](../FLOW_VOTE_MOC_WIRING_20261104.md). Move its YAML out of the releases root before reverting
+to code without this strategy, as for the capsule templates.
+
 The MR capsule templates (`pod_mr_*`) ship as disabled `paper` releases; `live`
 is allowed. Neither CORE5 nor the capsule needs a margin attestation in YAML
 (owner decision 2026-10-11: the accounts are margin accounts). An older YAML
@@ -85,6 +92,7 @@ releases root, even a disabled one: every serve parses the whole root, so it wou
 | Template | Wired strategy | Data profile |
 |---|---|---|
 | `pod_taa_adaptive_macro_core5_daily_moo.yaml.example` | `strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5` | `norgate_eod_core5` |
+| `pod_taa_month_end_flow_vote_daily_moc.yaml.example` | `strategies.taa_beyond_6040.strategy_taa_month_end_flow_vote` | `norgate_eod_flow_vote` |
 | `pod_dv2_daily_moo.yaml.example` | `strategies.dv2.strategy_mr_dv2:DVO2Strategy` | `norgate_eod_sp500_pit` |
 | `pod_hpi_sp500_2_3_5_vote_daily_moo.yaml.example` | `strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote` | `norgate_eod_sp500_hpi_pit` |
 | `pod_taa_btal_fallback_tqqq_vix_cash_monthly_open.yaml.example` | `strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash` | `norgate_eod_etf_plus_vix_helper` |

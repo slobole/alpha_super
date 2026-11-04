@@ -777,13 +777,14 @@ class LiveStateStore(CoreLiveStateStore):
             # A partial/missed rebalance is closed operationally but is not an
             # execution receipt. Replay can catch it up at the following open.
             target_dict = metadata_dict.get("fixed_target_share_map_dict")
-            candidate_receipt_dict = metadata_dict.get("core5_candidate_execution_receipt_dict")
-            if candidate_receipt_dict is not None and target_dict is not None:
-                actual_dict = broker_snapshot_obj.position_amount_map
-                achieved_bool = all(abs(float(target_dict.get(asset_str, 0)) - float(actual_dict.get(asset_str, 0))) <= 1e-9
-                    for asset_str in set(target_dict) | set(actual_dict))
-                strategy_state_dict["core5_execution_receipt_dict"] = dict(candidate_receipt_dict if achieved_bool else
-                    metadata_dict.get("base_strategy_state_dict", {}).get("core5_execution_receipt_dict", {}))
+            for receipt_prefix_str in ("core5", "flow_vote"):
+                candidate_receipt_dict = metadata_dict.get(f"{receipt_prefix_str}_candidate_execution_receipt_dict")
+                if candidate_receipt_dict is not None and target_dict is not None:
+                    actual_dict = broker_snapshot_obj.position_amount_map
+                    achieved_bool = all(abs(float(target_dict.get(asset_str, 0)) - float(actual_dict.get(asset_str, 0))) <= 1e-9
+                        for asset_str in set(target_dict) | set(actual_dict))
+                    strategy_state_dict[f"{receipt_prefix_str}_execution_receipt_dict"] = dict(candidate_receipt_dict if achieved_bool else
+                        metadata_dict.get("base_strategy_state_dict", {}).get(f"{receipt_prefix_str}_execution_receipt_dict", {}))
             result_dict = {"status_str": status_str, "exception_list": exception_list,
                 "broker_snapshot_timestamp_str": broker_snapshot_obj.snapshot_timestamp_ts.isoformat(),
                 "completed_timestamp_str": as_of_ts.isoformat()}
@@ -1000,6 +1001,7 @@ class LiveStateStore(CoreLiveStateStore):
     def insert_vplan(self, vplan_obj: VPlan) -> VPlan:
         from alpha.live.mr_capsule_adapter import MR_CAPSULE_CONTRACT_STR
         from alpha.live.core5_adapter import CORE5_CONTRACT_STR
+        from alpha.live.flow_vote_adapter import FLOW_VOTE_CONTRACT_STR
 
         from alpha.live.daily_reconcile import DAILY_STRATEGY_IMPORT_TUPLE
         from alpha.live.dv2_ind_adapter import DV2_IND_SIZING_CONTRACT_STR
@@ -1035,9 +1037,9 @@ class LiveStateStore(CoreLiveStateStore):
             capsule_bool = decision_row_obj is not None and json.loads(
                 decision_row_obj["snapshot_metadata_json_str"]
             ).get("sizing_contract_str") == MR_CAPSULE_CONTRACT_STR
-            core5_bool = decision_row_obj is not None and json.loads(
-                decision_row_obj["snapshot_metadata_json_str"]).get("sizing_contract_str") == CORE5_CONTRACT_STR
-            if capsule_bool or core5_bool or (decision_row_obj is not None and json.loads(
+            frozen_share_bool = decision_row_obj is not None and json.loads(
+                decision_row_obj["snapshot_metadata_json_str"]).get("sizing_contract_str") in (CORE5_CONTRACT_STR, FLOW_VOTE_CONTRACT_STR)
+            if capsule_bool or frozen_share_bool or (decision_row_obj is not None and json.loads(
                     decision_row_obj["snapshot_metadata_json_str"]).get("sizing_contract_str") == DV2_IND_SIZING_CONTRACT_STR):
                 # Serialize creation with abandonment and another worker's creation.
                 connection_obj.execute("BEGIN IMMEDIATE")
@@ -1149,7 +1151,7 @@ class LiveStateStore(CoreLiveStateStore):
                         str(vplan_row_obj.live_reference_source_str or vplan_obj.live_price_source_str),
                     ),
                 )
-            if capsule_bool or core5_bool or (decision_row_obj is not None and json.loads(
+            if capsule_bool or frozen_share_bool or (decision_row_obj is not None and json.loads(
                     decision_row_obj["snapshot_metadata_json_str"]).get("sizing_contract_str") == DV2_IND_SIZING_CONTRACT_STR):
                 connection_obj.execute(
                     "UPDATE decision_plan SET status_str = 'vplan_ready', updated_timestamp_str = ? WHERE decision_plan_id_int = ?",
@@ -1211,6 +1213,7 @@ class LiveStateStore(CoreLiveStateStore):
     def claim_vplan_for_submission(self, vplan_id_int: int) -> bool:
         from alpha.live.mr_capsule_adapter import MR_CAPSULE_CONTRACT_STR
         from alpha.live.core5_adapter import CORE5_CONTRACT_STR
+        from alpha.live.flow_vote_adapter import FLOW_VOTE_CONTRACT_STR
 
         from alpha.live.daily_reconcile import DAILY_STRATEGY_IMPORT_TUPLE
         from alpha.live.dv2_ind_adapter import DV2_IND_SIZING_CONTRACT_STR
@@ -1227,9 +1230,9 @@ class LiveStateStore(CoreLiveStateStore):
             capsule_bool = decision_row_obj is not None and json.loads(
                 decision_row_obj["snapshot_metadata_json_str"]
             ).get("sizing_contract_str") == MR_CAPSULE_CONTRACT_STR
-            core5_bool = decision_row_obj is not None and json.loads(
-                decision_row_obj["snapshot_metadata_json_str"]).get("sizing_contract_str") == CORE5_CONTRACT_STR
-            if capsule_bool or core5_bool or (decision_row_obj is not None and json.loads(
+            frozen_share_bool = decision_row_obj is not None and json.loads(
+                decision_row_obj["snapshot_metadata_json_str"]).get("sizing_contract_str") in (CORE5_CONTRACT_STR, FLOW_VOTE_CONTRACT_STR)
+            if capsule_bool or frozen_share_bool or (decision_row_obj is not None and json.loads(
                     decision_row_obj["snapshot_metadata_json_str"]).get("sizing_contract_str") == DV2_IND_SIZING_CONTRACT_STR):
                 connection_obj.execute("BEGIN IMMEDIATE")
                 decision_row_obj = connection_obj.execute(

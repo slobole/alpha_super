@@ -1,0 +1,30 @@
+# Disabled deployment template. This is not a deployed release.
+# Dedicated USD margin account only: the next-month pair holds TLT short.
+# Orders go into the NEXT session's closing auction (MOC), sent 20 minutes before the close; nothing is sent after close minus 15 minutes.
+identity:
+  release_id: your_user.flow_vote.daily_moc.v1
+  user_id: your_user
+  pod_id: pod_flow_vote_01
+deployment:
+  mode: live
+  enabled_bool: false
+broker:
+  account_route: YOUR_FLOW_VOTE_ACCOUNT
+  host_str: 127.0.0.1
+  port_int: 7497 # Paper TWS port; choose the intended endpoint before activation.
+  client_id_int: 56 # Keep unique across processes connected to this Gateway.
+  timeout_seconds_float: 4.0
+strategy:
+  strategy_import_str: strategies.taa_beyond_6040.strategy_taa_month_end_flow_vote
+  data_profile_str: norgate_eod_flow_vote
+  params: {}
+market:
+  session_calendar_id_str: XNYS
+schedule:
+  signal_clock_str: eod_snapshot_ready
+  execution_policy_str: next_close_moc
+execution:
+  pod_budget_fraction_float: 1.0
+  auto_submit_enabled_bool: true # A daily pod sends on schedule; a manual send would miss the 15:40-15:45 window.
+risk:
+  risk_profile_str: flow_vote_margin

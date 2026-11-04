@@ -203,6 +203,9 @@ For this release:
 - submit for next open
 - broker order type becomes `MOO`
 
+`next_close_moc` (Month-End Flow Vote only): the decision from Close_T, MOC orders for the next session's
+closing auction, sent at that close minus 20 minutes and never at or after close minus 15 minutes.
+
 Used by:
 - scheduling in [scheduler_utils.py](../../alpha/live/scheduler_utils.py)
 - broker order type mapping in [strategy_host.py](../../alpha/live/strategy_host.py)

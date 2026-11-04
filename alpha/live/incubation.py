@@ -172,6 +172,9 @@ class IncubationBrokerAdapter(BrokerAdapter):
     def get_core5_account_snapshot(self, account_route_str: str, *, include_portfolio_valuation_bool: bool = False) -> BrokerSnapshot:
         return self.get_account_snapshot(account_route_str)
 
+    def get_flow_vote_account_snapshot(self, account_route_str: str, *, include_portfolio_valuation_bool: bool = False) -> BrokerSnapshot:
+        return self.get_account_snapshot(account_route_str)
+
     def get_live_price_snapshot(
         self,
         account_route_str: str,
@@ -725,7 +728,7 @@ class IncubationBrokerAdapter(BrokerAdapter):
                 return
             indexed_row_list = accepted_row_list
         pod_state_obj = self._get_pod_state_or_default(release_obj)
-        fill_price_field_str = "Close" if vplan_obj.execution_policy_str == "same_day_moc" else "Open"
+        fill_price_field_str = "Close" if vplan_obj.execution_policy_str in ("same_day_moc", "next_close_moc") else "Open"
         # *** CRITICAL*** Settlement date is the target execution session from
         # the VPlan, not the wall-clock date of this reconcile command.
         target_session_label_ts = scheduler_utils.session_label_from_timestamp_ts(
@@ -1008,6 +1011,6 @@ class IncubationBrokerAdapter(BrokerAdapter):
                 continue
             if target_session_label_ts.date().isoformat() != session_date_str:
                 continue
-            if vplan_obj.execution_policy_str == "same_day_moc":
+            if vplan_obj.execution_policy_str in ("same_day_moc", "next_close_moc"):
                 return "Close"
         return "Open"

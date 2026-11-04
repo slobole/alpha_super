@@ -135,6 +135,14 @@ def inspect_auto_reference_support_dict(release_obj: LiveRelease) -> dict[str, o
             "missing_parameter_list": [],
             "reason_str": "core5_accounting_bridge_required",
         }
+    if module_import_str == "strategies.taa_beyond_6040.strategy_taa_month_end_flow_vote":
+        # The generic reference refits a fresh account; the frozen Close_T books need the same cash/dividend/borrow bridge as CORE5.
+        return {
+            "supported_bool": False,
+            "module_import_str": module_import_str,
+            "missing_parameter_list": [],
+            "reason_str": "flow_vote_accounting_bridge_required",
+        }
     strategy_module_obj = importlib.import_module(module_import_str)
     run_variant_fn = getattr(strategy_module_obj, "run_variant", None)
     if run_variant_fn is None:
@@ -181,6 +189,11 @@ def run_auto_reference_strategy(
         raise ValueError(
             "CORE5 automatic reference requires an explicit broker cash/dividend/borrow accounting bridge; "
             "use the conditional decision/order parity checker instead."
+        )
+    if support_dict["reason_str"] == "flow_vote_accounting_bridge_required":
+        raise ValueError(
+            "Flow Vote automatic reference requires an explicit broker cash/dividend/borrow accounting bridge; "
+            "use the decision parity proof instead."
         )
     missing_parameter_list = list(support_dict["missing_parameter_list"])
     if len(missing_parameter_list) > 0:

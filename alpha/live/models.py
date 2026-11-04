@@ -57,7 +57,7 @@ class DecisionPlan:
     signal_timestamp_ts: datetime  # Timestamp of the approved signal snapshot.
     submission_timestamp_ts: datetime  # Earliest allowed submit time for the derived VPlan.
     target_execution_timestamp_ts: datetime  # Expected execution timestamp.
-    execution_policy_str: str  # next_open_moo / next_open_market / same_day_moc / next_month_first_open.
+    execution_policy_str: str  # next_open_moo / next_open_market / same_day_moc / next_month_first_open / next_close_moc.
     decision_base_position_map: dict[str, float]  # Position snapshot used by the strategy when the decision was built.
     snapshot_metadata_dict: dict[str, Any]  # Audit metadata about the signal snapshot.
     strategy_state_dict: dict[str, Any]  # Strategy memory carried to the next cycle.
