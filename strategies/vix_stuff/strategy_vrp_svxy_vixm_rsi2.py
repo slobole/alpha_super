@@ -1,4 +1,5 @@
-"""Volatility risk premium sleeve: short SVXY in VIX contango with an RSI(2) dip boost, long VIXM in a crash.
+"""Volatility risk premium sleeve: buys SVXY (short VIX futures inside the ETF) in VIX contango with an RSI(2) dip boost,
+and VIXM (long VIX futures inside the ETF) in a crash. Both are long ETF positions; no futures and no shorting.
 
 Frozen rule of scripts/research/vrp_rsi2_build_20261103/SPEC_FROZEN.md (owner lock of 2026-11-03, Scout registration
 vrp_rsi2_locked_retro_20261103). After the official Close_T:

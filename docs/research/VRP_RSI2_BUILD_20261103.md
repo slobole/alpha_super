@@ -4,7 +4,8 @@ Research only. Nothing here touches `alpha/live`, a broker route, a schedule or 
 
 ## Answer
 
-The owner's locked rule (short SVXY in VIX contango with an RSI(2) dip boost, long VIXM in a crash, T-bills otherwise)
+The owner's locked rule (buy SVXY, an ETF short VIX futures, in VIX contango with an RSI(2) dip boost; buy VIXM, an
+ETF long VIX futures, in a crash; T-bills otherwise; long ETF positions only)
 is built as an engine module, matches its Scout spec exactly, and is in forward shadow from 2026-11-04. It is not in a
 fund book. It enters one only under the adoption rule in
 [SPEC_FROZEN.md](../../scripts/research/vrp_rsi2_build_20261103/SPEC_FROZEN.md): 10 points from CORE5, measured fills
