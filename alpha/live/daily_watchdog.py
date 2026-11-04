@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from alpha.live import dashboard, scheduler_utils
 from alpha.live.daily_reconcile import DAILY_TERMINAL_STATUS_SET, is_daily_reconcile_release_bool
+from alpha.live.guarded_dispatch import MOC_DISPATCH_CUTOFF_MINUTES_INT
 from alpha.live.release_manifest import load_release_list
 
 
@@ -20,8 +21,8 @@ UNSENT_VPLAN_STATUS_SET = {None, "ready"}
 UNCONFIRMED_VPLAN_STATUS_SET = {"submitting"}
 ALERT_ACTION_STR_DICT = {
     "decision_incomplete": "No usable decision for this session; nothing was sent for it. Check the daily serve and its event log.",
-    "opening_not_dispatched": "The opening batch was never claimed, so none of it reached the broker. Check the daily serve.",
-    "opening_dispatch_unconfirmed": ("The opening dispatch was claimed but never confirmed: orders may already be live. "
+    "opening_not_dispatched": "The auction batch was never claimed, so none of it reached the broker. Check the daily serve.",
+    "opening_dispatch_unconfirmed": ("The auction dispatch was claimed but never confirmed: orders may already be live. "
         "Check broker orders and fills before any action; do NOT resend."),
     "cycle_open_after_close": "The cycle is still open one hour after the close. Check owned orders at the broker; daily reconciliation keeps retrying.",
     "heartbeat_check_failed": "This pod could not be checked; the other daily pods still are. Check its database and release file.",
@@ -144,6 +145,13 @@ def _release_alert_list(release_obj, config_obj, event_log_path_str, as_of_ts, e
         next_candidate_label_ts = scheduler_utils.get_next_session_label_ts(candidate_label_ts, calendar_id_str)
         next_open_ts = scheduler_utils.get_session_open_timestamp_ts(next_candidate_label_ts, calendar_id_str)
         cutoff_ts = next_open_ts - timedelta(minutes=2)
+        dispatch_grace_anchor_ts = next_open_ts
+        if release_obj.execution_policy_str == "next_close_moc":
+            # The Flow Vote trades in the next session's closing auction; its send cutoff is that close minus 15 minutes,
+            # and the dispatch grace runs from that cutoff, as it runs from the open for an opening batch.
+            cutoff_ts = scheduler_utils.get_session_close_timestamp_ts(next_candidate_label_ts, calendar_id_str) - timedelta(
+                minutes=MOC_DISPATCH_CUTOFF_MINUTES_INT)
+            dispatch_grace_anchor_ts = cutoff_ts
         # A pod owes every decision whose 09:28 cutoff comes after the watchdog
         # first saw it enabled: an evening launch still owes the next open.
         if enabled_since_ts is not None and cutoff_ts <= enabled_since_ts:
@@ -164,7 +172,7 @@ def _release_alert_list(release_obj, config_obj, event_log_path_str, as_of_ts, e
         elif (matching_row_dict is not None
                 and matching_row_dict["status_str"] in UNDISPATCHED_DECISION_STATUS_SET
                 and matching_row_dict.get("vplan_status_str") in UNSENT_VPLAN_STATUS_SET | UNCONFIRMED_VPLAN_STATUS_SET
-                and as_of_ts >= next_open_ts + timedelta(minutes=OPENING_DISPATCH_GRACE_MINUTES_INT)):
+                and as_of_ts >= dispatch_grace_anchor_ts + timedelta(minutes=OPENING_DISPATCH_GRACE_MINUTES_INT)):
             kind_str = ("opening_dispatch_unconfirmed"
                 if matching_row_dict.get("vplan_status_str") in UNCONFIRMED_VPLAN_STATUS_SET else "opening_not_dispatched")
             alert_list.append(_alert_dict(release_obj, session_str, kind_str,

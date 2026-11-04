@@ -5,12 +5,13 @@ import json
 
 from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR
 from alpha.live.dv2_ind_adapter import DV2_IND_STRATEGY_IMPORT_STR
-from alpha.live.guarded_dispatch import DispatchFailure, is_transient_broker_error_bool, moo_dispatch_deadline_ts
+from alpha.live.flow_vote_adapter import FLOW_VOTE_STRATEGY_IMPORT_STR
+from alpha.live.guarded_dispatch import DispatchFailure, dispatch_deadline_ts, is_transient_broker_error_bool
 from alpha.live.mr_capsule_adapter import MR_CAPSULE_STRATEGY_IMPORT_TUPLE
 
 
 def is_guarded_release_bool(release_obj):
-    return (release_obj.strategy_import_str in (CORE5_STRATEGY_IMPORT_STR, DV2_IND_STRATEGY_IMPORT_STR)
+    return (release_obj.strategy_import_str in (CORE5_STRATEGY_IMPORT_STR, DV2_IND_STRATEGY_IMPORT_STR, FLOW_VOTE_STRATEGY_IMPORT_STR)
         or release_obj.strategy_import_str in MR_CAPSULE_STRATEGY_IMPORT_TUPLE)
 
 
@@ -35,14 +36,14 @@ def record_dispatch_failure(state_store_obj, release_obj, vplan_obj, request_lis
         attempted_key_list = [] if before_send_bool else [request_obj.order_request_key_str for request_obj in request_list]
         transient_bool = is_transient_broker_error_bool(exception_obj)
     retry_bool = (not attempted_key_list and transient_bool
-        and max(as_of_ts, datetime.now(UTC)) < moo_dispatch_deadline_ts(vplan_obj))
+        and max(as_of_ts, datetime.now(UTC)) < dispatch_deadline_ts(vplan_obj))
     payload_dict = {"severity_str": "warning" if retry_bool else "critical",
         "reason_code_str": "dispatch_retry_pending" if retry_bool else "opening_dispatch_incomplete",
         "error_type_str": getattr(exception_obj, "error_type_str", type(exception_obj).__name__),
         "attempted_request_key_list": attempted_key_list,
         "never_dispatched_request_key_list": [request_obj.order_request_key_str for request_obj in never_list],
         "observed_timestamp_str": as_of_ts.isoformat(),
-        "dispatch_deadline_timestamp_str": moo_dispatch_deadline_ts(vplan_obj).isoformat()}
+        "dispatch_deadline_timestamp_str": dispatch_deadline_ts(vplan_obj).isoformat()}
     with state_store_obj._connect() as connection_obj:
         connection_obj.execute("BEGIN IMMEDIATE")
         row_obj = connection_obj.execute("""SELECT v.status_str, d.snapshot_metadata_json_str

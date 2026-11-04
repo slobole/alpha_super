@@ -155,6 +155,9 @@ class BrokerAdapter(ABC):
     def get_core5_account_snapshot(self, account_route_str: str, *, include_portfolio_valuation_bool: bool = False) -> BrokerSnapshot:
         raise NotImplementedError("This broker adapter does not provide strict CORE5 account evidence.")
 
+    def get_flow_vote_account_snapshot(self, account_route_str: str, *, include_portfolio_valuation_bool: bool = False) -> BrokerSnapshot:
+        raise NotImplementedError("This broker adapter does not provide strict Flow Vote account evidence.")
+
     def get_capsule_order_state_snapshot(
         self, account_route_str: str, since_timestamp_ts: datetime,
         submission_key_str: str | None = None, allowed_broker_order_id_set: set[str] | None = None,
@@ -267,6 +270,11 @@ class IBKRGatewayBrokerAdapter(BrokerAdapter):
     def get_core5_account_snapshot(self, account_route_str: str, *, include_portfolio_valuation_bool: bool = False) -> BrokerSnapshot:
         from alpha.live.core5_broker import get_core5_account_snapshot
         return get_core5_account_snapshot(self.socket_client_obj, account_route_str,
+            include_portfolio_valuation_bool=include_portfolio_valuation_bool)
+
+    def get_flow_vote_account_snapshot(self, account_route_str: str, *, include_portfolio_valuation_bool: bool = False) -> BrokerSnapshot:
+        from alpha.live.flow_vote_broker import get_flow_vote_account_snapshot
+        return get_flow_vote_account_snapshot(self.socket_client_obj, account_route_str,
             include_portfolio_valuation_bool=include_portfolio_valuation_bool)
 
     def get_capsule_order_state_snapshot(
@@ -480,6 +488,9 @@ class StubBrokerAdapter(BrokerAdapter):
         return self._snapshot_map[account_route_str]
 
     def get_core5_account_snapshot(self, account_route_str: str, *, include_portfolio_valuation_bool: bool = False) -> BrokerSnapshot:
+        return self.get_account_snapshot(account_route_str)
+
+    def get_flow_vote_account_snapshot(self, account_route_str: str, *, include_portfolio_valuation_bool: bool = False) -> BrokerSnapshot:
         return self.get_account_snapshot(account_route_str)
 
     def get_live_price_snapshot(

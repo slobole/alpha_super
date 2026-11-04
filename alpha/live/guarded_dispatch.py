@@ -1,12 +1,22 @@
-"""Opening-auction dispatch evidence for CORE5 and capsules only."""
+"""Auction dispatch evidence for the guarded daily pods: CORE5, DV2-IND and capsules at the open, the Flow Vote at the close."""
 from datetime import timedelta
 
 from alpha.live.models import SubmitBatchResult
+
+# The house's manual MOC rule: the exchanges stop accepting MOC at 15:50 (NYSE), 15:55 (Nasdaq) and 15:59 (NYSE Arca).
+MOC_DISPATCH_CUTOFF_MINUTES_INT = 15
 
 
 def moo_dispatch_deadline_ts(vplan_obj):
     """XNYS 09:30 open minus two minutes; do not alter the broker's OPG TIF."""
     return vplan_obj.target_execution_timestamp_ts - timedelta(minutes=2)
+
+
+def dispatch_deadline_ts(plan_obj):
+    """The last moment a guarded order may be sent: the open minus two minutes, or for next_close_moc the close minus fifteen."""
+    if plan_obj.execution_policy_str == "next_close_moc":
+        return plan_obj.target_execution_timestamp_ts - timedelta(minutes=MOC_DISPATCH_CUTOFF_MINUTES_INT)
+    return moo_dispatch_deadline_ts(plan_obj)
 
 
 def is_transient_broker_error_bool(exception_obj):

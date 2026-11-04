@@ -842,8 +842,8 @@ class IBKRSocketClient:
                     submission_deadline_ts = datetime.fromisoformat(submission_deadline_str)
                 except (TypeError, ValueError) as exception_obj:
                     raise ValueError("Submission deadline requires an aware ISO timestamp.") from exception_obj
-                if submission_deadline_ts.tzinfo is None or request_obj.broker_order_type_str != "MOO":
-                    raise ValueError("Submission deadline requires an aware timestamp and MOO order.")
+                if submission_deadline_ts.tzinfo is None or request_obj.broker_order_type_str not in ("MOO", "MOC"):
+                    raise ValueError("Submission deadline requires an aware timestamp and an MOO or MOC order.")
                 submission_deadline_by_request_key_dict[request_obj.order_request_key_str] = submission_deadline_ts
             deadline_str = request_obj.execution_deadline_timestamp_str
             if deadline_str is None:

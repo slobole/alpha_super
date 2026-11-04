@@ -135,7 +135,7 @@ def _scope_tuple(provider_obj, workspace_dict):
         name_str = strategy_display_name_str({"pod_id_str": release_obj.pod_id_str,
             "strategy_import_str": getattr(release_obj, "strategy_import_str", "")})
         policy_str = getattr(release_obj, "execution_policy_str", "")
-        if policy_str not in {"next_open_moo", "next_open_market", "same_day_moc", "next_month_first_open"}:
+        if policy_str not in {"next_open_moo", "next_open_market", "same_day_moc", "next_month_first_open", "next_close_moc"}:
             policy_str = "Unknown"
         safe_list.append({"pod_id_str": release_obj.pod_id_str, "name_str": name_str, "mode_str": "live",
             "enabled_bool": release_obj.enabled_bool, "release_id_str": release_obj.release_id_str,
