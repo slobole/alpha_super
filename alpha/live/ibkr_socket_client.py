@@ -59,7 +59,7 @@ IBKR_TICK_OPEN_SOURCE_STR = "ibkr.tick_open"
 LOOPBACK_HOST_ALIAS_TUPLE: tuple[str, ...] = ("127.0.0.1", "localhost", "::1")
 CONNECTION_REFUSED_WINERROR_INT_SET: set[int] = {1225, 10061}
 # Explicit share-class aliases only; punctuation is meaningful for other assets.
-IBKR_STOCK_SYMBOL_MAP_DICT = {"BRK.B": "BRK B", "BF.B": "BF B"}
+IBKR_STOCK_SYMBOL_MAP_DICT = {"BRK.B": "BRK B", "BF.B": "BF B", "BF.A": "BF A", "HEI.A": "HEI A", "LEN.B": "LEN B", "UHAL.B": "UHAL B"}
 CANONICAL_STOCK_SYMBOL_MAP_DICT = {
     broker_symbol_str: asset_str for asset_str, broker_symbol_str in IBKR_STOCK_SYMBOL_MAP_DICT.items()
 }

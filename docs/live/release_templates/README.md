@@ -76,6 +76,11 @@ The MR capsule templates (`pod_mr_*`) ship as disabled `paper` releases; `live`
 is allowed. Neither CORE5 nor the capsule needs a margin attestation in YAML
 (owner decision 2026-10-11: the accounts are margin accounts). An older YAML
 that still has `margin_account_confirmed_bool` keeps working; the key is ignored.
+
+The three `pod_mo_capsule_leg*_month_swap` templates are the legs of the closed momentum capsule, one account each,
+deciding on two sessions a month ([wiring](../MOMENTUM_LEGS_WIRING_20261103.md)). Nothing in the templates sets a rule:
+release validation freezes them. Two legs can run without the third.
+
 The two `*_liq_bil` templates are the BIL pods with each entry sized by liquidity
 ([wiring](../MR_CAPSULE_LIQ_SIZING_WIRING_20261101.md)). They use the same data profiles and the same account
 contract as the 1/N BIL pods. Run one form per account: a pod cannot adopt the holdings of the other form.

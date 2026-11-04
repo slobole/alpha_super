@@ -9,10 +9,12 @@ import yaml
 from alpha.live import scheduler_utils
 from alpha.live.models import LiveRelease
 from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR, validate_core5_release
+from alpha.live.momentum_legs_adapter import MOMENTUM_LEGS_STRATEGY_IMPORT_TUPLE, validate_momentum_legs_release
 from alpha.live.mr_capsule_adapter import MR_CAPSULE_PROFILE_TUPLE, MR_CAPSULE_STRATEGY_IMPORT_TUPLE, validate_mr_capsule_release
 from alpha.live.ndx_e2_adapter import NDX_E2_STRATEGY_IMPORT_TUPLE, validate_ndx_e2_release
 from alpha.live.dv2_ind_adapter import DV2_IND_STRATEGY_IMPORT_STR, validate_dv2_ind_release
 from data.dv2_ind_snapshot_contract import DV2_IND_PROFILE_STR
+from data.momentum_legs_snapshot_contract import MOMENTUM_LEGS_PROFILE_TUPLE
 from alpha.live.order_clerk import validate_account_route_matches_mode
 from data.norgate_snapshot_store import CORE5_PROFILE_STR, HPI_SP500_PROFILE_STR, NDX_E2_PROFILE_STR
 
@@ -23,6 +25,7 @@ HPI_STRATEGY_IMPORT_TUPLE: tuple[str, ...] = (
 SUPPORTED_STRATEGY_IMPORT_TUPLE: tuple[str, ...] = (
     DV2_IND_STRATEGY_IMPORT_STR,
     *NDX_E2_STRATEGY_IMPORT_TUPLE,
+    *MOMENTUM_LEGS_STRATEGY_IMPORT_TUPLE,
     *MR_CAPSULE_STRATEGY_IMPORT_TUPLE,
     CORE5_STRATEGY_IMPORT_STR,
     "strategies.dv2.strategy_mr_dv2:DVO2Strategy",
@@ -44,6 +47,7 @@ SUPPORTED_SIGNAL_CLOCK_TUPLE: tuple[str, ...] = scheduler_utils.SUPPORTED_SIGNAL
 SUPPORTED_DATA_PROFILE_TUPLE: tuple[str, ...] = (
     DV2_IND_PROFILE_STR,
     NDX_E2_PROFILE_STR,
+    *MOMENTUM_LEGS_PROFILE_TUPLE,
     *MR_CAPSULE_PROFILE_TUPLE,
     CORE5_PROFILE_STR,
     "norgate_eod_sp500_pit",
@@ -237,6 +241,12 @@ def validate_release_manifest(release_obj: LiveRelease, *, require_live_qualific
         validate_ndx_e2_release(release_obj)
     elif release_obj.data_profile_str == NDX_E2_PROFILE_STR:
         raise ValueError("The NDX E2 snapshot profile is reserved for the two sector-capped E2 strategies.")
+    if release_obj.strategy_import_str in MOMENTUM_LEGS_STRATEGY_IMPORT_TUPLE:
+        validate_momentum_legs_release(release_obj)
+    elif release_obj.data_profile_str in MOMENTUM_LEGS_PROFILE_TUPLE:
+        raise ValueError("Momentum legs snapshot profiles are reserved for the three capsule legs.")
+    elif release_obj.signal_clock_str == scheduler_utils.MONTH_SWAP_SIGNAL_CLOCK_STR:
+        raise ValueError("The month-swap clock is reserved for the three capsule legs.")
     if release_obj.strategy_import_str in MR_CAPSULE_STRATEGY_IMPORT_TUPLE:
         validate_mr_capsule_release(release_obj)
     elif release_obj.data_profile_str in MR_CAPSULE_PROFILE_TUPLE:
@@ -513,6 +523,15 @@ def validate_release_list(release_list: list[LiveRelease]) -> None:
         ):
             raise ValueError(
                 "NDX E2 requires one dedicated account per component. "
+                f"Enabled pods '{prior_release_obj.pod_id_str}' and '{release_obj.pod_id_str}' "
+                f"share account_route_str '{release_obj.account_route_str}' in mode '{release_obj.mode_str}'."
+            )
+        if prior_release_obj is not None and (
+            release_obj.strategy_import_str in MOMENTUM_LEGS_STRATEGY_IMPORT_TUPLE
+            or prior_release_obj.strategy_import_str in MOMENTUM_LEGS_STRATEGY_IMPORT_TUPLE
+        ):
+            raise ValueError(
+                "A momentum capsule leg requires one dedicated account per leg. "
                 f"Enabled pods '{prior_release_obj.pod_id_str}' and '{release_obj.pod_id_str}' "
                 f"share account_route_str '{release_obj.account_route_str}' in mode '{release_obj.mode_str}'."
             )

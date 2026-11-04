@@ -22,6 +22,7 @@ if repo_root_str not in sys.path:
 
 from alpha.live.scheduler_utils import load_latest_norgate_heartbeat_session_label_ts
 from data.dv2_ind_snapshot_contract import DV2_IND_PROFILE_STR, DV2_IND_ETF_TUPLE
+from data.momentum_legs_snapshot_contract import MOMENTUM_LEGS_NDX_PROFILE_STR, MOMENTUM_LEGS_R1000_PROFILE_STR
 from data.norgate_snapshot_store import (
     CORE5_PROFILE_STR,
     ALPHA_USE_NORGATE_SNAPSHOT_ENV_STR,
@@ -408,6 +409,8 @@ def _check_profile_smoke(
 ) -> None:
     smoke_map_dict: dict[str, list[tuple[str, str]]] = {
         NDX_E2_PROFILE_STR: [("index", "Nasdaq 100"), ("symbol", "$VXN")],
+        MOMENTUM_LEGS_NDX_PROFILE_STR: [("index", "Nasdaq 100"), ("symbol", "SPY"), ("symbol", "$NDX"), ("symbol", "$VXN")],
+        MOMENTUM_LEGS_R1000_PROFILE_STR: [("index", "Russell 1000"), ("symbol", "$RUI")],
         CORE5_PROFILE_STR: [("symbol", "IEF"), ("symbol", "BIL"), ("symbol", "$SPXTR")],
         DV2_IND_PROFILE_STR: [("symbol", symbol_str) for symbol_str in DV2_IND_ETF_TUPLE] + [("symbol", "$SPXTR")],
         "norgate_eod_etf_plus_vix_helper": [("symbol", "SPY"), ("symbol", "$VIX")],

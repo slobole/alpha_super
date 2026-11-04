@@ -380,41 +380,50 @@ def _liquidate_missing_close_positions(
     active_close_price_ser = close_price_ser.reindex(active_position_ser.index).astype(float)
     missing_asset_list = active_close_price_ser[active_close_price_ser.isna()].index.astype(str).tolist()
     for asset_str in missing_asset_list:
-        close_key_tuple = (asset_str, "Close")
-        if close_key_tuple not in signal_data_df.columns:
-            raise RuntimeError(f"Missing close history for active asset {asset_str}.")
+        _liquidate_asset_at_prior_close(strategy_obj, signal_data_df, bar_ts, asset_str)
 
-        # *** CRITICAL*** Missing-close liquidation uses the latest available
-        # close strictly before the current bar. Using a later close would leak
-        # future information into the forced exit.
-        prior_close_ser = signal_data_df.loc[:bar_ts, close_key_tuple].dropna()
-        prior_close_ser = prior_close_ser[prior_close_ser.index < bar_ts]
-        if len(prior_close_ser) == 0:
-            raise RuntimeError(f"No prior close is available to liquidate {asset_str}.")
 
-        liquidation_price_float = float(prior_close_ser.iloc[-1])
-        open_trade_amount_ser = strategy_obj._get_open_trade_amount_ser(asset_str=asset_str)
-        if len(open_trade_amount_ser) == 0:
-            raise RuntimeError(f"Found active position in {asset_str} without open trade amounts.")
+def _liquidate_asset_at_prior_close(
+    strategy_obj: Strategy,
+    signal_data_df: pd.DataFrame,
+    bar_ts: pd.Timestamp,
+    asset_str: str,
+) -> None:
+    close_key_tuple = (asset_str, "Close")
+    if close_key_tuple not in signal_data_df.columns:
+        raise RuntimeError(f"Missing close history for active asset {asset_str}.")
 
-        for trade_id_obj, open_amount_float in open_trade_amount_ser.items():
-            liquidation_amount_float = -float(open_amount_float)
-            commission_float = float(strategy_obj._compute_execution_commission_float(
-                signal_data_df, asset_str, liquidation_amount_float, prior_close_ser.index[-1],
-            ))
-            transaction_value_float = float(liquidation_amount_float * liquidation_price_float)
-            strategy_obj.add_transaction(
-                trade_id_obj,
-                bar_ts,
-                asset_str,
-                liquidation_amount_float,
-                liquidation_price_float,
-                transaction_value_float,
-                order_id=-1,
-                commission=commission_float,
-            )
-            strategy_obj.cash -= transaction_value_float
-            strategy_obj.cash -= commission_float
+    # *** CRITICAL*** Missing-price liquidation uses the latest available
+    # close strictly before the current bar. Using a later close would leak
+    # future information into the forced exit.
+    prior_close_ser = signal_data_df.loc[:bar_ts, close_key_tuple].dropna()
+    prior_close_ser = prior_close_ser[prior_close_ser.index < bar_ts]
+    if len(prior_close_ser) == 0:
+        raise RuntimeError(f"No prior close is available to liquidate {asset_str}.")
+
+    liquidation_price_float = float(prior_close_ser.iloc[-1])
+    open_trade_amount_ser = strategy_obj._get_open_trade_amount_ser(asset_str=asset_str)
+    if len(open_trade_amount_ser) == 0:
+        raise RuntimeError(f"Found active position in {asset_str} without open trade amounts.")
+
+    for trade_id_obj, open_amount_float in open_trade_amount_ser.items():
+        liquidation_amount_float = -float(open_amount_float)
+        commission_float = float(strategy_obj._compute_execution_commission_float(
+            signal_data_df, asset_str, liquidation_amount_float, prior_close_ser.index[-1],
+        ))
+        transaction_value_float = float(liquidation_amount_float * liquidation_price_float)
+        strategy_obj.add_transaction(
+            trade_id_obj,
+            bar_ts,
+            asset_str,
+            liquidation_amount_float,
+            liquidation_price_float,
+            transaction_value_float,
+            order_id=-1,
+            commission=commission_float,
+        )
+        strategy_obj.cash -= transaction_value_float
+        strategy_obj.cash -= commission_float
 
 
 def _reset_strategy_state(strategy_obj: Strategy) -> None:
@@ -576,16 +585,34 @@ def _execute_scheduled_order(
 
     raw_fill_price_float = float(signal_data_df.loc[scheduled_order_obj.fill_bar_ts, fill_key_tuple])
     if not np.isfinite(raw_fill_price_float) or raw_fill_price_float <= 0.0:
+        flat_bool = (
+            current_position_float == 0.0 if strategy_obj.historical_share_units_bool
+            else np.isclose(current_position_float, 0.0, atol=1e-12)
+        )
         # *** CRITICAL*** Match Vanilla process_orders(): if a new entry has
         # no tradable fill price on its scheduled bar, cancel the order instead
-        # of inventing a price. Active positions still fail loud because a
-        # missing executable exit can materially change path risk.
+        # of inventing a price.
         if (
             scheduled_order_obj.order_kind_str == "entry"
-            and (current_position_float == 0.0 if strategy_obj.historical_share_units_bool
-                 else np.isclose(current_position_float, 0.0, atol=1e-12))
+            and flat_bool
             and (np.isnan(raw_fill_price_float) if strategy_obj.historical_share_units_bool else True)
         ):
+            return
+        # *** CRITICAL*** Match Vanilla's missing-price liquidation (owner
+        # decision 2026-11-03): a missing fill price drops the order, and a
+        # name still held on that bar is first sold at its last close before
+        # the bar. A present but invalid price still fails loud, and so does a
+        # held name whose strategy keeps its own missing-price model (exempt
+        # parking names, or its own liquidation rule): timing cannot replay it.
+        own_model_bool = (
+            strategy_obj._is_missing_price_liquidation_exempt(str(order_obj.asset))
+            or type(strategy_obj)._liquidate_missing_price_positions is not Strategy._liquidate_missing_price_positions
+        )
+        if np.isnan(raw_fill_price_float) and (flat_bool or not own_model_bool):
+            if not flat_bool:
+                _liquidate_asset_at_prior_close(
+                    strategy_obj, signal_data_df, scheduled_order_obj.fill_bar_ts, order_obj.asset,
+                )
             return
         raise RuntimeError(
             f"Invalid {scheduled_order_obj.fill_price_field_str} fill price for "

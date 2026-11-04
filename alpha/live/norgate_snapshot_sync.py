@@ -164,7 +164,7 @@ def _build_gate_reason_by_release_dict(
     gate_reason_by_release_dict: dict[str, str] = {}
     for release_obj in release_list:
         signal_clock_str = scheduler_utils.normalize_signal_clock_str(release_obj.signal_clock_str)
-        if signal_clock_str not in {"eod_snapshot_ready", "month_end_snapshot_ready"}:
+        if signal_clock_str not in {"eod_snapshot_ready", "month_end_snapshot_ready", scheduler_utils.MONTH_SWAP_SIGNAL_CLOCK_STR}:
             continue
         try:
             gate_dict = scheduler_utils.evaluate_build_gate_dict(release_obj, as_of_ts)
@@ -188,6 +188,11 @@ def _required_snapshot_session_by_release_dict(
             )
         elif signal_clock_str == "month_end_snapshot_ready":
             required_session_label_ts = scheduler_utils.get_latest_completed_month_end_session_label_ts(
+                as_of_ts,
+                release_obj.session_calendar_id_str,
+            )
+        elif signal_clock_str == scheduler_utils.MONTH_SWAP_SIGNAL_CLOCK_STR:
+            required_session_label_ts = scheduler_utils.get_latest_completed_month_swap_session_label_ts(
                 as_of_ts,
                 release_obj.session_calendar_id_str,
             )
@@ -1110,7 +1115,7 @@ def build_norgate_snapshot_status_dict(
 
     build_gate_reason_code_str = None
     signal_clock_str = scheduler_utils.normalize_signal_clock_str(release_obj.signal_clock_str)
-    if signal_clock_str in {"eod_snapshot_ready", "month_end_snapshot_ready"}:
+    if signal_clock_str in {"eod_snapshot_ready", "month_end_snapshot_ready", scheduler_utils.MONTH_SWAP_SIGNAL_CLOCK_STR}:
         try:
             build_gate_reason_code_str = str(
                 scheduler_utils.evaluate_build_gate_dict(release_obj, as_of_ts).get("reason_code_str")

@@ -985,6 +985,7 @@ def _humanize_reason_code_str(reason_code_str: str | None) -> str:
         "no_due_work": "no due work right now",
         "non_positive_net_liq": "broker net liquidation value is non-positive",
         "not_month_end_session": "waiting for the last session of the month",
+        "not_month_swap_session": "waiting for the next swap session of the month",
         "position_reconciliation_warning": "model and broker positions differ before sizing",
         "ready_to_build_decision_plan": "ready to build the next decision plan",
         "ready_to_build_vplan": "ready to build the execution plan",

@@ -1,0 +1,41 @@
+# Disabled template for leg 2 of the momentum capsule: Nasdaq-100, 10 names, market and sector residual. One leg, one account.
+# Copy to alpha/live/releases/<client_id>/<pod_id>.yaml and edit the copy only.
+# Decides on two sessions a month: the last one, and 10 sessions before it. See docs/live/MOMENTUM_LEGS_WIRING_20261103.md.
+# Close_T determines weights; pre-open broker NAV and reference quotes determine shares.
+identity:
+  release_id: your_user.pod_mo_capsule_leg2_residual_ndx.month_swap.v1
+  user_id: your_user
+  pod_id: pod_mo_capsule_leg2_residual_ndx_01
+
+deployment:
+  mode: paper
+  enabled_bool: false
+
+broker:
+  account_route: DU_YOUR_MOMENTUM_LEG2_PAPER_ACCOUNT
+  host_str: 127.0.0.1
+  port_int: 7497
+  client_id_int: 54 # Keep unique per running API process.
+  timeout_seconds_float: 4.0
+
+strategy:
+  strategy_import_str: strategies.momentum.strategy_mo_capsule_leg2_residual_ndx:MomentumCapsuleLeg2Strategy
+  data_profile_str: norgate_eod_ndx_momentum_legs_pit
+  params: {} # Every rule is frozen by release validation.
+
+market:
+  session_calendar_id_str: XNYS
+
+schedule:
+  signal_clock_str: month_swap_snapshot_ready
+  execution_policy_str: next_open_moo
+
+execution:
+  pod_budget_fraction_float: 1.0 # Fraction of this leg's dedicated account NAV.
+  auto_submit_enabled_bool: false
+
+bootstrap:
+  initial_cash_float: 100000.0 # Initial model state; pre-open broker NAV sizes orders.
+
+risk:
+  risk_profile_str: standard_month_swap_momentum_capsule_leg

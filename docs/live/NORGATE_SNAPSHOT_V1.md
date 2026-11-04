@@ -496,3 +496,21 @@ unclassified symbols share UNKNOWN, while provider errors abort export.
 The new profile and disabled templates do not activate any account. See
 [E2 wiring](NDX_E2_WIRING_20261011.md) for exact rules, monthly pre-open sizing,
 rollout prerequisites, historical-GICS limitations and verification evidence.
+
+## Momentum capsule leg profiles (2026-11-03)
+
+`norgate_eod_ndx_momentum_legs_pit` carries the two Nasdaq-100 legs and
+`norgate_eod_r1000_momentum_legs_pit` the Russell 1000 leg. Both are schema v2 and
+hold everything a backtest reads, from 1998 through T: every name with a member
+session since 1999-06, delisted names too, `$SPXTR` TOTALRETURN, the gate and market
+series (`SPY`, `$NDX`, `$VXN` or `$RUI`) and the 11 GICS sector indexes, plus the current-at-export
+GICS labels with hash and capture timestamp (sectors; for Russell 1000 also industry groups).
+A client validates them locally and never calls the provider. The contract is
+`data/momentum_legs_snapshot_contract.py`.
+
+The gate, market, sector and benchmark series need an unpadded close at T equal to
+the exported one. A member without one is a halt: it is listed in the manifest and
+keeps the carried close the backtest also reads, up to 2% of the members; more
+means the stocks have not updated and the export fails. VXN keeps its as-of rule.
+Prices are not kept in memory between decisions. See
+[momentum legs wiring](MOMENTUM_LEGS_WIRING_20261103.md).

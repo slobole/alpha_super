@@ -194,3 +194,26 @@ Test of 2026-11-01 ([record](../research/GROWTH_MR_PRODUCTS_20261101.md), indepe
 | The close route is worse, not just untested | Optimistic | Entries and exits at the next close: DV2 11.6% / 0.71 against 19.2% / 1.06, HPI 7.2% / 0.59 against 14.6% / 1.05. The route model's $25M and $10M assumed that route | Bench Timing |
 | The 1/N pod is not a quick fallback | Live | A pod cannot move between the forms: the account must be flat, BIL included, and restart under a new pod id | Build review |
 | Wired, not enabled | Status | Real modules, disabled templates and tests; no paper days and no fills. Record in `docs/live/MR_CAPSULE_LIQ_SIZING_WIRING_20261101.md` | Build 2026-11-01 |
+
+## Momentum capsule, three legs (wired, templates disabled)
+
+Closed 2026-10-31 ([record](../research/RESIDUAL_MOMENTUM_20261031.md)). `strategy_mo_capsule_leg1_natr_ndx`, `strategy_mo_capsule_leg2_residual_ndx`, `strategy_mo_capsule_leg3_residual_r1000`, one third each, reset once a year; or the first two, half each. Each leg is one account that decides on a month's last session and 10 sessions before it.
+
+| Caveat | Direction | Size | Evidence |
+|---|---|---|---|
+| The numbers to plan on are not the backtest | Optimistic | Backtest 12.6% / 0.76 / -22.9% is the best of 11 day pairs (median 0.723, deepest -30.5%); plan 11% / 0.65 / -26%. Two legs 13.1% / 0.73 / -23.3%; plan 11.3% / 0.63 / -25% | Research record |
+| The plan leans on one era | Optimistic | Sharpe by era, days 0 + 10: 2000-07 0.54, 2008-12 0.78, 2013-21 1.07, 2022-26 0.43 | Research record |
+| No measurable alpha since 2017 | Optimistic | Over `$SPX`, zero rate, before fees: full 9.2%, t 4.12; from 2017-07 6.0%, t 1.52; from 2022 4.5%, t 0.82. Over IWB behind the same gate 3.7%, t 2.57; from 2017-07 2.8%, t 0.95; after 2 and 20 -0.1%, t -0.05 | Wiring record, research record |
+| A selected design | Optimistic | 21 rounds, about 3,000 series, history examined many times, no holdout, no deflated Sharpe. Three legs fell short of the frozen rule twice (4 and 5 of 9, bar 6) and were kept by the owner's decision | Research record |
+| It does not earn its slot in Growth | Note | With the closed capsule in its slot, a paired share of 0.33 of paths ahead against the bar of 0.80 | Growth with the closed capsule 2026-11-01 |
+| Leg 1 has no pinned-price guard | Optimistic, small | Legs 2 and 3 skip a name with too many zero-return days; leg 1 does not. Research measured 0.01 to 0.035 of Sharpe | Research record |
+| One account instead of two books | Optimistic, small | Sharpe 0.7604 to 0.7580, Max DD -22.87% to -22.96%, correlation above 0.999 per leg | `r34_one_account_form.py` |
+| Bench costs are lower and its cash earns nothing | Mixed | Bench 2.5 bps a side and 0% cash; research 5 bps plus half-spread and T-bill cash. Do not compare the two directly | Module docstring |
+| Current GICS labels applied to all history | Optimistic, mild | Sector caps and peer groups read today's labels (G-025) | G-025 |
+| A rank buffer makes the path long | Live gap | A decision replays the whole path, so a vendor's correction of old data can change a past pick and today's target. Live always equals today's backtest, not yesterday's | Wiring record |
+| Capacity | Limit | The wired route sends every order to the opening auction. Bench, last 5 years: Sharpe at $5M a leg 0.58, 0.60, 0.56 against 0.58, 0.61, 0.54 with no impact; 0.56, 0.57, 0.51 at $10M. Research's worked-order figures ($59M, $50M, $20M at 1% of ADV) need a route that works orders through the day | Bench Capacity 2026-11-03, research record |
+| Small accounts | Friction | Minimum to hold the books: $150K, $100K, $150K per leg. A month that only checks operations: $40K a leg, without the most expensive names | Research record |
+| Opposite orders between legs | Live risk | Accounts IBKR treats as related cancel the later of two opposite orders in one stock: 85% of swap days since 2021 hold such a pair among three legs, and a cancelled order freezes that leg until a person acts (G-038) | Wiring record |
+| A name on its last bar stops a swap | Live risk | A target name with no quote blocks the whole plan: 2, 2 and 9 of 627 decisions per leg | Wiring record |
+| A fill at the next close | Small | Bench Timing: 0.2 to 0.35 points a year and 0.01 to 0.03 of Sharpe against the next open, so completing a cancelled order by MOC is cheap | Bench Timing 2026-11-03 |
+| Wired, not enabled | Status | Real modules, disabled templates and tests; no paper days and no fills. Record in `docs/live/MOMENTUM_LEGS_WIRING_20261103.md` | Build 2026-11-03 |

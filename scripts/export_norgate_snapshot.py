@@ -8,6 +8,7 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Lock
 from typing import Iterable
 
 import pandas as pd
@@ -20,6 +21,11 @@ if repo_root_str not in sys.path:
 
 from data.dv2_ind_snapshot_contract import (
     DV2_IND_PROFILE_STR, DV2_IND_ETF_TUPLE, DV2_IND_HISTORY_START_STR, DV2_IND_DATA_CONTRACT_DICT, dv2_ind_price_coverage_dict,
+)
+from data.momentum_legs_snapshot_contract import (
+    BENCHMARK_SYMBOL_STR, MAX_UNOBSERVED_MEMBER_FRACTION_FLOAT, MOMENTUM_LEGS_DATA_CONTRACT_DICT, MOMENTUM_LEGS_MEMBER_START_DATE_STR,
+    MOMENTUM_LEGS_PRICE_HISTORY_START_DATE_STR, MOMENTUM_LEGS_PROFILE_TUPLE, MOMENTUM_LEGS_SPEC_BY_PROFILE_DICT,
+    SECTOR_INDEX_SYMBOL_TUPLE, SECTOR_LABEL_SET, momentum_legs_label_hash_str, read_stable_gics_label_str, strict_endpoint_symbol_list,
 )
 from data.norgate_snapshot_store import (
     CAPITALSPECIAL_ADJUSTMENT_STR,
@@ -112,10 +118,18 @@ PROFILE_EXPORT_SPEC_DICT: dict[str, NorgateExportProfileSpec] = {
         total_return_symbol_tuple=("SPY",),
         helper_symbol_tuple=("$VXN",),
     ),
+    **{
+        profile_str: NorgateExportProfileSpec(
+            indexname_str=spec_dict["indexname_str"], capital_symbol_tuple=spec_dict["capital_symbol_tuple"],
+            total_return_symbol_tuple=(BENCHMARK_SYMBOL_STR,), helper_symbol_tuple=spec_dict["helper_symbol_tuple"],
+        )
+        for profile_str, spec_dict in MOMENTUM_LEGS_SPEC_BY_PROFILE_DICT.items()
+    },
 }
 
 SUPPORTED_EOD_PROFILE_TUPLE: tuple[str, ...] = tuple(PROFILE_EXPORT_SPEC_DICT.keys())
-NON_DISTRIBUTING_INDEX_SYMBOL_SET = {"$SPX", "$SPXTR", "$VIX", "$VXN"}
+_MOMENTUM_LEGS_EXPORT_LOCK_OBJ = Lock()
+NON_DISTRIBUTING_INDEX_SYMBOL_SET = {"$SPX", "$SPXTR", "$VIX", "$VXN", "$NDX", "$RUI", *SECTOR_INDEX_SYMBOL_TUPLE}
 
 
 def _load_direct_norgate_module():
@@ -143,6 +157,56 @@ def _capture_ndx_e2_sector_contract(symbol_list: list[str], snapshot_date_str: s
         "sector_snapshot_date_str": snapshot_date_str,
         "sector_observed_timestamp_str": datetime.now(UTC).isoformat(),
     }
+
+
+def _capture_momentum_legs_label_contract(profile_str: str, symbol_list: list[str], snapshot_date_str: str) -> dict[str, object]:
+    provider_obj = _load_direct_norgate_module()
+    group_bool = MOMENTUM_LEGS_SPEC_BY_PROFILE_DICT[profile_str]["group_label_bool"]
+    sector_by_symbol_dict: dict[str, str] = {}
+    group_by_symbol_dict: dict[str, str] = {}
+    for symbol_str in tqdm(sorted(set(symbol_list)), desc="exporting GICS labels"):
+        sector_str = read_stable_gics_label_str(provider_obj, symbol_str, 1)
+        if sector_str not in SECTOR_LABEL_SET:
+            raise ValueError(f"Invalid GICS level-1 classification for {symbol_str}: {sector_str!r}")
+        sector_by_symbol_dict[symbol_str] = sector_str
+        if group_bool:
+            group_by_symbol_dict[symbol_str] = read_stable_gics_label_str(provider_obj, symbol_str, 2)
+    return {
+        "sector_by_symbol_dict": sector_by_symbol_dict,
+        **({"group_by_symbol_dict": group_by_symbol_dict} if group_bool else {}),
+        "label_map_hash_str": momentum_legs_label_hash_str(sector_by_symbol_dict, group_by_symbol_dict if group_bool else None),
+        "label_snapshot_date_str": snapshot_date_str,
+        "label_observed_timestamp_str": datetime.now(UTC).isoformat(),
+    }
+
+
+def _momentum_legs_endpoint_contract(profile_str: str, price_df: pd.DataFrame, current_member_list: list[str], snapshot_date_str: str) -> dict[str, object]:
+    """*** CRITICAL *** Padded history stays for backtest parity, but an unpadded observation certifies Close_T. A strict series must have one; a member without one is a halt, listed and capped."""
+    snapshot_date_ts = pd.Timestamp(snapshot_date_str)
+    strict_symbol_set = set(strict_endpoint_symbol_list(profile_str))
+    endpoint_df = price_df.loc[pd.to_datetime(price_df["date"]).eq(snapshot_date_ts)]
+    observed_endpoint_dict: dict[str, str] = {}
+    unobserved_member_list: list[str] = []
+    for symbol_str in tqdm(sorted(set(current_member_list) | strict_symbol_set), desc="exporting unpadded endpoints"):
+        adjustment_str = TOTALRETURN_ADJUSTMENT_STR if symbol_str == BENCHMARK_SYMBOL_STR else CAPITALSPECIAL_ADJUSTMENT_STR
+        try:
+            observed_price_df = _load_price_frame_df(symbol_str=symbol_str, adjustment_str=adjustment_str, start_date_str=snapshot_date_str, end_date_str=snapshot_date_str, padding_type_name_str="NONE")
+        except RuntimeError:
+            observed_price_df = pd.DataFrame()
+        observed_bool = (len(observed_price_df) == 1 and pd.Timestamp(observed_price_df["date"].iloc[0]) == snapshot_date_ts
+            and math.isfinite(float(observed_price_df["Close"].iloc[0])) and float(observed_price_df["Close"].iloc[0]) > 0)
+        if not observed_bool:
+            if symbol_str in strict_symbol_set:
+                raise ValueError(f"Momentum legs have no unpadded source observation at {snapshot_date_str} for {symbol_str}.")
+            unobserved_member_list.append(symbol_str)
+            continue
+        exported_endpoint_df = endpoint_df.loc[endpoint_df["symbol_str"].eq(symbol_str) & endpoint_df["adjustment_str"].eq(adjustment_str)]
+        if len(exported_endpoint_df) != 1 or float(exported_endpoint_df["Close"].iloc[0]) != float(observed_price_df["Close"].iloc[0]):
+            raise ValueError(f"Momentum legs exported Close_T differs from its unpadded source observation: {symbol_str}.")
+        observed_endpoint_dict[symbol_str] = snapshot_date_str
+    if len(unobserved_member_list) > MAX_UNOBSERVED_MEMBER_FRACTION_FLOAT * len(current_member_list):
+        raise ValueError(f"Momentum legs: {len(unobserved_member_list)} of {len(current_member_list)} members have no unpadded close at {snapshot_date_str}.")
+    return {"observed_endpoint_date_by_symbol_dict": observed_endpoint_dict, "unobserved_member_list": unobserved_member_list}
 
 
 def validate_export_profile(profile_str: str) -> None:
@@ -379,6 +443,15 @@ def _export_profile_to_root_path(
         pit_symbol_list = universe_df.columns.astype(str).tolist()
         start_date_str = NDX_E2_PRICE_HISTORY_START_DATE_STR
 
+    if profile_str in MOMENTUM_LEGS_PROFILE_TUPLE:
+        if end_date_str != snapshot_date_str:
+            raise ValueError("Momentum legs export must end on the snapshot session.")
+        # *** CRITICAL *** The backtest's universe: every name with a member session in the window, delisted names too.
+        universe_df = universe_df.loc[MOMENTUM_LEGS_PRICE_HISTORY_START_DATE_STR:snapshot_date_str]
+        universe_df = universe_df.loc[:, universe_df.loc[MOMENTUM_LEGS_MEMBER_START_DATE_STR:].eq(1).any(axis=0)]
+        pit_symbol_list = universe_df.columns.astype(str).tolist()
+        start_date_str = MOMENTUM_LEGS_PRICE_HISTORY_START_DATE_STR
+
     symbol_list = list(dict.fromkeys(pit_symbol_list + list(profile_spec_obj.capital_symbol_tuple)))
     helper_symbol_list = list(profile_spec_obj.helper_symbol_tuple)
     benchmark_symbol_list = list(profile_spec_obj.total_return_symbol_tuple)
@@ -448,6 +521,11 @@ def _export_profile_to_root_path(
                 raise ValueError(f"E2 exported Close_T differs from its unpadded source observation: {symbol_str}.")
             observed_endpoint_dict[symbol_str] = snapshot_date_str
         data_contract_dict["observed_endpoint_date_by_symbol_dict"] = observed_endpoint_dict
+    if profile_str in MOMENTUM_LEGS_PROFILE_TUPLE:
+        data_contract_dict.update(MOMENTUM_LEGS_DATA_CONTRACT_DICT)
+        data_contract_dict.update(_capture_momentum_legs_label_contract(profile_str, pit_symbol_list, snapshot_date_str))
+        current_member_list = universe_df.columns[universe_df.loc[pd.Timestamp(snapshot_date_str)].eq(1)].astype(str).tolist()
+        data_contract_dict.update(_momentum_legs_endpoint_contract(profile_str, price_df, current_member_list, snapshot_date_str))
     if profile_str in MR_CAPSULE_PROFILE_SET:
         data_contract_dict.update(MR_CAPSULE_DATA_CONTRACT_BY_PROFILE_DICT[profile_str])
         data_contract_dict["source_field_by_pair_dict"] = price_df.attrs["source_field_by_pair_dict"]
@@ -546,6 +624,27 @@ def export_profile_snapshot(
     end_date_str: str | None = None,
     overwrite_bool: bool = False,
 ) -> Path:
+    keyword_dict = {
+        "snapshot_root_str": snapshot_root_str, "profile_str": profile_str, "snapshot_date_str": snapshot_date_str,
+        "start_date_str": start_date_str, "end_date_str": end_date_str, "overwrite_bool": overwrite_bool,
+    }
+    if profile_str not in MOMENTUM_LEGS_PROFILE_TUPLE:
+        return _export_profile_snapshot(**keyword_dict)
+    # *** CRITICAL *** A Russell 1000 export outlasts the client's request timeout. A retry must wait for the running
+    # export and then find its finished snapshot; it must not remove the running export's staging folder.
+    with _MOMENTUM_LEGS_EXPORT_LOCK_OBJ:
+        return _export_profile_snapshot(**keyword_dict)
+
+
+def _export_profile_snapshot(
+    *,
+    snapshot_root_str: str,
+    profile_str: str,
+    snapshot_date_str: str | None,
+    start_date_str: str,
+    end_date_str: str | None,
+    overwrite_bool: bool,
+) -> Path:
     validate_export_profile(profile_str)
     resolved_snapshot_date_str = snapshot_date_str or _latest_norgate_session_date_str()
     resolved_end_date_str = str(end_date_str or resolved_snapshot_date_str)
@@ -558,7 +657,7 @@ def export_profile_snapshot(
     if final_snapshot_dir_path_obj.exists() and not overwrite_bool:
         manifest_path_obj = final_snapshot_dir_path_obj / "manifest.json"
         if manifest_path_obj.exists():
-            if profile_str in {CORE5_PROFILE_STR, NDX_E2_PROFILE_STR, DV2_IND_PROFILE_STR} or profile_str in MR_CAPSULE_PROFILE_SET:
+            if profile_str in {CORE5_PROFILE_STR, NDX_E2_PROFILE_STR, DV2_IND_PROFILE_STR, *MOMENTUM_LEGS_PROFILE_TUPLE} or profile_str in MR_CAPSULE_PROFILE_SET:
                 load_valid_snapshot_manifest(
                     profile_str, snapshot_date_str=resolved_snapshot_date_str,
                     snapshot_root_str=str(snapshot_root_path_obj),
@@ -584,7 +683,7 @@ def export_profile_snapshot(
             end_date_str=resolved_end_date_str,
             overwrite_bool=False,
         )
-        if profile_str in {CORE5_PROFILE_STR, NDX_E2_PROFILE_STR, DV2_IND_PROFILE_STR} or profile_str in MR_CAPSULE_PROFILE_SET:
+        if profile_str in {CORE5_PROFILE_STR, NDX_E2_PROFILE_STR, DV2_IND_PROFILE_STR, *MOMENTUM_LEGS_PROFILE_TUPLE} or profile_str in MR_CAPSULE_PROFILE_SET:
             load_valid_snapshot_manifest(
                 profile_str, snapshot_date_str=resolved_snapshot_date_str,
                 snapshot_root_str=str(staging_root_path_obj),

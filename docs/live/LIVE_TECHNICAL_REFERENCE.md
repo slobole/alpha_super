@@ -443,7 +443,7 @@ Inputs and outputs:
 
 Important invariants:
 - timing is derived from exchange session rules, not host local wall clock
-- snapshot-ready logic is event-driven for `eod_snapshot_ready` and `month_end_snapshot_ready`
+- snapshot-ready logic is event-driven for `eod_snapshot_ready`, `month_end_snapshot_ready` and `month_swap_snapshot_ready`
 
 ### `alpha/live/strategy_host.py`
 
@@ -669,6 +669,7 @@ now_utc -> exchange session timestamps -> live timing decisions
 Current supported `signal_clock_str` values:
 - `eod_snapshot_ready`
 - `month_end_snapshot_ready`
+- `month_swap_snapshot_ready` (the momentum capsule legs only: a month's last session and the session 10 sessions before it)
 - `pre_close_15m`
 
 Current aliases:
@@ -681,6 +682,7 @@ Current signal timestamp rules:
 ```text
 eod_snapshot_ready       -> session close timestamp
 month_end_snapshot_ready -> month-end session close timestamp
+month_swap_snapshot_ready -> swap session close timestamp
 pre_close_15m            -> session close - 15 minutes
 ```
 
@@ -722,6 +724,7 @@ Current gate outcomes include:
 - `snapshot_not_ready_for_session`
 - `snapshot_window_expired`
 - `not_month_end_session`
+- `not_month_swap_session`
 
 The important behavior is:
 

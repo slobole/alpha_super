@@ -666,7 +666,7 @@ def _row_has_active_window_bool(row_dict: dict[str, Any], now_dt: datetime) -> b
             return True
         return not _row_pre_execution_action_expired_bool(row_dict, now_dt)
     reason_code_str = str(row_dict.get("reason_code_str") or "")
-    if reason_code_str == "not_month_end_session":
+    if reason_code_str in ("not_month_end_session", "not_month_swap_session"):
         return False
     target_timestamp_obj = _target_timestamp_obj(row_dict)
     if target_timestamp_obj is None:

@@ -176,7 +176,8 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
         pod_state_str = "skip" if cycle_dict["pill_str"] == "Waiting" else _state_str(cycle_dict.get("tone_str"))
         policy_str = row_dict.get("execution_policy_str") or ""
         monthly_bool = policy_str == "next_month_first_open" or row_dict.get("signal_clock_str") == "month_end_snapshot_ready"
-        cadence_str = ("Monthly" if monthly_bool else "Daily") if policy_str else "—"
+        swap_bool = row_dict.get("signal_clock_str") == "month_swap_snapshot_ready"
+        cadence_str = ("Monthly" if monthly_bool else "Twice a month" if swap_bool else "Daily") if policy_str else "—"
         session_str = "Close" if policy_str == "same_day_moc" else "First open" if monthly_bool else "Open"
         name_str = account_dict.get("display_name") or strategy_display_name_str(row_dict)
         required_dict = row_dict.get("required_action_dict") or {}

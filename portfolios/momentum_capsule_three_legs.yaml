@@ -1,0 +1,27 @@
+# The closed momentum capsule (docs/research/RESIDUAL_MOMENTUM_20261031.md): two Nasdaq-100 legs and one Russell 1000 leg, one third each,
+# reset to thirds once a year. History 2000-2026 has been examined many times; plan 11% / 0.65 / -26%, not the backtest.
+# max_workers_int 1: the pods load Norgate one after the other (parallel loads have hung on this machine).
+name_str: "momentum_capsule_three_legs"
+capital_base_float: 1e+06
+backtest_start_date_str: "2000-09-01"
+end_date_str: null
+allocation_policy_str: fixed
+max_workers_int: 1
+rebalance:
+  frequency_str: annually
+  policy_str: fixed
+save_pod_artifacts_bool: true
+regression_benchmark_symbol_str: "$SPX"
+
+pods:
+  - pod_id_str: pod_mo_capsule_leg1_natr_ndx
+    strategy_import_str: strategies.momentum.strategy_mo_capsule_leg1_natr_ndx:MomentumCapsuleLeg1Strategy
+    weight_float: 0.3333333333333333
+
+  - pod_id_str: pod_mo_capsule_leg2_residual_ndx
+    strategy_import_str: strategies.momentum.strategy_mo_capsule_leg2_residual_ndx:MomentumCapsuleLeg2Strategy
+    weight_float: 0.3333333333333333
+
+  - pod_id_str: pod_mo_capsule_leg3_residual_r1000
+    strategy_import_str: strategies.momentum.strategy_mo_capsule_leg3_residual_r1000:MomentumCapsuleLeg3Strategy
+    weight_float: 0.3333333333333334

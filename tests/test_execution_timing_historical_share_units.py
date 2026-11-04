@@ -139,6 +139,69 @@ def test_missing_close_liquidation_uses_last_observed_fee_units(scale_float):
     assert strategy_obj.get_position("AAA") == 0.0
 
 
+@pytest.mark.parametrize("stops_trading_bool", [False, True])
+def test_a_held_name_without_a_fill_price_matches_vanilla(stops_trading_bool):
+    """A trim is scheduled for a name that has no open on the fill bar: it stopped trading, or only its open is missing.
+    Vanilla sells the name at its last close before the bar and drops the order; timing must do the same (owner decision 2026-11-03)."""
+    price_df = pricing_df(40.0, 0.0)
+    if stops_trading_bool:
+        price_df.loc[price_df.index[3]:, pd.IndexSlice["AAA", ["Open", "High", "Low", "Close", "Unadjusted Close"]]] = np.nan
+    else:
+        price_df.loc[price_df.index[3], ("AAA", "Open")] = np.nan
+    build_fn = lambda: HistoricalTimingStrategy({price_df.index[0]: 505.0, price_df.index[2]: 303.0}, "value")
+    vanilla_obj = build_fn()
+    with contextlib.redirect_stdout(io.StringIO()):
+        run_daily(vanilla_obj, price_df, show_progress=False, show_signal_progress_bool=False)
+    timing_obj = timing_strategy_obj(price_df, build_fn)
+    pd.testing.assert_frame_equal(
+        vanilla_obj.results[["cash", "portfolio_value", "total_value"]],
+        timing_obj.results[["cash", "portfolio_value", "total_value"]],
+        check_exact=True, check_freq=False,
+    )
+    pd.testing.assert_frame_equal(economic_transactions_df(vanilla_obj), economic_transactions_df(timing_obj), check_exact=True)
+    sale_ser = timing_obj.get_transactions().iloc[-1]
+    assert pd.Timestamp(sale_ser["bar"]) == price_df.index[3]
+    assert sale_ser["price"] == price_df.loc[price_df.index[2], ("AAA", "Close")]
+    assert timing_obj.get_position("AAA") == 0.0
+
+
+def test_a_present_invalid_fill_price_on_a_held_name_still_fails_loud():
+    price_df = pricing_df(40.0, 0.0)
+    price_df.loc[price_df.index[3], ("AAA", "Open")] = 0.0
+    build_fn = lambda: HistoricalTimingStrategy({price_df.index[0]: 505.0, price_df.index[2]: 303.0}, "value")
+    # The held-asset anchor check refuses the present zero price before any fill or dividend.
+    with pytest.raises(ValueError, match="Invalid historical execution Open for AAA"):
+        timing_strategy_obj(price_df, build_fn)
+
+
+def test_a_present_invalid_fill_price_on_a_held_name_fails_loud_without_historical_units():
+    price_df = pricing_df(1.0, 0.0)
+    price_df.loc[price_df.index[3], ("AAA", "Open")] = 0.0
+    build_fn = lambda: HistoricalTimingStrategy({price_df.index[0]: 505.0, price_df.index[2]: 303.0}, "value", enabled_bool=False)
+    with pytest.raises(RuntimeError, match="Invalid Open fill price"):
+        timing_strategy_obj(price_df, build_fn)
+
+
+class ExemptParkingStrategy(HistoricalTimingStrategy):
+    def _is_missing_price_liquidation_exempt(self, asset_str):
+        return True
+
+
+class OwnLiquidationStrategy(HistoricalTimingStrategy):
+    def _liquidate_missing_price_positions(self, prices):
+        return 0.0, 0.0
+
+
+@pytest.mark.parametrize("strategy_cls", [ExemptParkingStrategy, OwnLiquidationStrategy])
+def test_a_strategy_with_its_own_missing_price_model_still_fails_loud(strategy_cls):
+    """Timing cannot replay a strategy that keeps a held name through a missing open, so it keeps refusing."""
+    price_df = pricing_df(40.0, 0.0)
+    price_df.loc[price_df.index[3], ("AAA", "Open")] = np.nan
+    build_fn = lambda: strategy_cls({price_df.index[0]: 505.0, price_df.index[2]: 303.0}, "value")
+    with pytest.raises(RuntimeError, match="Invalid Open fill price"):
+        timing_strategy_obj(price_df, build_fn)
+
+
 def scheduled_order_obj(strategy_obj, price_df, unit_str="value", ledger_amount_float=2000.0):
     if unit_str == "shares":
         strategy_obj.order("AAA", ledger_amount_float, trade_id=1)

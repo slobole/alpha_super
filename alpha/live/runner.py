@@ -42,6 +42,7 @@ from alpha.live.logging_utils import (
 from alpha.live.models import (
     BrokerOrderEvent, BrokerOrderRequest, DecisionPlan, LivePriceSnapshot, LiveRelease, PodState, SubmitBatchResult, VPlan,
 )
+from alpha.live.momentum_legs_adapter import MOMENTUM_LEGS_STRATEGY_IMPORT_TUPLE
 from alpha.live.mr_capsule_adapter import MR_CAPSULE_STRATEGY_IMPORT_TUPLE, validate_mr_capsule_release
 from alpha.live.daily_reconcile import (
     DAILY_TERMINAL_STATUS_SET, _refresh as refresh_daily_snapshot,
@@ -117,7 +118,7 @@ def _release_uses_norgate_snapshot_gate_bool(release_obj: LiveRelease) -> bool:
     normalized_signal_clock_str = scheduler_utils.normalize_signal_clock_str(
         release_obj.signal_clock_str
     )
-    return normalized_signal_clock_str in ("eod_snapshot_ready", "month_end_snapshot_ready")
+    return normalized_signal_clock_str in ("eod_snapshot_ready", "month_end_snapshot_ready", scheduler_utils.MONTH_SWAP_SIGNAL_CLOCK_STR)
 
 
 def _decision_plan_norgate_provenance_block_reason_str(
@@ -160,6 +161,11 @@ def _next_norgate_signal_ready_timestamp_ts(
                 next_signal_session_label_ts,
                 release_obj.session_calendar_id_str,
             )
+    elif normalized_signal_clock_str == scheduler_utils.MONTH_SWAP_SIGNAL_CLOCK_STR:
+        next_signal_session_label_ts = scheduler_utils.get_next_month_swap_session_label_ts(
+            signal_session_label_ts,
+            release_obj.session_calendar_id_str,
+        )
     else:
         return None
 
@@ -1775,6 +1781,7 @@ def _humanize_reason_code_str(reason_code_str: str | None) -> str:
         "no_due_work": "no due work right now",
         "non_positive_net_liq": "broker net liquidation value is non-positive",
         "not_month_end_session": "waiting for the last session of the month",
+        "not_month_swap_session": "waiting for the next swap session of the month",
         "position_reconciliation_warning": "model and broker positions differ before sizing",
         "ready_to_build_decision_plan": "ready to build the next decision plan",
         "ready_to_build_vplan": "ready to build the order plan",
@@ -2685,10 +2692,12 @@ def build_decision_plans(
 
         except (ValueError, RuntimeError) as exception_obj:
             capsule_bool = release_obj.strategy_import_str.startswith("strategies.mr_capsule.")
-            if release_obj.strategy_import_str not in (CORE5_STRATEGY_IMPORT_STR, DV2_IND_STRATEGY_IMPORT_STR) and not capsule_bool:
+            momentum_leg_bool = release_obj.strategy_import_str in MOMENTUM_LEGS_STRATEGY_IMPORT_TUPLE
+            if release_obj.strategy_import_str not in (CORE5_STRATEGY_IMPORT_STR, DV2_IND_STRATEGY_IMPORT_STR) and not capsule_bool and not momentum_leg_bool:
                 raise
             skipped_decision_plan_count_int += 1
             reason_code_str = ("dv2_ind_decision_blocked" if release_obj.strategy_import_str == DV2_IND_STRATEGY_IMPORT_STR
+                else "momentum_leg_decision_blocked" if momentum_leg_bool
                 else "mr_capsule_decision_blocked" if capsule_bool else "core5_decision_blocked")
             if capsule_bool:
                 from alpha.live.mr_capsule_adapter import CapsuleHoldingMismatchError

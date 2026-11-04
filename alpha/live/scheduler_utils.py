@@ -30,6 +30,7 @@ import pandas as pd
 
 from alpha.live.models import LiveRelease
 from data.dv2_ind_snapshot_contract import DV2_IND_PROFILE_STR
+from data.momentum_legs_snapshot_contract import MOMENTUM_LEGS_NDX_PROFILE_STR, MOMENTUM_LEGS_R1000_PROFILE_STR
 from data.norgate_loader import is_snapshot_mode_enabled_bool, load_latest_snapshot_session_label_ts
 from data.norgate_snapshot_store import CORE5_PROFILE_STR, MR_CAPSULE_DV2_PROFILE_STR, MR_CAPSULE_HPI_PROFILE_STR, NDX_E2_PROFILE_STR
 
@@ -40,9 +41,12 @@ DEFAULT_OPEN_MARKET_EXPIRY_GRACE_SECONDS_INT = 60
 DEFAULT_SNAPSHOT_READY_BUFFER_MINUTES_INT = 10
 PRE_CLOSE_SIGNAL_BUFFER_MINUTES_INT = 15
 SUPPORTED_SESSION_CALENDAR_ID_TUPLE: tuple[str, ...] = ("XNYS", "XTSE", "XASX")
+MONTH_SWAP_SIGNAL_CLOCK_STR = "month_swap_snapshot_ready"
+MONTH_SWAP_SESSION_OFFSET_TUPLE: tuple[int, ...] = (0, 10)
 SUPPORTED_SIGNAL_CLOCK_TUPLE: tuple[str, ...] = (
     "eod_snapshot_ready",
     "month_end_snapshot_ready",
+    MONTH_SWAP_SIGNAL_CLOCK_STR,
     "pre_close_15m",
 )
 SIGNAL_CLOCK_ALIAS_MAP: dict[str, str] = {
@@ -53,6 +57,8 @@ SIGNAL_CLOCK_ALIAS_MAP: dict[str, str] = {
 DATA_PROFILE_HEARTBEAT_SYMBOL_MAP: dict[str, str] = {
     DV2_IND_PROFILE_STR: "$SPXTR",
     NDX_E2_PROFILE_STR: "$SPX",
+    MOMENTUM_LEGS_NDX_PROFILE_STR: "$SPX",
+    MOMENTUM_LEGS_R1000_PROFILE_STR: "$SPX",
     CORE5_PROFILE_STR: "$SPX",
     MR_CAPSULE_DV2_PROFILE_STR: "$SPX",
     MR_CAPSULE_HPI_PROFILE_STR: "$SPX",
@@ -255,6 +261,55 @@ def get_latest_completed_month_end_session_label_ts(
     return None
 
 
+def is_month_swap_session_bool(
+    session_label_ts: pd.Timestamp,
+    session_calendar_id_str: str,
+) -> bool:
+    """The month's last session, or the session 10 sessions before it."""
+    calendar_obj = get_exchange_calendar_obj(session_calendar_id_str)
+    session_label_ts = pd.Timestamp(session_label_ts).tz_localize(None).normalize()
+    month_period_obj = session_label_ts.to_period("M")
+    month_session_idx = calendar_obj.sessions_in_range(
+        max(month_period_obj.start_time.normalize(), calendar_obj.first_session),
+        min(month_period_obj.end_time.normalize(), calendar_obj.last_session),
+    )
+    return any(
+        len(month_session_idx) > offset_int and session_label_ts == month_session_idx[-1 - offset_int]
+        for offset_int in MONTH_SWAP_SESSION_OFFSET_TUPLE
+    )
+
+
+def get_latest_completed_month_swap_session_label_ts(
+    as_of_ts: datetime,
+    session_calendar_id_str: str,
+    snapshot_ready_buffer_minutes_int: int = DEFAULT_SNAPSHOT_READY_BUFFER_MINUTES_INT,
+) -> pd.Timestamp | None:
+    session_label_ts = get_latest_completed_session_label_ts(
+        as_of_ts,
+        session_calendar_id_str,
+        snapshot_ready_buffer_minutes_int=snapshot_ready_buffer_minutes_int,
+    )
+    calendar_obj = get_exchange_calendar_obj(session_calendar_id_str)
+    while session_label_ts is not None:
+        if is_month_swap_session_bool(session_label_ts, session_calendar_id_str):
+            return session_label_ts
+        try:
+            session_label_ts = calendar_obj.previous_session(session_label_ts)
+        except ValueError:
+            return None
+    return None
+
+
+def get_next_month_swap_session_label_ts(
+    session_label_ts: pd.Timestamp,
+    session_calendar_id_str: str,
+) -> pd.Timestamp:
+    next_session_label_ts = get_next_session_label_ts(session_label_ts, session_calendar_id_str)
+    while not is_month_swap_session_bool(next_session_label_ts, session_calendar_id_str):
+        next_session_label_ts = get_next_session_label_ts(next_session_label_ts, session_calendar_id_str)
+    return next_session_label_ts
+
+
 def _date_from_timestamp_obj(timestamp_obj, session_calendar_id_str: str):
     timestamp_ts = pd.Timestamp(timestamp_obj)
     if timestamp_ts.tzinfo is None:
@@ -388,7 +443,7 @@ def build_signal_timestamp_ts(
         session_label_ts,
         release_obj.session_calendar_id_str,
     )
-    if normalized_signal_clock_str in ("eod_snapshot_ready", "month_end_snapshot_ready"):
+    if normalized_signal_clock_str in ("eod_snapshot_ready", "month_end_snapshot_ready", MONTH_SWAP_SIGNAL_CLOCK_STR):
         return session_close_timestamp_ts
     if normalized_signal_clock_str == "pre_close_15m":
         return session_close_timestamp_ts - timedelta(minutes=PRE_CLOSE_SIGNAL_BUFFER_MINUTES_INT)
@@ -538,6 +593,16 @@ def evaluate_build_gate_dict(
                 "reason_code_str": "not_month_end_session",
                 "latest_heartbeat_session_date_str": latest_heartbeat_session_date_str,
             }
+    if normalize_signal_clock_str(release_obj.signal_clock_str) == MONTH_SWAP_SIGNAL_CLOCK_STR:
+        if not is_month_swap_session_bool(
+            latest_heartbeat_session_label_ts,
+            release_obj.session_calendar_id_str,
+        ):
+            return {
+                "due_bool": False,
+                "reason_code_str": "not_month_swap_session",
+                "latest_heartbeat_session_date_str": latest_heartbeat_session_date_str,
+            }
 
     market_timestamp_ts = to_market_timestamp_ts(as_of_ts, release_obj.session_calendar_id_str)
     market_date_obj = market_timestamp_ts.date()
@@ -591,7 +656,7 @@ def get_signal_clock_reason_code_str(
 ) -> str:
     normalized_signal_clock_str = normalize_signal_clock_str(release_obj.signal_clock_str)
 
-    if normalized_signal_clock_str in ("eod_snapshot_ready", "month_end_snapshot_ready"):
+    if normalized_signal_clock_str in ("eod_snapshot_ready", "month_end_snapshot_ready", MONTH_SWAP_SIGNAL_CLOCK_STR):
         return str(evaluate_build_gate_dict(release_obj, as_of_ts)["reason_code_str"])
 
     if normalized_signal_clock_str == "pre_close_15m":
@@ -616,7 +681,7 @@ def get_signal_clock_reason_code_str(
 def is_release_due_for_build(release_obj: LiveRelease, as_of_ts: datetime) -> bool:
     normalized_signal_clock_str = normalize_signal_clock_str(release_obj.signal_clock_str)
 
-    if normalized_signal_clock_str in ("eod_snapshot_ready", "month_end_snapshot_ready"):
+    if normalized_signal_clock_str in ("eod_snapshot_ready", "month_end_snapshot_ready", MONTH_SWAP_SIGNAL_CLOCK_STR):
         return bool(evaluate_build_gate_dict(release_obj, as_of_ts)["due_bool"])
 
     if normalized_signal_clock_str == "pre_close_15m":

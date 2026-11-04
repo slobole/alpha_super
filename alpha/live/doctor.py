@@ -49,6 +49,7 @@ DOCTOR_FEATURE_NAME_STR = "doctor"
 WAIT_GATE_REASON_CODE_SET: set[str] = {
     "snapshot_not_ready",
     "not_month_end_session",
+    "not_month_swap_session",
     "snapshot_not_ready_for_session",
 }
 
@@ -843,7 +844,7 @@ def _release_requires_norgate_snapshot_sync_bool(release_obj: LiveRelease) -> bo
     normalized_signal_clock_str = scheduler_utils.normalize_signal_clock_str(
         release_obj.signal_clock_str
     )
-    return normalized_signal_clock_str in {"eod_snapshot_ready", "month_end_snapshot_ready"}
+    return normalized_signal_clock_str in {"eod_snapshot_ready", "month_end_snapshot_ready", scheduler_utils.MONTH_SWAP_SIGNAL_CLOCK_STR}
 
 
 def _norgate_snapshot_sync_result_dict(sync_detail_dict: dict[str, object]) -> dict[str, object]:

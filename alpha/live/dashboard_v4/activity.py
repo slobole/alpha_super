@@ -44,6 +44,7 @@ EVENT_DICT = {
     "dv2_ind_pre_submit_account_changed": ("alerts", "fail", "Account changed before submission. Orders blocked.", "orders"),
     "dv2_ind_release_disabled": ("alerts", "fail", "Release disabled. Orders blocked.", "orders"),
     "mr_capsule_decision_blocked": ("alerts", "fail", "Decision blocked by a safety check.", "decision"),
+    "momentum_leg_decision_blocked": ("alerts", "fail", "Decision blocked by a safety check.", "decision"),
     "mr_capsule_eod_source_untrusted": ("alerts", "fail", "Closing snapshot source could not be verified.", "events"),
     "mr_capsule_vplan_blocked": ("alerts", "fail", "Order plan blocked.", "plan"),
     "mr_capsule_pre_submit_account_changed": ("alerts", "fail", "Account changed before submission. Orders blocked.", "orders"),

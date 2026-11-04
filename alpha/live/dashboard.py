@@ -57,7 +57,7 @@ SAFE_ACTION_NAME_LIST = [
     "eod_snapshot",
 ]
 ACTION_TOKEN_HEADER_STR = "X-Alpha-Action-Token"
-NORGATE_SNAPSHOT_GATED_SIGNAL_CLOCK_SET = {"eod_snapshot_ready", "month_end_snapshot_ready"}
+NORGATE_SNAPSHOT_GATED_SIGNAL_CLOCK_SET = {"eod_snapshot_ready", "month_end_snapshot_ready", scheduler_utils.MONTH_SWAP_SIGNAL_CLOCK_STR}
 NORGATE_CURRENT_DECISION_STATUS_SET = {"planned", "vplan_ready", "submitted"}
 
 
@@ -1349,9 +1349,14 @@ def _missed_monthly_decision_cycle_dict(
     latest_decision_plan_row_dict: dict[str, Any] | None,
     as_of_ts: datetime,
 ) -> dict[str, str] | None:
-    if scheduler_utils.normalize_signal_clock_str(release_obj.signal_clock_str) != "month_end_snapshot_ready":
+    signal_clock_str = scheduler_utils.normalize_signal_clock_str(release_obj.signal_clock_str)
+    if signal_clock_str not in ("month_end_snapshot_ready", scheduler_utils.MONTH_SWAP_SIGNAL_CLOCK_STR):
         return None
-    required_session_label_ts = scheduler_utils.get_latest_completed_month_end_session_label_ts(
+    required_session_label_ts = (
+        scheduler_utils.get_latest_completed_month_end_session_label_ts
+        if signal_clock_str == "month_end_snapshot_ready"
+        else scheduler_utils.get_latest_completed_month_swap_session_label_ts
+    )(
         as_of_ts,
         release_obj.session_calendar_id_str,
     )
@@ -3568,6 +3573,11 @@ def _completed_decision_plan_covers_norgate_signal_cycle_bool(row_dict: dict[str
                 next_signal_session_label_ts,
                 calendar_id_str,
             )
+    elif signal_clock_str == scheduler_utils.MONTH_SWAP_SIGNAL_CLOCK_STR:
+        next_signal_session_label_ts = scheduler_utils.get_next_month_swap_session_label_ts(
+            signal_session_label_ts,
+            calendar_id_str,
+        )
     else:
         return True
     next_ready_timestamp_ts = scheduler_utils.get_session_close_timestamp_ts(

@@ -18,6 +18,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from data.dv2_ind_snapshot_contract import DV2_IND_PROFILE_STR, validate_dv2_ind_snapshot
+from data.momentum_legs_snapshot_contract import MOMENTUM_LEGS_PROFILE_TUPLE, MOMENTUM_LEGS_R1000_PROFILE_STR, validate_momentum_legs_snapshot_content
 
 
 ALPHA_USE_NORGATE_SNAPSHOT_ENV_STR = "ALPHA_USE_NORGATE_SNAPSHOT_BOOL"
@@ -76,6 +77,7 @@ MR_CAPSULE_DATA_CONTRACT_BY_PROFILE_DICT = {
 PIT_PROFILE_BY_INDEX_NAME_DICT: dict[str, str] = {
     "S&P 500": "norgate_eod_sp500_pit",
     "Nasdaq 100": "norgate_eod_ndx_pit",
+    "Russell 1000": MOMENTUM_LEGS_R1000_PROFILE_STR,
 }
 
 HELPER_PROFILE_BY_SYMBOL_DICT: dict[str, str] = {
@@ -452,6 +454,44 @@ def load_ndx_e2_sector_map(
     if not set(symbol_list).issubset(sector_by_symbol_dict):
         raise NorgateSnapshotValidationError("E2 sector snapshot does not cover the requested universe.")
     return {symbol_str: sector_by_symbol_dict[symbol_str] for symbol_str in symbol_list}
+
+
+_MOMENTUM_LEGS_CHECKED_CONTENT_KEY_SET: set[tuple[str, str, str]] = set()
+_MOMENTUM_LEGS_CHECKED_CONTENT_LOCK_OBJ = Lock()
+
+
+def _validate_momentum_legs_snapshot_contract(
+    snapshot_dir_path_obj: Path, manifest_dict: dict[str, Any], snapshot_date_ts: pd.Timestamp, profile_str: str,
+) -> None:
+    # *** CRITICAL *** Same rule as E2: file hashes on every read; the manifest pins them, the labels and the endpoint
+    # attestations, so one green content check per exact manifest is reused in this process. A failure is never kept.
+    _validate_file_hash(snapshot_dir_path_obj, manifest_dict, UNIVERSE_FILE_NAME_STR)
+    content_key_tuple = _ndx_e2_content_key_tuple(snapshot_dir_path_obj, manifest_dict, snapshot_date_ts)
+    with _MOMENTUM_LEGS_CHECKED_CONTENT_LOCK_OBJ:
+        if content_key_tuple in _MOMENTUM_LEGS_CHECKED_CONTENT_KEY_SET:
+            return
+    universe_df = pd.read_parquet(snapshot_dir_path_obj / UNIVERSE_FILE_NAME_STR)
+    if "date" in universe_df.columns:
+        universe_df = universe_df.set_index("date")
+    try:
+        validate_momentum_legs_snapshot_content(
+            pd.read_parquet(snapshot_dir_path_obj / PRICE_FILE_NAME_STR), universe_df, manifest_dict, snapshot_date_ts, profile_str)
+    except ValueError as error_obj:
+        raise NorgateSnapshotValidationError(str(error_obj)) from error_obj
+    with _MOMENTUM_LEGS_CHECKED_CONTENT_LOCK_OBJ:
+        _MOMENTUM_LEGS_CHECKED_CONTENT_KEY_SET.add(content_key_tuple)
+
+
+def load_momentum_legs_label_map(symbol_list: Sequence[str], level_int: int) -> dict[str, str]:
+    """GICS labels captured with the active snapshot, at level 1 (sector) or 2 (industry group)."""
+    profile_str = get_active_data_profile_str()
+    if profile_str not in MOMENTUM_LEGS_PROFILE_TUPLE:
+        raise NorgateSnapshotValidationError(f"Momentum legs labels need their own snapshot profile, not {profile_str}.")
+    label_map_dict = load_valid_snapshot_manifest(profile_str).manifest_dict["data_contract"].get(
+        {1: "sector_by_symbol_dict", 2: "group_by_symbol_dict"}[int(level_int)])
+    if not isinstance(label_map_dict, dict) or not set(symbol_list).issubset(label_map_dict):
+        raise NorgateSnapshotValidationError("Momentum legs label snapshot does not cover the requested universe.")
+    return {symbol_str: label_map_dict[symbol_str] for symbol_str in symbol_list}
 
 
 def _load_manifest_from_dir(snapshot_dir_path_obj: Path) -> tuple[dict[str, Any], str]:
@@ -842,6 +882,8 @@ def _load_valid_snapshot_manifest_cached(
         _validate_core5_snapshot_contract(snapshot_dir_path_obj, manifest_dict, snapshot_date_ts)
     if profile_str in MR_CAPSULE_PROFILE_SET:
         _validate_mr_capsule_snapshot_contract(snapshot_dir_path_obj, manifest_dict, snapshot_date_ts)
+    if profile_str in MOMENTUM_LEGS_PROFILE_TUPLE:
+        _validate_momentum_legs_snapshot_contract(snapshot_dir_path_obj, manifest_dict, snapshot_date_ts, profile_str)
     files_dict = manifest_dict.get("files", {})
     file_hashes_dict = manifest_dict.get("file_hashes", {})
     has_universe_entry_bool = (
@@ -875,7 +917,7 @@ def load_valid_snapshot_manifest(
     # replacing/corrupting a previously read artifact cannot reuse a green cache.
     manifest_loader_fn = (
         _load_valid_snapshot_manifest_cached.__wrapped__
-        if profile_str in {CORE5_PROFILE_STR, NDX_E2_PROFILE_STR, DV2_IND_PROFILE_STR}
+        if profile_str in {CORE5_PROFILE_STR, NDX_E2_PROFILE_STR, DV2_IND_PROFILE_STR, *MOMENTUM_LEGS_PROFILE_TUPLE}
         else _load_valid_snapshot_manifest_cached
     )
     return manifest_loader_fn(
@@ -927,7 +969,8 @@ def _read_prices_cached_df(snapshot_dir_str: str, manifest_hash_str: str) -> pd.
 
 
 def _read_prices_df(snapshot_manifest_obj: NorgateSnapshotManifest) -> pd.DataFrame:
-    if snapshot_manifest_obj.profile_str == DV2_IND_PROFILE_STR:
+    # Momentum legs decide about twice a month, so a long-running serve keeps no full price table of theirs.
+    if snapshot_manifest_obj.profile_str == DV2_IND_PROFILE_STR or snapshot_manifest_obj.profile_str in MOMENTUM_LEGS_PROFILE_TUPLE:
         return _read_prices_uncached_df(str(snapshot_manifest_obj.snapshot_dir_path_obj))
     if snapshot_manifest_obj.profile_str in MR_CAPSULE_PROFILE_SET or snapshot_manifest_obj.profile_str == NDX_E2_PROFILE_STR:
         cache_key_tuple = (str(snapshot_manifest_obj.snapshot_dir_path_obj), snapshot_manifest_obj.manifest_hash_str)

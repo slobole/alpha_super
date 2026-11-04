@@ -310,7 +310,7 @@ def build_cycle_view_dict(
             step_dict_list.append(_step_dict(label_str, state_str, fact_str, now_dt, planned_dt=planned_dt))
 
     idle_bool = (
-        pod_row_dict.get("reason_code_str") == "not_month_end_session"
+        pod_row_dict.get("reason_code_str") in ("not_month_end_session", "not_month_swap_session")
         and action_str == "wait"
         and required_dict.get("severity_str") not in {"red", "yellow"}
         and decision_status_str == "completed"
