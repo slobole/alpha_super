@@ -5,6 +5,7 @@ import threading
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.error import URLError
 from typing import Iterator, Sequence
 
 import pandas as pd
@@ -397,6 +398,14 @@ def test_server_doctor_fails_when_token_missing(tmp_path, monkeypatch):
 def test_server_doctor_fails_when_api_health_unreachable(tmp_path, monkeypatch):
     monkeypatch.setenv(NORGATE_API_TOKEN_ENV_STR, TOKEN_STR)
 
+    request_list = []
+
+    def unreachable_urlopen(request_obj, *, timeout):
+        request_list.append((request_obj.full_url, timeout))
+        raise URLError(ConnectionRefusedError("Synthetic connection refused"))
+
+    monkeypatch.setattr("scripts.doctor_norgate_server.urlopen", unreachable_urlopen)
+
     report_obj = run_norgate_server_doctor(
         service_root_path_str=str(tmp_path / "norgate_service"),
         api_url_str="http://127.0.0.1:9",
@@ -409,6 +418,7 @@ def test_server_doctor_fails_when_api_health_unreachable(tmp_path, monkeypatch):
     status_dict = _check_status_dict(report_obj)
     assert report_obj.result_str == "FAIL"
     assert status_dict["api healthz"] == "FAIL"
+    assert request_list == [("http://127.0.0.1:9/healthz", 0.2)]
 
 
 def test_server_doctor_fails_when_api_accepts_missing_token(tmp_path, monkeypatch):

@@ -114,6 +114,7 @@ def test_publication_safe_selection_rejects_same_day_observation() -> None:
     assert selected_ts == pd.Timestamp("2026-07-30")
 
 
+@pytest.mark.data_integration
 def test_corrected_frozen_signal_endpoints_and_changed_ties() -> None:
     (
         _execution_price_df,
@@ -145,6 +146,7 @@ def test_corrected_frozen_signal_endpoints_and_changed_ties() -> None:
     ) == FROZEN_SIGNAL_CONTRACT_SHA256_STR
 
 
+@pytest.mark.data_integration
 def test_frozen_norgate_price_frames_match_content_hashes() -> None:
     execution_price_df = get_tactical_yield_data(DEFAULT_CONFIG)[0]
 
@@ -154,6 +156,7 @@ def test_frozen_norgate_price_frames_match_content_hashes() -> None:
     } == FROZEN_NORGATE_SHA256_BY_SYMBOL_DICT
 
 
+@pytest.mark.data_integration
 def test_run_variant_honors_earlier_pm_end_date() -> None:
     strategy_obj = run_variant(
         show_display_bool=False,

@@ -1,5 +1,6 @@
 import os
 import unittest
+from unittest.mock import call, patch
 import warnings
 from pathlib import Path
 
@@ -310,8 +311,27 @@ class MtumTimedByMomPdpBridgeStrategyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, SUPPORTED_SHARED_START_DATE_STR):
             get_mtum_timed_by_mom_pdp_bridge_data(config=early_config)
 
-        with self.assertRaisesRegex(ValueError, "end_date_str <="):
-            get_mtum_timed_by_mom_pdp_bridge_data(config=late_config)
+        module_path_str = "strategies.momentum.strategy_mo_mtum_timed_by_mom_pdp_bridge"
+        primary_signal_close_ser = self.make_primary_signal_close_ser()
+        fallback_signal_close_ser = self.make_fallback_signal_close_ser()
+        with (
+            patch(f"{module_path_str}.load_execution_price_df", return_value=self.make_pricing_data_df()) as execution_mock,
+            patch(f"{module_path_str}.load_signal_close_ser", side_effect=[primary_signal_close_ser, fallback_signal_close_ser]) as signal_mock,
+        ):
+            expected_end_str = fallback_signal_close_ser.index[-1].strftime("%Y-%m-%d")
+            with self.assertRaisesRegex(ValueError, f"end_date_str <= {expected_end_str}"):
+                get_mtum_timed_by_mom_pdp_bridge_data(config=late_config)
+        execution_mock.assert_called_once_with(
+            trade_symbol_str=late_config.trade_symbol_str,
+            benchmark_list=late_config.benchmark_list,
+            start_date_str=late_config.start_date_str,
+            end_date_str=late_config.end_date_str,
+        )
+        self.assertEqual(signal_mock.call_args_list, [
+            call(signal_symbol_str=symbol_str, start_date_str=late_config.start_date_str,
+                 end_date_str=late_config.end_date_str)
+            for symbol_str in (late_config.primary_signal_symbol_str, late_config.fallback_signal_symbol_str)
+        ])
 
     def test_default_switch_date_constant_matches_expected_bridge_boundary(self):
         self.assertEqual(DEFAULT_SIGNAL_SWITCH_DATE_STR, "2021-03-12")

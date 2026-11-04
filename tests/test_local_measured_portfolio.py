@@ -16,6 +16,10 @@ from test_live_dashboard import _seed_eod_pod_state
 
 
 def measured_fixture_app(tmp_path, monkeypatch, *, missing_day_str=None, retire_bool=False):
+    # These cases isolate measured Pod accounting. Full-client pre-Pod ownership
+    # is covered by test_other_accounts_workspace/history_regressions.
+    monkeypatch.setattr("alpha.live.dashboard_v3.local_workspace.discover_other_account_list",
+                        lambda *arg_tuple, **kwarg_dict: [])
     app_obj = build_fixture_app(tmp_path, monkeypatch, finance_bool=False, new_pod_bool=False, expanded_bool=True)
     binding_list = [
         PodPerformanceBinding(account_route_str="U100", pod_id_str="pod_a",
@@ -25,7 +29,7 @@ def measured_fixture_app(tmp_path, monkeypatch, *, missing_day_str=None, retire_
             return_end_date_str="2026-06-17" if retire_bool else None),
     ]
     # Real Pod ledgers establish the baseline; the normal dashboard derives
-    # June1 / June17 without a reporting date override or mocked discovery.
+    # June1 / June17 without a reporting date override or mocked Pod discovery.
     for release_obj in load_release_list(str(tmp_path / "releases")):
         baseline_ts = datetime(2026, 5, 29, 20, 10, tzinfo=UTC) if release_obj.pod_id_str == "pod_a" else datetime(2026, 6, 16, 20, 10, tzinfo=UTC)
         _seed_eod_pod_state(tmp_path / (release_obj.pod_id_str + ".sqlite3"), release_obj,

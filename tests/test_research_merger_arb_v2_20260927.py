@@ -190,6 +190,7 @@ def test_terminal_liquidation_and_sweep():
     assert sim_small["total_ser"].iloc[0] == pytest.approx(25_000.0)
 
 
+@pytest.mark.data_integration
 @pytest.mark.skipif(not common.trend_common.SLEEVE_SERIES_PATH.exists(), reason="stored sleeves not available")
 def test_control_books_reproduce_the_prereg_table():
     taa, l_ser, bil, spy = common.load_taa_ser(), common.trend_common.load_stored_l_ser(), common.load_bil_ret_ser(), common.load_spy_tr_ret_ser()

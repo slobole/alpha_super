@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -174,6 +176,8 @@ def test_taa_variants_are_gated_and_the_live_default_is_unchanged():
 
 
 def _norgate_ready() -> bool:
+    if os.environ.get("ALPHA_TEST_DATA_INTEGRATION_BOOL") != "true":
+        return False
     try:
         import norgatedata
 
@@ -189,6 +193,7 @@ def _norgate_running_bool() -> bool:
 EXACT_MEMBERSHIP_DEFAULT_TS = pd.Timestamp("2026-09-29 10:31")  # 9afc293: older engine runs used the member tail trim
 
 
+@pytest.mark.data_integration
 @pytest.mark.skipif(not _norgate_running_bool(), reason="Norgate data not available")
 @pytest.mark.parametrize("spec_name_str", ["ndx_atr", "ndx_natr20", "ndx_natr20_vxn"])
 def test_ndx_sibling_gate_passes_against_the_saved_engine_run(spec_name_str):
@@ -204,6 +209,7 @@ def test_ndx_sibling_gate_passes_against_the_saved_engine_run(spec_name_str):
     assert report.passed_bool, report.summary_str()
 
 
+@pytest.mark.data_integration
 @pytest.mark.skipif("not _norgate_ready()")
 @pytest.mark.parametrize("spec_name_str", ["taa_3x_1n", "taa_lin_1n_qqq", "taa_2x_1n_qld", "taa_nobtal_2x_1n_qld", "taa_nobtal_2x_1n_sso"])
 def test_taa_variant_gate_passes_against_the_saved_engine_run(spec_name_str):
@@ -286,6 +292,7 @@ def test_compass_fast_replica_holds_the_planted_regime_and_runs_on_a_shuffle():
     assert all(np.isfinite(v).all() for v in shuffled_list)
 
 
+@pytest.mark.data_integration
 @pytest.mark.skipif("not _norgate_ready()")
 @pytest.mark.parametrize("spec_name_str", ["compass", "compass_qqq"])
 def test_compass_gate_passes_against_the_saved_engine_run(spec_name_str):
@@ -300,6 +307,7 @@ def test_compass_gate_passes_against_the_saved_engine_run(spec_name_str):
     assert report.passed_bool, report.summary_str()
 
 
+@pytest.mark.data_integration
 @pytest.mark.skipif("not _norgate_ready()")
 def test_compass_gate_fails_the_old_same_date_t5yie_leak(monkeypatch):
     """Near-miss mutant: reading the T5YIE value dated T at the T close (the leak fixed on 2026-09-28) must fail."""
@@ -316,6 +324,7 @@ def test_compass_gate_fails_the_old_same_date_t5yie_leak(monkeypatch):
     assert not run_gate("compass").passed_bool
 
 
+@pytest.mark.data_integration
 @pytest.mark.skipif("not _norgate_ready()")
 def test_compass_fast_replica_tracks_the_engine():
     from alpha.scout.family import compass_family
@@ -375,6 +384,7 @@ def test_core5_spec_signal_targets_and_rebalance_dates():
     offset_expected_index = session_index[session_index.get_indexer(offset_decision_index) + 1]
     assert offset_df.index.equals(offset_expected_index[offset_expected_index >= "2015-08-01"])  # 3 sessions earlier
 
+@pytest.mark.data_integration
 @pytest.mark.skipif("not _norgate_ready()")
 def test_core5_gate_passes_and_blocks_a_spec_without_the_borrow_fee(monkeypatch):
     from dataclasses import replace
@@ -392,6 +402,7 @@ def test_core5_gate_passes_and_blocks_a_spec_without_the_borrow_fee(monkeypatch)
     monkeypatch.setattr(core5, "LIVE_CONFIG", replace(core5.LIVE_CONFIG, annual_borrow_rate_float=0.0))
     assert not run_gate("core5").passed_bool  # the DBC borrow fee is about 6e-5 of NAV on a short day
 
+@pytest.mark.data_integration
 @pytest.mark.skipif("not _norgate_ready()")
 def test_core5_mcpt_replica_tracks_the_engine():
     from alpha.scout.family import core5_family
@@ -518,6 +529,7 @@ def test_tfi_and_trinity_replicas_run_on_a_shuffled_matrix():
             daily_vec = spec_module.fast_daily_list(candidate_mat, date_index, config_list)[0]
             assert daily_vec.shape == (row_count_int,) and np.isfinite(daily_vec).all() and (daily_vec != 0.0).sum() > 200
 
+@pytest.mark.data_integration
 @pytest.mark.skipif("not _norgate_ready()")
 @pytest.mark.parametrize("spec_name_str", ["tfi", "trinity"])
 def test_beyond_6040_gate_passes_against_the_saved_engine_run(spec_name_str):
@@ -596,6 +608,7 @@ def test_eom_family_grid_and_replica_on_a_shuffle():
     assert np.corrcoef(engine_ser, fast_ser)[0, 1] > 0.99
 
 
+@pytest.mark.data_integration
 @pytest.mark.skipif("not _norgate_ready()")
 def test_eom_gate_passes_and_blocks_the_hindsight_free_calendar(monkeypatch):
     from dataclasses import replace
@@ -749,6 +762,7 @@ def test_sector_ibs_s3_inputs_feed_the_class_e_station():
     result_dict = sector_ibs.s3_result(input_dict)
     assert len(result_dict["check_list"]) == 8 and {v for _, v, _ in result_dict["check_list"]} <= {"PASS", "WARN", "FAIL"}
 
+@pytest.mark.data_integration
 @pytest.mark.skipif("not _norgate_ready()")
 @pytest.mark.parametrize("spec_name_str", ["sector_ibs_vox_iyr","dispersion_ibs_kie_ihi_xlc", "dispersion_ibs_kie_ihi_xlc_sma200", "dispersion_ibs_kie_ihi_sma200"])
 def test_sector_ibs_gate_passes_against_the_saved_engine_run(spec_name_str):
@@ -762,6 +776,7 @@ def test_sector_ibs_gate_passes_against_the_saved_engine_run(spec_name_str):
     report = run_gate(spec_name_str)
     assert report.passed_bool, report.summary_str()
 
+@pytest.mark.data_integration
 @pytest.mark.skipif("not _norgate_ready()")
 def test_sector_ibs_mcpt_replica_tracks_the_engine():
     from alpha.scout.family import sector_ibs_family
@@ -969,6 +984,7 @@ def test_dv2_s3_inputs_feed_the_class_e_station(variant_name_str):
     assert len(result_dict["check_list"]) == 8 and {v for _, v, _ in result_dict["check_list"]} <= {"PASS", "WARN", "FAIL"}
 
 
+@pytest.mark.data_integration
 @pytest.mark.skipif("not _norgate_ready()")
 @pytest.mark.parametrize("variant_name_str", ["dv2", "dv2_ndx"])
 def test_dv2_gate_passes_against_a_fresh_engine_run_and_blocks_a_near_miss(monkeypatch, variant_name_str):
@@ -991,6 +1007,7 @@ def test_dv2_gate_passes_against_a_fresh_engine_run_and_blocks_a_near_miss(monke
     assert not gate_run.run_gate(variant_name_str).passed_bool
 
 
+@pytest.mark.data_integration
 @pytest.mark.skipif("not _norgate_ready()")
 @pytest.mark.parametrize("variant_name_str", ["dv2", "dv2_ndx"])
 def test_dv2_panel_replica_tracks_the_engine(variant_name_str):
@@ -1168,6 +1185,7 @@ def test_dv2_industry_etf_s3_inputs_feed_the_class_e_station():
     assert len(result_dict["check_list"]) == 8 and {v for _, v, _ in result_dict["check_list"]} <= {"PASS", "WARN", "FAIL"}
 
 
+@pytest.mark.data_integration
 @pytest.mark.skipif("not _norgate_ready()")
 def test_dv2_industry_etf_gate_passes_against_a_fresh_engine_run_and_blocks_a_near_miss(monkeypatch):
     # A fresh engine run to 2016-12-30 (about 10 s); the full `python -m alpha.scout gate dv2_industry_etf --fresh` is
@@ -1185,6 +1203,7 @@ def test_dv2_industry_etf_gate_passes_against_a_fresh_engine_run_and_blocks_a_ne
     assert not gate_run.run_gate("dv2_industry_etf").passed_bool
 
 
+@pytest.mark.data_integration
 @pytest.mark.skipif("not _norgate_ready()")
 def test_dv2_industry_etf_mcpt_replica_tracks_the_engine():
     from alpha.scout.engines.weights import CostModel
@@ -1349,6 +1368,7 @@ def test_hpi_panel_replica_tracks_the_spec_and_runs_on_a_permuted_panel():
     shuffled_list, shuffled_baseline_vec = hpi.fast_daily_list_panel(permuted_panel(panel, np.random.default_rng(3)), config_list, config)
     assert all(np.isfinite(v).all() and (v != 0.0).sum() > 50 for v in shuffled_list) and np.isfinite(shuffled_baseline_vec).all()
 
+@pytest.mark.data_integration
 @pytest.mark.skipif("not _norgate_ready()")
 @pytest.mark.parametrize("spec_name_str", ["hpi_vote", "hpi_ibs_rsi"])
 def test_hpi_gate_passes_against_the_saved_engine_run(spec_name_str):
@@ -1362,6 +1382,7 @@ def test_hpi_gate_passes_against_the_saved_engine_run(spec_name_str):
     report = run_gate(spec_name_str)
     assert report.passed_bool, report.summary_str()
 
+@pytest.mark.data_integration
 @pytest.mark.skipif("not _norgate_ready()")
 def test_hpi_panel_replica_tracks_the_engine_on_the_sealed_panel():
     from alpha.scout.engines.weights import CostModel

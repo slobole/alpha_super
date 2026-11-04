@@ -1,8 +1,10 @@
-"""Guard rail: monthly and demo pages render byte-identically while daily pods are added.
+"""Guard rail: fixed monthly/demo pages retain their reviewed rendering.
 
-The hashes were generated at dee5499, before any daily-pod change. Every later
-phase must keep them unchanged. A mismatch names the changed URL; compare that
-page with its dee5499 rendering before considering any hash update.
+The original golden predates daily pods. The four overview hashes were amended
+for a4e810c's explicit Client value / Strategy return labeling. Reversing only
+those labels and the Strategies source prefix recovered every previous hash;
+no numeric, date, scope or other HTML differences were accepted. Review each
+rendered difference before updating a golden; never bulk-refresh these hashes.
 """
 
 from copy import deepcopy
@@ -28,9 +30,9 @@ SHARED_URL_TUPLE = ("/", "/overview/refresh", "/overview/money?period=All",
                     "/system", "/activity/body?days=7", "/tools")
 STORAGE_KEY_RE = re.compile(r"alpha\.ops\.v4\.activity\.live\.[0-9a-f]{64}")
 GOLDEN_DEMO_DICT = {
-    "/": "200:7478b3d4f1caae9327c6530a6342307ab39bae9313807f3c45326b68c1b31f34",
+    "/": "200:38a64d12b64420625093821aaeb3f9a4ca895220346c7dbf150324e28f33ae5f",
     "/overview/refresh": "200:4507bf6779bc91b6d01f4fe63faecde705e1356cfef34cd48487c6a32855c32e",
-    "/overview/money?period=All": "200:a569e5ded22c5fc239e31e7d7b311d86ecdcb07f71b51992e4bdb8474126fe56",
+    "/overview/money?period=All": "200:dac31525177898daffe23251d1b592042f0c8cae86c402d9b0528f8ab1449a55",
     "/system": "200:0b9286584d36e279b63cc9bf041d8bf4f5bb54901591c396d00c2f90a4322f0b",
     "/activity/body?days=7": "200:d3da9835352a876927eb92ad6b7013093b93ceafc01e8dff2e46d9eeca9368ee",
     "/tools": "200:01e9f2141c5824934134620079c51014de233540161aac9e403e0ff2a48b261d",
@@ -56,9 +58,9 @@ GOLDEN_DEMO_DICT = {
     "/pods/demo_1_3?tab=events": "200:79347cb52e03caac8a89314c2fc4ff72331001c319fe3546db67295bdbca2301"
 }
 GOLDEN_PRODUCTION_DICT = {
-    "/": "200:9fe84c89a0d008d472d3d5f80103d135874b23ea56883ab727cb7119b15cbeea",
+    "/": "200:7368f528fe67eeed03fa3e64884436f76015c07e865442a1430997c6a7d95f58",
     "/overview/refresh": "200:34cadf0f307147d42f327e6a883c6d6bdfd62c58b328584929ce8064cf34bdd1",
-    "/overview/money?period=All": "200:846197d7845456bdc19251a0059ef7eaebed36d7352723c7da1371cc325954f9",
+    "/overview/money?period=All": "200:e2b5a575a6e252356529bde49af840fcf42d2a4a7a4d4104391379c2c4a64ac4",
     "/system": "200:afd5e21d55f3c938a1dbeac9629bc43457dce2b6de106ad4a09f27daf24c7259",
     "/activity/body?days=7": "200:d4155e7376ef8563c07a60613a0edbb8ca4811d806413b19fe1bd3c08b903428",
     "/tools": "200:b7d8132a06b0350dd112bd2fae9d3214360ec5ad4f04f3d21453529fd3b604c5",

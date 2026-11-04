@@ -197,6 +197,8 @@ No account, margin, broker or scheduler setting was changed.
   33 new tests fail.
 - **Opt-in real-data parity** (`tests/test_live_hpi_same_open_refill_parity.py`,
   both pods): 8 of 8 passed, taking 30 minutes.
+  Current invocations also require pytest `--run-data-integration`; see the
+  [test-lane guide](../../tests/README.md). The recorded results below are unchanged.
   - `ALPHA_RUN_HPI_LIVE_PARITY_BOOL=true` runs three windows (2008-09..12,
     2020-02..05, 2025-03..05) per pod: 217 of 217 sessions match for each pod,
     with 23 refill days (vote) and 21 (baseline), and the old host was wrong on

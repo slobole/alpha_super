@@ -6,6 +6,7 @@ import threading
 from contextlib import contextmanager
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from urllib.error import URLError
 from typing import Iterator
 
 import pandas as pd
@@ -346,6 +347,14 @@ def test_client_doctor_fails_when_api_unreachable(tmp_path, monkeypatch):
     _write_release_manifest(releases_root_path_obj)
     monkeypatch.setenv(ALPHA_USE_NORGATE_SNAPSHOT_ENV_STR, "true")
 
+    request_list = []
+
+    def unreachable_urlopen(request_obj, *, timeout):
+        request_list.append((request_obj.full_url, timeout))
+        raise URLError(ConnectionRefusedError("Synthetic connection refused"))
+
+    monkeypatch.setattr(client_doctor_module, "urlopen", unreachable_urlopen)
+
     report_obj = run_norgate_client_doctor(
         api_url_str="http://127.0.0.1:9",
         token_str=TOKEN_STR,
@@ -358,6 +367,7 @@ def test_client_doctor_fails_when_api_unreachable(tmp_path, monkeypatch):
 
     assert report_obj.result_str == "FAIL"
     assert _status_dict(report_obj)["api healthz"] == "FAIL"
+    assert request_list == [("http://127.0.0.1:9/healthz", 0.2)]
 
 
 def test_client_doctor_fails_when_token_invalid(tmp_path, monkeypatch):

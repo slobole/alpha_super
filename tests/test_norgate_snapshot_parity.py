@@ -13,13 +13,13 @@ RUN_PARITY_BOOL = os.getenv("ALPHA_RUN_NORGATE_SNAPSHOT_PARITY_BOOL", "false").l
     "on",
 }
 
-pytestmark = pytest.mark.skipif(
+pytestmark = [pytest.mark.data_integration, pytest.mark.skipif(
     not RUN_PARITY_BOOL,
     reason=(
         "Direct-vs-snapshot parity requires a Windows Norgate install and matching "
-        "NORGATE_SNAPSHOT_ROOT. Set ALPHA_RUN_NORGATE_SNAPSHOT_PARITY_BOOL=true to run."
+        "NORGATE_SNAPSHOT_ROOT. Set ALPHA_RUN_NORGATE_SNAPSHOT_PARITY_BOOL=true and pass --run-data-integration to run."
     ),
-)
+)]
 
 
 def _set_snapshot_mode_bool(monkeypatch, enabled_bool: bool) -> None:

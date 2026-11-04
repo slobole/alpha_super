@@ -11,6 +11,8 @@ from types import SimpleNamespace
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+import pytest
+
 import alpha.live.dashboard as dashboard_module
 import alpha.live.norgate_snapshot_sync as norgate_sync_module
 import alpha.live.runner as runner_module
@@ -48,6 +50,8 @@ from alpha.live.state_store_v2 import LiveStateStore
 
 
 AS_OF_TS = datetime(2024, 1, 2, 12, 0, tzinfo=UTC)
+
+
 
 
 def _write_release_manifest(
@@ -972,6 +976,7 @@ def test_bad_cash_flow_config_does_not_hide_operational_targets(
     )
 
 
+@pytest.mark.usefixtures("no_vendor_heartbeat")
 def test_dashboard_incubation_rehearsal_keeps_sim_ledger_separate_from_paper_probe(tmp_path: Path):
     releases_root_path_obj = tmp_path / "releases"
     _write_release_manifest(
@@ -1046,6 +1051,7 @@ def test_dashboard_incubation_rehearsal_keeps_sim_ledger_separate_from_paper_pro
     }
 
 
+@pytest.mark.usefixtures("no_vendor_heartbeat")
 def test_dashboard_incubation_aggregates_default_pod_dbs_without_shared_state(
     tmp_path: Path,
     monkeypatch,
@@ -1159,6 +1165,7 @@ def test_dashboard_incubation_missing_per_pod_db_renders_safe_debug_output(
     assert detail_dict["debug_story_dict"]["verdict_dict"]["next_inspect_command_name_str"] == "status"
 
 
+@pytest.mark.usefixtures("no_vendor_heartbeat")
 def test_dashboard_summary_handles_missing_empty_shared_and_pod_db(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", "false")
     releases_root_path_obj = tmp_path / "releases"
@@ -2270,6 +2277,7 @@ def test_dashboard_event_loader_reads_rotated_jsonl_backups(tmp_path: Path):
     ]
 
 
+@pytest.mark.usefixtures("no_vendor_heartbeat")
 def test_dashboard_summary_keeps_comparison_artifacts_informational(tmp_path: Path):
     releases_root_path_obj = tmp_path / "releases"
     _write_release_manifest(
@@ -2333,6 +2341,7 @@ def test_dashboard_summary_keeps_comparison_artifacts_informational(tmp_path: Pa
     }
 
 
+@pytest.mark.usefixtures("no_vendor_heartbeat")
 def test_dashboard_eod_snapshot_states_and_alerts(tmp_path: Path):
     releases_root_path_obj = tmp_path / "releases"
     for pod_id_str in ("pod_eod_done", "pod_eod_missing", "pod_eod_blocked"):
@@ -2410,6 +2419,7 @@ def test_dashboard_eod_snapshot_states_and_alerts(tmp_path: Path):
     assert any(item_dict["label_str"] == "EOD Snapshot" for item_dict in freshness_item_list)
 
 
+@pytest.mark.usefixtures("no_vendor_heartbeat")
 def test_dashboard_detail_pod_pnl_uses_eod_history_and_latest_same_day_snapshot(tmp_path: Path):
     releases_root_path_obj = tmp_path / "releases"
     _write_release_manifest(
@@ -2484,6 +2494,7 @@ def test_dashboard_detail_pod_pnl_uses_eod_history_and_latest_same_day_snapshot(
     assert point_by_market_date_dict["2024-01-02"]["since_start_pnl_float"] == 0.0
 
 
+@pytest.mark.usefixtures("no_vendor_heartbeat")
 def test_dashboard_combined_book_uses_strict_and_carry_forward_eod_series(tmp_path: Path):
     releases_root_path_obj = tmp_path / "releases"
     for pod_id_str in ("pod_alpha", "pod_beta"):
@@ -2589,6 +2600,7 @@ def test_dashboard_combined_book_uses_strict_and_carry_forward_eod_series(tmp_pa
     assert len(beta_contribution_dict["equity_point_dict_list"]) == 2
 
 
+@pytest.mark.usefixtures("no_vendor_heartbeat")
 def test_dashboard_combined_book_separates_modes_and_warns_without_failing(
     tmp_path: Path,
 ):
@@ -2698,6 +2710,7 @@ def test_dashboard_combined_book_separates_modes_and_warns_without_failing(
     )["freshness_warning_str"] == "DB missing"
 
 
+@pytest.mark.usefixtures("no_vendor_heartbeat")
 def test_dashboard_detail_parses_decision_plan_and_preserves_execution_rows(tmp_path: Path):
     releases_root_path_obj = tmp_path / "releases"
     _write_release_manifest(
@@ -2806,6 +2819,7 @@ def test_dashboard_detail_parses_decision_plan_and_preserves_execution_rows(tmp_
     ] == ["show_vplan", "status", "show_decision_plan"]
 
 
+@pytest.mark.usefixtures("no_vendor_heartbeat")
 def test_dashboard_detail_separates_current_decision_from_previous_execution_cycle(tmp_path: Path):
     releases_root_path_obj = tmp_path / "releases"
     _write_release_manifest(
@@ -2861,6 +2875,7 @@ def test_dashboard_detail_separates_current_decision_from_previous_execution_cyc
     )
 
 
+@pytest.mark.usefixtures("no_vendor_heartbeat")
 def test_dashboard_summary_flags_missing_ack_and_reconcile_failure_actions(tmp_path: Path):
     releases_root_path_obj = tmp_path / "releases"
     for pod_id_str in ("pod_ack", "pod_reconcile"):
@@ -3360,3 +3375,12 @@ def test_dashboard_action_runner_delegates_to_live_runner_with_pod_scope(
         "db_path_str": str(db_path_obj),
         "as_of_timestamp_str": AS_OF_TS.isoformat(),
     }
+
+
+@pytest.fixture
+def no_vendor_heartbeat(monkeypatch):
+    """Persisted-state cases exercise the real build gate with no vendor heartbeat."""
+    monkeypatch.setattr(
+        "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
+        lambda *arg_tuple, **kwarg_dict: None,
+    )

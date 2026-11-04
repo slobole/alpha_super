@@ -22,8 +22,10 @@ Run:
 uv run python scripts/review/triage.py
 ```
 
-By default the helper reads `git diff --name-only` and also includes untracked
-non-ignored files, so brand-new scripts and tests are not missed.
+By default the helper includes staged, unstaged, and untracked non-ignored
+paths. Renames include both the source and destination so moving a live file
+cannot lower its review tier. See [test lanes](../../tests/README.md) for local
+fixture checks and explicit real-data integration checks.
 
 To classify a proposed or explicit path set:
 

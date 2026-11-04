@@ -190,11 +190,9 @@ def test_forward_decision_uses_frozen_history_plus_one_august_row(
 
     report_dict = forward_module.build_forward_decision_report(tmp_path)
     decision_row_dict = report_dict["decision_row_list"][0]
-    frozen_data_tuple = forward_module.tactical_module.get_tactical_yield_data(
-        forward_module.tactical_module.DEFAULT_CONFIG
-    )
+    frozen_yield_df, frozen_signal_df = forward_module.load_governed_frozen_signal_history()
     term_history_list, credit_history_list = forward_module.frozen_spread_history_lists(
-        frozen_data_tuple[1], frozen_data_tuple[2]
+        frozen_yield_df, frozen_signal_df
     )
     expected_target_dict = forward_module.build_forward_target(
         pd.Series(yield_value_by_id_dict), term_history_list, credit_history_list

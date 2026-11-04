@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -110,6 +112,7 @@ def test_grade_follows_d22():
     assert grade_str(bundle(True, "PASS")) == "REJECTED"
 
 
+@pytest.mark.data_integration
 @pytest.mark.skipif("not _norgate_ready()")
 def test_taa_replica_tracks_the_engine():
     from alpha.scout import searches
@@ -127,6 +130,8 @@ def test_taa_replica_tracks_the_engine():
 
 
 def _norgate_ready() -> bool:
+    if os.environ.get("ALPHA_TEST_DATA_INTEGRATION_BOOL") != "true":
+        return False
     try:
         import norgatedata
 

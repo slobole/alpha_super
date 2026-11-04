@@ -83,7 +83,37 @@ class RecordingJobManager:
 
 
 @pytest.fixture()
-def recording_client():
+def bench_results_root(monkeypatch, tmp_path):
+    results_path = tmp_path / "results"
+    strategy_path = results_path / "research" / "strategy"
+    portfolio_path = results_path / "research" / "portfolio"
+    strategy_path.mkdir(parents=True)
+    portfolio_path.mkdir(parents=True)
+    monkeypatch.setattr(runs, "RESULTS_ROOT_PATH", results_path)
+    monkeypatch.setattr(runs, "RESEARCH_STRATEGY_ROOT_PATH", strategy_path)
+    monkeypatch.setattr(runs, "RESEARCH_PORTFOLIO_ROOT_PATH", portfolio_path)
+    return strategy_path
+
+
+@pytest.fixture()
+def bench_saved_results(bench_results_root):
+    """Seed real artifact-reader inputs only for tests that need saved evidence."""
+    for module_str, analysis_list in (
+        (DV2_MODULE_STR, ["vanilla_backtest", "capacity_analysis", "execution_timing_analyzer", "risk_analysis", "stress_test"]),
+        ("strategies.mean_reversion.strategy_mr_sector_dispersion_ibs", ["vanilla_backtest"]),
+    ):
+        for analysis_str in analysis_list:
+            run_path = bench_results_root / module_str.rsplit(".", 1)[-1] / analysis_str / "2026-08-06_120000"
+            run_path.mkdir(parents=True)
+            (run_path / "report.html").write_text("<html><body>Saved synthetic analyzer report</body></html>", encoding="utf-8")
+            (run_path / "metadata.json").write_text(json.dumps({"class_module": module_str}), encoding="utf-8")
+            (run_path / "summary.json").write_text(json.dumps({
+                "ann_return_pct": 12.5, "sharpe": 1.1, "max_drawdown_pct": -8.0, "trade_count": 42,
+            }), encoding="utf-8")
+
+
+@pytest.fixture()
+def recording_client(bench_results_root):
     recording_job_manager = RecordingJobManager()
     app = create_app(job_manager_obj=recording_job_manager)
     token_str = app.config["bench_token_str"]
@@ -1647,6 +1677,7 @@ def test_partial_artifact_without_report_is_not_promoted_to_analyzer_pass():
     assert vanilla_view_dict["latest_run"] is None
 
 
+@pytest.mark.usefixtures("bench_saved_results")
 def test_compare_has_a_zero_selection_landing_page(recording_client):
     client, _job_manager, _token_str = recording_client
     html_str = client.get("/compare").get_data(as_text=True)
@@ -1693,6 +1724,7 @@ def test_strategy_overview_is_the_control_page(recording_client):
     assert 'href="/strategy/' + DV2_MODULE_STR + '?analysis=vanilla"' in html_str
 
 
+@pytest.mark.usefixtures("bench_saved_results")
 def test_strategy_workspace_exposes_all_analyzers_and_vanilla_depth(recording_client):
     client, _job_manager, _token_str = recording_client
     html_str = client.get(f"/strategy/{DV2_MODULE_STR}?analysis=vanilla").get_data(as_text=True)
@@ -1961,6 +1993,7 @@ def test_saved_report_is_historical_evidence_not_current_pass():
     assert vanilla_view_dict["status_str"] == "SAVED"
 
 
+@pytest.mark.usefixtures("bench_saved_results")
 def test_studies_page_marks_skip_as_not_ready(recording_client):
     client, _job_manager, _token_str = recording_client
     html_str = client.get("/research").get_data(as_text=True)
@@ -2103,6 +2136,7 @@ def test_sortable_metric_rejects_non_numbers_and_keeps_none_distinct_from_zero()
     assert _sortable_metric_float({"sharpe": True}, "sharpe") is None
 
 
+@pytest.mark.usefixtures("bench_saved_results")
 def test_index_splits_tested_rows_from_the_untested_fold(recording_client):
     """Evidence and absence of evidence render as different objects.
 
@@ -2120,8 +2154,14 @@ def test_index_splits_tested_rows_from_the_untested_fold(recording_client):
     # DV2 has recorded vanilla runs, so its row must sit in the tested table
     # with a numeric sharpe to sort on.
     dv2_row_start_int = html_str.index(f'data-module="{DV2_MODULE_STR}"')
-    dv2_row_excerpt_str = html_str[dv2_row_start_int : dv2_row_start_int + 1_500]
-    assert 'data-sharpe="' in dv2_row_excerpt_str
+    row_match_obj = re.search(
+        r'<tr\b[^>]*data-module="' + re.escape(DV2_MODULE_STR) + r'"[^>]*>.*?</tr>',
+        html_str, re.DOTALL,
+    )
+    assert row_match_obj is not None
+    sharpe_match_obj = re.search(r'data-sharpe="([^"]+)"', row_match_obj.group())
+    assert sharpe_match_obj is not None
+    assert float(sharpe_match_obj.group(1)) == pytest.approx(1.1)
     untested_start_int = html_str.index('id="untested-list"')
     assert dv2_row_start_int < untested_start_int  # tested section renders first
 
@@ -2154,6 +2194,7 @@ def test_research_page_lists_only_unreachable_result_folders(recording_client):
 SECTOR_IBS_MODULE_STR = "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs"
 
 
+@pytest.mark.usefixtures("bench_saved_results")
 def test_compare_page_shows_latest_vanilla_side_by_side(recording_client):
     client, _job_manager, _token_str = recording_client
     html_str = client.get(

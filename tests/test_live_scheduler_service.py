@@ -45,6 +45,8 @@ from alpha.live.state_store_v2 import LiveStateStore
 MARKET_TIMEZONE_OBJ = ZoneInfo("America/New_York")
 
 
+
+
 def _write_manifest(
     root_path_obj: Path,
     auto_submit_enabled_bool: bool = True,
@@ -1855,6 +1857,7 @@ def test_wait_operator_message_emits_on_state_change_and_fifteen_minute_heartbea
     )
 
 
+@pytest.mark.usefixtures("no_vendor_heartbeat")
 def test_phase_result_operator_messages_include_submit_ack_and_fill_progress(tmp_path: Path):
     _write_manifest(tmp_path, auto_submit_enabled_bool=True)
     state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
@@ -1970,6 +1973,7 @@ def test_phase_start_operator_messages_use_release_broker_tuple(tmp_path: Path):
     assert operator_message_spec_dict_list[0]["field_map_dict"]["client_id"] == 41
 
 
+@pytest.mark.usefixtures("no_vendor_heartbeat")
 def test_wait_operator_messages_show_active_reconcile_progress(tmp_path: Path):
     _write_manifest(tmp_path, auto_submit_enabled_bool=True)
     state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
@@ -2132,3 +2136,12 @@ def test_stuck_operator_messages_detect_reconcile_stall(tmp_path: Path):
             },
         }
     ]
+
+
+@pytest.fixture
+def no_vendor_heartbeat(monkeypatch):
+    """Persisted-state cases exercise the real build gate with no vendor heartbeat."""
+    monkeypatch.setattr(
+        "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
+        lambda *arg_tuple, **kwarg_dict: None,
+    )

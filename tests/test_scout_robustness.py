@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -114,6 +116,8 @@ def test_paired_probability_is_symmetric_and_random_summary_rules():
 
 # ---------------------------------------------------------------------------------------------- spec switches (real data)
 def _norgate_running_bool() -> bool:
+    if os.environ.get("ALPHA_TEST_DATA_INTEGRATION_BOOL") != "true":
+        return False
     try:
         import norgatedata
 
@@ -122,6 +126,7 @@ def _norgate_running_bool() -> bool:
         return False
 
 
+@pytest.mark.data_integration
 @pytest.mark.skipif(not _norgate_running_bool(), reason="Norgate data not available")
 def test_taa_switches_move_only_their_own_weights():
     import dataclasses
@@ -148,6 +153,7 @@ def test_taa_switches_move_only_their_own_weights():
         taa_3x.TaaConfig(defensive_hold_str="bonds")
 
 
+@pytest.mark.data_integration
 @pytest.mark.skipif(not _norgate_running_bool(), reason="Norgate data not available")
 def test_core5_switches():
     import dataclasses
@@ -254,6 +260,7 @@ def test_ndx_replica_refuses_an_unknown_ranking():
         ndx_selection_daily(mat, mat, mat, mat, mat, mat.astype(bool), date_index, pd.Series(1.0, index=date_index), [], "none")
 
 
+@pytest.mark.data_integration
 @pytest.mark.skipif(not _norgate_running_bool(), reason="Norgate data not available")
 def test_ndx_switches():
     import dataclasses
@@ -277,6 +284,7 @@ def test_ndx_switches():
     assert not roc_df.equals(live_df) and ((roc_df > 0).sum(axis=1) <= ndx_vxn.TOP_COUNT_INT).all()
 
 
+@pytest.mark.data_integration
 @pytest.mark.skipif(not _norgate_running_bool(), reason="Norgate data not available")
 def test_taa_cash_asset_switch_isolates_one_asset():
     import dataclasses
@@ -303,6 +311,7 @@ def test_fast_replicas_refuse_ablation_switches():
             refuse_ablation_switches([config])
 
 
+@pytest.mark.data_integration
 @pytest.mark.skipif(not _norgate_running_bool(), reason="Norgate data not available")
 def test_ndx_trend_filter_variants():
     import dataclasses

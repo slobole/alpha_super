@@ -1,27 +1,29 @@
 """Real OS processes: account capture lock is neither a thread nor a stale flag."""
 import multiprocessing
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from alpha.live.portfolio_capture_lock import portfolio_capture_lock
 
 
-def _hold_lock(port_int, ready_event, release_event):
-    with portfolio_capture_lock("localhost", port_int):
+def _hold_lock(port_int, ready_event, release_event, home_path):
+    with patch.object(Path, "home", return_value=home_path), portfolio_capture_lock("localhost", port_int):
         ready_event.set()
         if not release_event.wait(20):
             raise RuntimeError("Test parent did not release lock")
 
 
 @pytest.mark.parametrize("terminate_bool", [False, True])
-def test_process_lock_covers_loopback_aliases_and_releases_after_exit(terminate_bool):
+def test_process_lock_covers_loopback_aliases_and_releases_after_exit(terminate_bool, tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     # The port is an identity only: no network is opened by this test.
     port_int = 57731 + int(terminate_bool)
     context_obj = multiprocessing.get_context("spawn")
     ready_event = context_obj.Event()
     release_event = context_obj.Event()
-    process_obj = context_obj.Process(target=_hold_lock, args=(port_int, ready_event, release_event))
+    process_obj = context_obj.Process(target=_hold_lock, args=(port_int, ready_event, release_event, tmp_path))
     process_obj.start()
     try:
         assert ready_event.wait(15), "Lock holder failed to start"

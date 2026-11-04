@@ -19,9 +19,11 @@ import pytest
 
 from alpha.live.dashboard_v3.app import (
     DASHBOARD_V3_VERSION_STR,
-    create_app,
+    create_app as _create_app,
 )
 from alpha.live.ops_report import build_ops_report_dict
+
+create_app = _create_app
 
 
 def _build_lifecycle_step_dict_list() -> list[dict[str, Any]]:
@@ -384,9 +386,31 @@ class StubDataProvider:
         ]
 
 
+@pytest.fixture(autouse=True)
+def isolated_app_defaults(monkeypatch, tmp_path):
+    """Route tests never inherit the operator's notification or results paths."""
+    def create_isolated_app(*arg_tuple, **kwarg_dict):
+        kwarg_dict.setdefault("journal_path_str", str(tmp_path / "journal.jsonl"))
+        kwarg_dict.setdefault("notification_state_path_str", str(tmp_path / "notifications.json"))
+        kwarg_dict.setdefault("notification_webhook_url_str", "")
+        kwarg_dict.setdefault("performance_db_path_str", str(tmp_path / "performance.sqlite3"))
+        return _create_app(*arg_tuple, **kwarg_dict)
+
+    monkeypatch.setitem(globals(), "create_app", create_isolated_app)
+    original_init_fn = StubDataProvider.__init__
+
+    def isolated_init(self):
+        original_init_fn(self)
+        self.results_root_path_str = str(tmp_path)
+
+    monkeypatch.setattr(StubDataProvider, "__init__", isolated_init)
+
+
 @pytest.fixture(name="provider_obj")
-def fixture_provider_obj() -> StubDataProvider:
-    return StubDataProvider()
+def fixture_provider_obj(tmp_path) -> StubDataProvider:
+    provider_obj = StubDataProvider()
+    provider_obj.results_root_path_str = str(tmp_path)
+    return provider_obj
 
 
 @pytest.fixture(name="journal_path_str")
@@ -395,8 +419,14 @@ def fixture_journal_path_str(tmp_path) -> str:
 
 
 @pytest.fixture(name="test_client_obj")
-def fixture_test_client_obj(provider_obj: StubDataProvider, journal_path_str: str):
-    flask_app_obj = create_app(data_provider_obj=provider_obj, journal_path_str=journal_path_str)
+def fixture_test_client_obj(provider_obj: StubDataProvider, journal_path_str: str, tmp_path):
+    # This fixture is also imported by operator-confirmation tests.
+    flask_app_obj = _create_app(
+        data_provider_obj=provider_obj, journal_path_str=journal_path_str,
+        notification_state_path_str=str(tmp_path / "notifications.json"),
+        notification_webhook_url_str="",
+        performance_db_path_str=str(tmp_path / "performance.sqlite3"),
+    )
     flask_app_obj.config["TESTING"] = True
     with flask_app_obj.test_client() as test_client_obj:
         yield test_client_obj
@@ -805,6 +835,11 @@ def test_mode_page_lists_only_that_modes_pods(
 
 
 def test_live_page_renders_pod_row_with_severity(test_client_obj, monkeypatch) -> None:
+    # Disk thresholds have dedicated tests; this fixture checks mode severity.
+    monkeypatch.setattr(
+        "alpha.live.dashboard_v3.health.shutil.disk_usage",
+        lambda path_obj: SimpleNamespace(total=100, used=20, free=80),
+    )
     monkeypatch.setattr(
         "alpha.live.dashboard_v3.app.build_trading_window_list",
         lambda *_args, **_kwargs: [],

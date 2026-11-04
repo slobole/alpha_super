@@ -466,6 +466,7 @@ def real_pit_data():
     return frozen_tuple, pit_tuple, snapshot_dict
 
 
+@pytest.mark.data_integration
 def test_real_frozen_mode_is_unchanged_and_stale_free(real_pit_data) -> None:
     frozen_tuple = real_pit_data[0]
     signal_df, weight_df = frozen_tuple[2], frozen_tuple[3]
@@ -479,6 +480,7 @@ def test_real_frozen_mode_is_unchanged_and_stale_free(real_pit_data) -> None:
     ) == tfi.FROZEN_SIGNAL_CONTRACT_SHA256_STR
 
 
+@pytest.mark.data_integration
 def test_real_pit_blocks_exactly_the_2016_17_moodys_outage(real_pit_data) -> None:
     signal_df, weight_df = real_pit_data[1][2], real_pit_data[1][3]
 
@@ -494,6 +496,7 @@ def test_real_pit_blocks_exactly_the_2016_17_moodys_outage(real_pit_data) -> Non
     assert signal_df.loc[pd.Timestamp("2016-12-30"), "observation_date"] == pd.Timestamp("2016-10-07")
 
 
+@pytest.mark.data_integration
 def test_real_pit_rows_use_only_values_published_by_their_vintage(real_pit_data) -> None:
     signal_df = real_pit_data[1][2]
     snapshot_dict = real_pit_data[2]
@@ -516,6 +519,7 @@ def test_real_pit_rows_use_only_values_published_by_their_vintage(real_pit_data)
         )
 
 
+@pytest.mark.data_integration
 def test_real_pit_raise_policy_stops_at_the_first_outage_decision() -> None:
     with pytest.raises(tfi.StaleMacroInputError, match="2016-10-31"):
         tfi.get_tactical_yield_data(
@@ -523,6 +527,7 @@ def test_real_pit_raise_policy_stops_at_the_first_outage_decision() -> None:
         )
 
 
+@pytest.mark.data_integration
 def test_real_snapshot_reproduces_the_leakage_hunt_flips_and_metrics(real_pit_data) -> None:
     from scripts.research.run_tactical_fi_alfred_replay import (
         flipped_decision_df,
@@ -581,6 +586,7 @@ def test_real_snapshot_reproduces_the_leakage_hunt_flips_and_metrics(real_pit_da
     assert reproduction_2014_dict["sharpe"] == pytest.approx(1.4427459900739439, abs=1e-10)
 
 
+@pytest.mark.data_integration
 def test_real_previous_session_policy_matches_its_pinned_contract() -> None:
     # get_tactical_yield_data verifies the pinned previous-session contract hash.
     (_px, _y, frozen_signal_df, *_rest) = tfi.get_tactical_yield_data(tfi.DEFAULT_CONFIG)
@@ -611,6 +617,7 @@ def test_real_previous_session_policy_matches_its_pinned_contract() -> None:
     ]
 
 
+@pytest.mark.data_integration
 def test_real_run_variant_labels_the_pit_run_and_holds_through_the_block() -> None:
     strategy_obj = tfi.run_variant(
         show_display_bool=False,

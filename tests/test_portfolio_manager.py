@@ -30,6 +30,26 @@ SECTOR_DISPERSION_KIE_IHI_ASSET_SMA200_IMPORT_STR = (
 )
 
 
+@pytest.fixture()
+def synthetic_pm_benchmark(monkeypatch):
+    """Keep allocation/orchestration tests independent of the report data vendor."""
+    call_list = []
+
+    def load_benchmark_price_df(symbol_str, **option_dict):
+        call_list.append((symbol_str, option_dict["adjustment_str"]))
+        return pd.DataFrame(
+            {"Close": [100.0, 101.0, 102.0]},
+            index=pd.bdate_range("2024-01-02", periods=3),
+        )
+
+    monkeypatch.setattr(portfolio_manager, "load_price_timeseries", load_benchmark_price_df)
+    yield
+    # Assert outside the production report boundary, which catches Exception.
+    assert call_list
+    assert all(call_tuple == ("$SPXTR", portfolio_manager.TOTALRETURN_ADJUSTMENT_STR)
+               for call_tuple in call_list)
+
+
 def test_supported_strategy_imports_include_vxn_scaled_ndx_momentum():
     assert VXN_SCALED_NDX_IMPORT_STR in portfolio_manager.SUPPORTED_STRATEGY_IMPORT_TUPLE
 
@@ -594,6 +614,7 @@ def test_sector_dispersion_variants_expose_manager_run_contract(strategy_import_
     )
 
 
+@pytest.mark.usefixtures("synthetic_pm_benchmark")
 def test_serial_run_uses_allocated_capital_and_builds_portfolio(monkeypatch, tmp_path):
     left_import_str = write_dummy_strategy_module(tmp_path, "dummy_pm_serial_a", "StrategyA", 0.10)
     right_import_str = write_dummy_strategy_module(tmp_path, "dummy_pm_serial_b", "StrategyB", -0.05)
@@ -618,6 +639,7 @@ def test_serial_run_uses_allocated_capital_and_builds_portfolio(monkeypatch, tmp
     assert "source_pkl" not in result_obj.portfolio.pod_info_list[0]
 
 
+@pytest.mark.usefixtures("synthetic_pm_benchmark")
 def test_serial_run_passes_rebalance_policy_to_portfolio(monkeypatch, tmp_path):
     left_import_str = write_dummy_strategy_module(tmp_path, "dummy_pm_rebalance_a", "StrategyA", 0.10)
     right_import_str = write_dummy_strategy_module(tmp_path, "dummy_pm_rebalance_b", "StrategyB", -0.05)
@@ -642,6 +664,7 @@ def test_serial_run_passes_rebalance_policy_to_portfolio(monkeypatch, tmp_path):
     assert result_obj.portfolio._rebalance_policy == "equal"
 
 
+@pytest.mark.usefixtures("synthetic_pm_benchmark")
 def test_parallel_run_preserves_config_order(monkeypatch, tmp_path):
     slow_import_str = write_dummy_strategy_module(
         tmp_path,
@@ -674,6 +697,7 @@ def test_parallel_run_preserves_config_order(monkeypatch, tmp_path):
     assert [strategy.name for strategy in result_obj.portfolio.strategies] == ["StrategySlow", "StrategyFast"]
 
 
+@pytest.mark.usefixtures("synthetic_pm_benchmark")
 def test_run_max_workers_override_can_force_serial(monkeypatch, tmp_path):
     left_import_str = write_dummy_strategy_module(tmp_path, "dummy_pm_override_a", "StrategyA", 0.01)
     right_import_str = write_dummy_strategy_module(tmp_path, "dummy_pm_override_b", "StrategyB", 0.02)
@@ -721,6 +745,7 @@ def test_failed_pod_error_includes_pod_context(monkeypatch, tmp_path):
         manager_obj.run(save_results_bool=False, show_display_bool=False, max_workers_int=1)
 
 
+@pytest.mark.usefixtures("synthetic_pm_benchmark")
 def test_artifact_metadata_records_pod_and_portfolio_outputs(monkeypatch, tmp_path):
     strategy_import_str = write_dummy_strategy_module(
         tmp_path,

@@ -211,6 +211,7 @@ def test_sweep_arithmetic():
     np.testing.assert_allclose(swept_missing.to_numpy(), engine_ret.to_numpy() + np.array([0.0, 0.0002, 0.0, 0.0, 0.0]))
 
 
+@pytest.mark.data_integration
 @pytest.mark.skipif(not common.trend_common.SLEEVE_SERIES_PATH.exists(), reason="stored sleeves not available")
 def test_control_books_reproduce_the_prereg_table():
     taa = common.load_taa_ser()

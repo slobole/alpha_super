@@ -18,6 +18,18 @@ from test_dashboard_operator_access import ForbiddenProvider, ForbiddenProvider
 AS_OF_TS = datetime(2026, 9, 5, 12, tzinfo=UTC)
 
 
+@pytest.fixture(autouse=True)
+def fixed_operations_clock(monkeypatch):
+    """Keep the demo's fixed cycle and the route's current assessment aligned."""
+    class FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return AS_OF_TS.astimezone(tz) if tz else AS_OF_TS.replace(tzinfo=None)
+
+    monkeypatch.setattr("alpha.live.dashboard_v3.client_views.datetime", FixedDatetime)
+    monkeypatch.setattr("alpha.live.dashboard_v3.demo.datetime", FixedDatetime)
+
+
 def fixture_tuple():
     registry_dict, snapshot_dict = build_demo_fixture_tuple()
     provider_obj = DemoOperationsProvider()
@@ -203,7 +215,7 @@ def test_existing_red_action_is_not_downgraded_by_unknown_calendar():
 def test_compact_status_shows_red_reason_even_after_an_unranked_calendar_issue(monkeypatch):
     registry_dict, _, provider_obj, summary_dict = fixture_tuple()
     summary_dict["pod_row_dict_list"][0].update(session_calendar_id_str="UNKNOWN", required_action_dict={"severity_str": "red", "detail_str": "Rejected order"})
-    summary_dict["as_of_timestamp_str"] = datetime.now(UTC).isoformat()
+    summary_dict["as_of_timestamp_str"] = AS_OF_TS.isoformat()
     monkeypatch.setattr(provider_obj, "get_summary_dict", lambda: summary_dict)
     app_obj = create_app(provider_obj, read_only_bool=True, client_registry_dict={**registry_dict, "clients": registry_dict["clients"][:1]})
     html_str = app_obj.test_client().get("/clients/demo-owner/strategies").get_data(as_text=True)
@@ -322,7 +334,7 @@ def test_diagnostics_preserves_nonblocking_next_cycle_source_warning(monkeypatch
     registry_dict, _, provider_obj, summary_dict = fixture_tuple()
     norgate_dict = next(item_dict for item_dict in summary_dict["pod_row_dict_list"][0]["data_freshness_dict"]["item_dict_list"] if item_dict["label_str"] == "Norgate")
     norgate_dict["sub_detail_str_list"] = ["Sync failed: next DecisionPlan needs review; token=PRIVATE"]
-    summary_dict["as_of_timestamp_str"] = datetime.now(UTC).isoformat()
+    summary_dict["as_of_timestamp_str"] = AS_OF_TS.isoformat()
     monkeypatch.setattr(provider_obj, "get_summary_dict", lambda: summary_dict)
     app_obj = create_app(provider_obj, read_only_bool=True, client_registry_dict={**registry_dict, "clients": registry_dict["clients"][:1]})
     html_str = app_obj.test_client().get("/clients/demo-owner/diagnostics").get_data(as_text=True)
@@ -344,7 +356,7 @@ def test_visible_pod_flow_preserves_recorded_not_complete_fill_and_cycle_role(mo
         latest_vplan_status_str="submitted", latest_submit_ack_status_str="complete",
         fill_count_int=1, next_action_str="post_execution_reconcile")
     row_dict["lifecycle_step_dict_list"] = _build_lifecycle_step_dict_list(row_dict)
-    summary_dict["as_of_timestamp_str"] = datetime.now(UTC).isoformat()
+    summary_dict["as_of_timestamp_str"] = AS_OF_TS.isoformat()
     monkeypatch.setattr(provider_obj, "get_summary_dict", lambda: summary_dict)
     app_obj = create_app(provider_obj, read_only_bool=True, client_registry_dict={**registry_dict, "clients": registry_dict["clients"][:1]})
     html_str = app_obj.test_client().get("/clients/demo-owner/strategies").get_data(as_text=True)
@@ -370,7 +382,7 @@ def test_visible_pod_flow_preserves_recorded_not_complete_fill_and_cycle_role(mo
 def test_visible_pod_flow_does_not_invent_missing_stage_evidence(monkeypatch, stage_list):
     registry_dict, _, provider_obj, summary_dict = fixture_tuple()
     summary_dict["pod_row_dict_list"][0]["lifecycle_step_dict_list"] = stage_list
-    summary_dict["as_of_timestamp_str"] = datetime.now(UTC).isoformat()
+    summary_dict["as_of_timestamp_str"] = AS_OF_TS.isoformat()
     monkeypatch.setattr(provider_obj, "get_summary_dict", lambda: summary_dict)
     app_obj = create_app(provider_obj, read_only_bool=True, client_registry_dict={**registry_dict, "clients": registry_dict["clients"][:1]})
     html_str = app_obj.test_client().get("/clients/demo-owner/strategies").get_data(as_text=True)

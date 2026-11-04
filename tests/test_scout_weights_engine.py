@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import os
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -175,6 +177,8 @@ def test_moc_close_and_reopen_short_dividend_and_borrow():
 # ---------------------------------------------------------------------------------------------- real-data gates
 def _norgate_running_bool() -> bool:
     """True only when the Norgate Data Updater is running (the package alone is always installed)."""
+    if os.environ.get("ALPHA_TEST_DATA_INTEGRATION_BOOL") != "true":
+        return False
     try:
         import norgatedata
 
@@ -193,6 +197,7 @@ def _saved_run_exists(spec_name_str: str) -> bool:
     return any(Path(MAIN_CHECKOUT_ROOT_PATH).glob(GATED_SPEC_DICT[spec_name_str].pickle_glob_str))
 
 
+@pytest.mark.data_integration
 @pytest.mark.skipif(not NORGATE_AVAILABLE_BOOL, reason="Norgate data not available")
 @pytest.mark.parametrize("spec_name_str", ["taa_3x", "ndx_vxn"])
 def test_identity_gate_passes_against_the_saved_engine_run(spec_name_str):
@@ -204,6 +209,7 @@ def test_identity_gate_passes_against_the_saved_engine_run(spec_name_str):
     assert report.passed_bool, report.summary_str()
 
 
+@pytest.mark.data_integration
 @pytest.mark.skipif(not NORGATE_AVAILABLE_BOOL, reason="Norgate data not available")
 def test_identity_gate_blocks_a_deliberately_broken_spec(monkeypatch):
     if not _saved_run_exists("taa_3x"):
@@ -218,6 +224,7 @@ def test_identity_gate_blocks_a_deliberately_broken_spec(monkeypatch):
     assert len(report.mismatch_df) > 0
 
 
+@pytest.mark.data_integration
 @pytest.mark.skipif(not NORGATE_AVAILABLE_BOOL, reason="Norgate data not available")
 def test_identity_gate_blocks_a_missing_minimum_fee(monkeypatch):
     """Near miss: 0.4 bps a year, which the tolerance tier let through; the exact tier must not."""
@@ -231,6 +238,7 @@ def test_identity_gate_blocks_a_missing_minimum_fee(monkeypatch):
     assert not report.check_dict["largest daily return difference"]["pass_bool"]
 
 
+@pytest.mark.data_integration
 @pytest.mark.skipif(not NORGATE_AVAILABLE_BOOL, reason="Norgate data not available")
 def test_identity_gate_blocks_a_one_session_membership_look_ahead(monkeypatch):
     """Near miss: membership read at the execution session instead of the decision session (4 bps, 99.7% cells)."""

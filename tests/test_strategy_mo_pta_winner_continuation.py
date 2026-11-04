@@ -1,6 +1,7 @@
 import unittest
 from dataclasses import replace
 
+import exchange_calendars as exchange_calendar_module
 import numpy as np
 import pandas as pd
 
@@ -161,7 +162,11 @@ class PtaWinnerContinuationTests(unittest.TestCase):
 
     def test_signal_tables_use_prior_month_pta_not_same_month_pta(self):
         config_obj = self.make_test_config()
-        date_index = pd.bdate_range("2024-01-02", "2024-03-29")
+        # March 29 is Good Friday: the real March decision close is March 28.
+        calendar_obj = exchange_calendar_module.get_calendar("XNYS")
+        date_index = pd.DatetimeIndex(
+            calendar_obj.sessions_in_range("2024-01-02", "2024-03-28")
+        ).tz_localize(None)
         price_close_df = pd.DataFrame(
             {
                 "AAA": np.linspace(10.0, 30.0, len(date_index)),
@@ -181,7 +186,7 @@ class PtaWinnerContinuationTests(unittest.TestCase):
 
         decision_index = monthly_decision_close_df.index
         self.assertIn(pd.Timestamp("2024-02-29"), decision_index)
-        self.assertIn(pd.Timestamp("2024-03-29"), decision_index)
+        self.assertIn(pd.Timestamp("2024-03-28"), decision_index)
         expected_feb_return_float = (
             price_close_df.loc[pd.Timestamp("2024-02-29"), "AAA"]
             / price_close_df.loc[pd.Timestamp("2024-01-31"), "AAA"]
@@ -195,18 +200,22 @@ class PtaWinnerContinuationTests(unittest.TestCase):
         # could be known after February close. Changing March prices must not
         # change the PTA input used by the March winner decision.
         self.assertFalse(prior_pta_df.loc[pd.Timestamp("2024-02-29")].isna().all())
-        self.assertFalse(prior_pta_df.loc[pd.Timestamp("2024-03-29")].isna().all())
+        self.assertFalse(prior_pta_df.loc[pd.Timestamp("2024-03-28")].isna().all())
         modified_price_close_df = price_close_df.copy()
-        modified_price_close_df.loc[modified_price_close_df.index >= pd.Timestamp("2024-03-01"), "AAA"] *= 10.0
-        _modified_monthly_decision_close_df, _modified_monthly_return_df, modified_prior_pta_df = (
+        modified_price_close_df.loc[pd.Timestamp("2024-03-28"), "AAA"] *= 10.0
+        _modified_monthly_decision_close_df, modified_monthly_return_df, modified_prior_pta_df = (
             compute_pta_winner_continuation_signal_tables(
                 price_close_df=modified_price_close_df,
                 config=config_obj,
             )
         )
+        self.assertNotEqual(
+            monthly_return_df.loc[pd.Timestamp("2024-03-28"), "AAA"],
+            modified_monthly_return_df.loc[pd.Timestamp("2024-03-28"), "AAA"],
+        )
         np.testing.assert_allclose(
-            prior_pta_df.loc[pd.Timestamp("2024-03-29")].to_numpy(dtype=float),
-            modified_prior_pta_df.loc[pd.Timestamp("2024-03-29")].to_numpy(dtype=float),
+            prior_pta_df.loc[pd.Timestamp("2024-03-28")].to_numpy(dtype=float),
+            modified_prior_pta_df.loc[pd.Timestamp("2024-03-28")].to_numpy(dtype=float),
             equal_nan=True,
         )
 

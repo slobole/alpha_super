@@ -18,7 +18,7 @@ readiness gate are covered only by the unit tests.
 
 Opt-in because it needs real Norgate data (several minutes, several GB RAM):
 
-    ALPHA_RUN_HPI_LIVE_PARITY_BOOL=true uv run pytest -s tests/test_live_hpi_same_open_refill_parity.py
+    ALPHA_RUN_HPI_LIVE_PARITY_BOOL=true uv run pytest --run-data-integration -s tests/test_live_hpi_same_open_refill_parity.py
 
 Set ALPHA_HPI_PARITY_INPUTS_PICKLE to a pickle with keys "universe" and
 "pricing_df" (the load_exact_hpi_inputs output, e.g. the 2026-09-27 leakage
@@ -45,13 +45,13 @@ RUN_PARITY_BOOL = os.getenv("ALPHA_RUN_HPI_LIVE_PARITY_BOOL", "false").lower() i
     "on",
 }
 
-pytestmark = pytest.mark.skipif(
+pytestmark = [pytest.mark.data_integration, pytest.mark.skipif(
     not RUN_PARITY_BOOL,
     reason=(
         "Live HPI parity needs real Norgate data. "
-        "Set ALPHA_RUN_HPI_LIVE_PARITY_BOOL=true to run."
+        "Set ALPHA_RUN_HPI_LIVE_PARITY_BOOL=true and pass --run-data-integration to run."
     ),
-)
+)]
 
 MARKET_TIMEZONE_OBJ = ZoneInfo("America/New_York")
 VOTE_IMPORT_STR = "strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote"

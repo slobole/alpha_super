@@ -55,6 +55,8 @@ from alpha.live.state_store_v2 import LiveStateStore
 MARKET_TIMEZONE_OBJ = ZoneInfo("America/New_York")
 
 
+
+
 def _write_manifest_file(
     root_path_obj: Path,
     file_name_str: str,
@@ -1130,6 +1132,7 @@ def test_show_decision_plan_cli_outputs_latest_plan(tmp_path: Path, capsys):
     assert "- Target: AAPL | weight=0.200000" in output_str
 
 
+@pytest.mark.usefixtures("no_vendor_heartbeat")
 def test_incubation_status_cli_fans_out_to_pod_scoped_dbs(tmp_path: Path, capsys):
     _write_guardrail_manifest(
         tmp_path,
@@ -1241,6 +1244,7 @@ def test_incubation_fanout_reports_one_pod_failure_without_hiding_success(
     assert result_by_pod_id_dict["pod_bad"]["error_str"] == "pod boom"
 
 
+@pytest.mark.usefixtures("no_vendor_heartbeat")
 def test_incubation_explicit_db_path_keeps_legacy_single_db_behavior(tmp_path: Path, capsys):
     _write_guardrail_manifest(
         tmp_path,
@@ -3967,3 +3971,12 @@ def test_cutover_v1_schema_exports_and_drops_legacy_tables(tmp_path: Path):
     assert "execution_quality_snapshot" not in remaining_table_name_set
     assert "decision_plan" in remaining_table_name_set
     assert "vplan" in remaining_table_name_set
+
+
+@pytest.fixture
+def no_vendor_heartbeat(monkeypatch):
+    """Persisted-state cases exercise the real build gate with no vendor heartbeat."""
+    monkeypatch.setattr(
+        "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
+        lambda *arg_tuple, **kwarg_dict: None,
+    )
