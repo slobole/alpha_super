@@ -1,6 +1,6 @@
 # Repository cleanup: verification repairs, 2026-11-04
 
-Status: verification repairs complete on the isolated branch; ready for owner review.
+Status: verification repairs complete; merged into local main with owner approval.
 Base: `08f1c616203f44a5da877a3c8b71fc7e0d1ece31`.
 Branch: `codex/cleanup-verification`.
 
@@ -19,7 +19,18 @@ The final preservation check confirmed all 25 tracked states (including one
 existing deletion) and all 1,353 untracked files, with no missing or altered work.
 Recovery folder: `C:\Users\User\AppData\Local\Temp\alpha-cleanup-preserve-20261104-qlufwj13`;
 retained stash: `700b0cb18dbd182f36eb20aaa2fb5dabf508ee0c`.
-Cleanup changes remain on the separate branch; no push or deployment occurred.
+The owner subsequently authorized the local merge. Main was fast-forwarded to
+`413599d`; no push or deployment occurred. All 25 pre-existing tracked states
+and 1,353 untracked files were preserved again. The sole overlap,
+`tests/test_bench.py`, merged cleanly; its two parametrized owner cases remain
+uncommitted with the other pre-existing work.
+
+Post-merge verification in a disposable clone, including the tracked local
+working changes: **134 Bench/offline-guard tests passed**. Independent source
+review confirmed the combined Bench file is exactly the cleanup version plus
+the owner's original test addition. This focused check does not qualify all
+uncommitted research. Merge recovery/evidence directory:
+`C:\Users\User\AppData\Local\Temp\alpha-cleanup-merge-20261104-l4j0ua82`.
 
 ## Repairs
 
