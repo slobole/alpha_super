@@ -38,6 +38,7 @@ from datetime import datetime, timedelta
 
 from alpha.live.daily_watchdog import OPENING_DISPATCH_GRACE_MINUTES_INT
 from alpha.live.guarded_dispatch import MOC_DISPATCH_CUTOFF_MINUTES_INT
+from alpha.live.scheduler_utils import DEFAULT_CLOSE_SUBMISSION_LEAD_MINUTES_INT
 from alpha.live.dashboard_v3.filters import MARKET_TIMEZONE_OBJ
 from alpha.live.dashboard_v4.cycle import _step_dict, _timestamp_dt
 
@@ -121,8 +122,12 @@ def build_daily_steps_and_status(pod_row_dict, data_step_dict, *, now_dt: dateti
     close_dt = _timestamp_dt(daily_dict.get("session_close_timestamp_str"))
     cutoff_dt = _timestamp_dt(signal_dict.get("decision_cutoff_timestamp_str"))
     closing_bool = daily_dict.get("execution_policy_str") == "next_close_moc"
-    send_dt = (target_dt - (timedelta(minutes=MOC_DISPATCH_CUTOFF_MINUTES_INT) if closing_bool else DISPATCH_LEAD)
+    # A closing batch is sent at the close minus 20 and may not be sent at or after the close minus 15: show the send,
+    # count the grace from the cutoff. An opening batch keeps its one time, the open minus two.
+    dispatch_cutoff_dt = (target_dt - (timedelta(minutes=MOC_DISPATCH_CUTOFF_MINUTES_INT) if closing_bool else DISPATCH_LEAD)
         if target_dt is not None else None)
+    send_dt = (target_dt - timedelta(minutes=DEFAULT_CLOSE_SUBMISSION_LEAD_MINUTES_INT)
+        if closing_bool and target_dt is not None else dispatch_cutoff_dt)
     auction_str = "closing" if closing_bool else "opening"
     if decision_dict and (target_dt is None or close_dt is None):
         return _unknown_result_dict(now_dt)
@@ -148,9 +153,9 @@ def build_daily_steps_and_status(pod_row_dict, data_step_dict, *, now_dt: dateti
     attempted_int = _int(dispatch_dict.get("attempted_count_int"))
     never_int = _int(dispatch_dict.get("never_dispatched_count_int"))
     incomplete_bool = reason_str == "opening_dispatch_incomplete"
-    deadline_dt = _timestamp_dt(dispatch_dict.get("dispatch_deadline_timestamp_str")) or send_dt
+    deadline_dt = _timestamp_dt(dispatch_dict.get("dispatch_deadline_timestamp_str")) or dispatch_cutoff_dt
     # The grace runs from the open for an opening batch and from the send cutoff (close minus 15) for a closing one.
-    grace_anchor_dt = send_dt if closing_bool else target_dt
+    grace_anchor_dt = dispatch_cutoff_dt if closing_bool else target_dt
     grace_bool = grace_anchor_dt is not None and check_dt >= grace_anchor_dt + OPENING_GRACE
     unsent_plan_bool = vplan_status_str in {None, "ready"} and decision_status_str in UNDISPATCHED_DECISION_STATUS_SET
     exception_list = result_dict.get("exception_list") or []

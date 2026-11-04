@@ -670,13 +670,26 @@ def test_the_v4_cycle_reads_a_closing_plan_against_its_cutoff():
     for daily_dict in (unsent_dict, sent_dict):
         daily_dict["decision_dict"]["target_execution_timestamp_str"] = V4_CLOSE_TS.isoformat()
         daily_dict["vplan_dict"]["target_execution_timestamp_str"] = V4_CLOSE_TS.isoformat()
-    assert _v4_view(deepcopy(unsent_dict), cutoff_ts - timedelta(minutes=10))["daily_status_dict"]["key_str"] == "ready"
+    ready_dict = _v4_view(deepcopy(unsent_dict), cutoff_ts - timedelta(minutes=10))
+    # The plan shows its send time (close minus 20), never the cutoff at which sending is already refused.
+    assert (ready_dict["daily_status_dict"]["key_str"], ready_dict["daily_status_dict"]["label_str"]) == ("ready", "Ready · sends 15:40")
+    assert ready_dict["step_dict_list"][3]["fact_str"] == "Sends 15:40"
     assert _v4_view(deepcopy(unsent_dict), cutoff_ts + timedelta(minutes=4, seconds=59))["daily_status_dict"]["key_str"] == "ready"
     not_sent_dict = _v4_view(deepcopy(unsent_dict), cutoff_ts + timedelta(minutes=5))["daily_status_dict"]
     assert not_sent_dict["key_str"] == "not_sent" and "closing batch" in not_sent_dict["detail_str"]
     trading_dict = _v4_view(deepcopy(sent_dict), cutoff_ts)
     assert trading_dict["daily_status_dict"]["key_str"] == "trading"
     assert trading_dict["step_dict_list"][4]["fact_str"] == "Fills at the close"
+
+
+def test_the_v4_cycle_shows_the_half_day_send_time():
+    half_close_ts = datetime(2026, 11, 27, 18, 0, tzinfo=UTC)  # 13:00 ET, the day after Thanksgiving
+    daily_dict = _v4_daily_dict(decision_status_str="vplan_ready", vplan_status_str="ready", execution_policy_str="next_close_moc",
+        session_close_timestamp_str=half_close_ts.isoformat())
+    daily_dict["decision_dict"]["target_execution_timestamp_str"] = half_close_ts.isoformat()
+    daily_dict["vplan_dict"]["target_execution_timestamp_str"] = half_close_ts.isoformat()
+    view_dict = _v4_view(daily_dict, half_close_ts - timedelta(minutes=30))
+    assert view_dict["daily_status_dict"]["label_str"] == "Ready · sends 12:40"
 
 
 # ---------------------------------------------------------------- the data path: exporter -> snapshot -> reader -> decision
