@@ -182,7 +182,8 @@ def test_catalog_lists_strategies_and_flags_wired():
     # + the sector-capped NDX VXN pair (Scout A15 design of record, 2026-10-04).
     # The six DV2/HPI capsule cash/BIL/SPMO entry points expose the same hooks, and the two liquidity-sized BIL pods.
     # + the month-end flow vote (2026-11-01).
-    assert len(capacity_entry_list) == 57
+    # + the VRP RSI2 sleeve (2026-11-04).
+    assert len(capacity_entry_list) == 58
     assert {
         f"strategies.mr_capsule.strategy_mr_{family_str}_{parking_str}"
         for family_str in ("dv2_vix_gated", "hpi_vote_vix_gated")

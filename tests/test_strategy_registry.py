@@ -205,3 +205,20 @@ def test_pod_minimum_capital_keys_are_registered():
     """A funding floor for a strategy no book can hold would never apply."""
     for strategy_import_str in portfolio_manager.POD_MINIMUM_ALLOCATED_CAPITAL_FLOAT_DICT:
         assert strategy_registry.tier_for(strategy_import_str) >= MaturityTier.PM_READY
+
+
+def test_vrp_rsi2_is_pm_ready_and_has_no_live_route():
+    strategy_import_str = "strategies.vix_stuff.strategy_vrp_svxy_vixm_rsi2"
+    assert strategy_registry.tier_for(strategy_import_str) is MaturityTier.PM_READY
+    assert strategy_import_str in portfolio_manager.SUPPORTED_STRATEGY_IMPORT_TUPLE
+    assert strategy_import_str not in release_manifest.SUPPORTED_STRATEGY_IMPORT_TUPLE
+    config_dict = {
+        "name_str": "vrp_rsi2_pm_contract",
+        "capital_base_float": 100_000.0,
+        "backtest_start_date_str": "2012-01-03",
+        "end_date_str": "2026-10-30",
+        "allocation_policy_str": "fixed",
+        "pods": [{"pod_id_str": "vrp_rsi2", "strategy_import_str": strategy_import_str, "weight_float": 1.0}],
+    }
+    config_obj = portfolio_manager.build_portfolio_manager_config(config_dict)
+    assert config_obj.pod_config_list[0].allocated_capital_float == 100_000.0
