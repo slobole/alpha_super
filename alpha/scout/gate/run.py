@@ -260,7 +260,7 @@ def _run_vrp_rsi2(capital_float: float):
     return vrp_rsi2.simulate_config(inputs, vrp_rsi2.ENGINE_COST_MODEL, capital_float), inputs.close_df
 
 
-# Short SVXY / long VIXM with the RSI(2) boost (RESEARCH, 2026-11-03; alpha/scout/specs/vrp_rsi2.py): band-traded
+# Long SVXY (short volatility) / long VIXM with the RSI(2) boost (RESEARCH, 2026-11-03; alpha/scout/specs/vrp_rsi2.py): band-traded
 # full targets at the next open, at the engine's own costs.
 GATED_SPEC_DICT["vrp_rsi2"] = GatedSpec(
     "vrp_rsi2", "strategies.vix_stuff.strategy_vrp_svxy_vixm_rsi2", _pickle_glob_str("strategies.vix_stuff.strategy_vrp_svxy_vixm_rsi2"), _run_vrp_rsi2,
