@@ -78,6 +78,9 @@ def compare(a_str: str, b_str: str) -> None:
         if "error_str" in a_dict["rows"].get(key_str, {}):
             print(key_str, a_dict["rows"][key_str]["error_str"][:200])
 
+    if not key_list or differ_list:
+        raise SystemExit(1)
+
 
 if __name__ == "__main__":
     if sys.argv[1] == "compare":

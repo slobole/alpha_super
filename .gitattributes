@@ -6,3 +6,8 @@
 /docs/research/alpha-studies/mr-deeper-dip-entry-study/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 /tests/fixtures/month_end_rebalancing_flow/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 /data/research/tactical_yield_tbill_spread/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+
+# Frozen specs and the Bash proof runner require stable LF checkouts on Windows.
+/scripts/research/specs/clean_sheet_portfolio_foundry_v4.yaml text eol=lf
+/scripts/research/specs/ladder4_candidate_value_add_h0_h8.yaml text eol=lf
+/scripts/research/momentum_capsule_wiring_20261103/run_final_proofs.sh text eol=lf

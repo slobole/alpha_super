@@ -84,15 +84,31 @@ def run_one(mode_str: str, leg_str: str, date_str: str, snapshot_root_str: str) 
         environment_dict.pop("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", None)
     done_obj = subprocess.run([sys.executable, __file__, "--one", mode_str, leg_str, date_str], env=environment_dict, cwd=REPO_PATH, capture_output=True, text=True, encoding="utf-8")
     line_list = [line_str for line_str in done_obj.stdout.splitlines() if line_str.startswith("RESULT ")]
-    return json.loads(line_list[-1][7:]) if line_list else {"error_str": done_obj.stderr[-1800:]}
+    if done_obj.returncode != 0:
+        return {"error_str": f"Child exit {done_obj.returncode}: {done_obj.stderr[-1800:]}",
+                "stdout_tail_str": done_obj.stdout[-1800:]}
+    if len(line_list) != 1:
+        return {"error_str": f"Expected one RESULT line; found {len(line_list)}. {done_obj.stderr[-1800:]}",
+                "stdout_tail_str": done_obj.stdout[-1800:]}
+    try:
+        result_dict = json.loads(line_list[0][7:])
+    except json.JSONDecodeError as error_obj:
+        return {"error_str": f"Invalid RESULT JSON: {error_obj}"}
+    if not isinstance(result_dict, dict) or not all(
+        isinstance(result_dict.get(key_str), dict) for key_str in ("weight_dict", "path_dict")
+    ):
+        return {"error_str": "RESULT requires weight_dict and path_dict objects"}
+    return result_dict
 
 
 def main(snapshot_root_str: str, date_str: str, leg_list: list[str]) -> None:
     OUT_PATH.mkdir(parents=True, exist_ok=True)
     out_file_path = OUT_PATH / f"snapshot_decision_{date_str}.json"
     result_dict = json.loads(out_file_path.read_text(encoding="utf-8")) if out_file_path.exists() else {}
+    failed_bool = False
     for leg_str in leg_list:
         live_dict, direct_dict = run_one("live", leg_str, date_str, snapshot_root_str), run_one("direct", leg_str, date_str, snapshot_root_str)
+        failed_bool |= "error_str" in live_dict or "error_str" in direct_dict
         same_names_bool, largest_gap_float, path_summary_dict = None, None, {}
         if "weight_dict" in live_dict and "weight_dict" in direct_dict:
             same_names_bool = set(live_dict["weight_dict"]) == set(direct_dict["weight_dict"])
@@ -103,6 +119,9 @@ def main(snapshot_root_str: str, date_str: str, leg_list: list[str]) -> None:
         result_dict[leg_str] = {"live": live_dict, "direct": direct_dict, "same_names_bool": same_names_bool, "largest_weight_gap_float": largest_gap_float, "whole_path_dict": path_summary_dict}
         print("leg", leg_str, json.dumps(result_dict[leg_str], default=str)[:1800], flush=True)
     out_file_path.write_text(json.dumps(result_dict, indent=2, default=str), encoding="utf-8")
+    if failed_bool:
+        print(f"SNAPSHOT DECISIONS FAILED: inspect {out_file_path}", file=sys.stderr, flush=True)
+        raise SystemExit(1)
     print("SNAPSHOT DECISIONS DONE", flush=True)
 
 

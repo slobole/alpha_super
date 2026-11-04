@@ -13,6 +13,7 @@ class PathClassification:
     path_str: str
     tier_int: int
     reason_str: str
+    unclassified_bool: bool = False
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,18 @@ RESEARCH_TEST_TARGET_TUPLE = (
     "tests/test_run_strategy_analysis.py",
 )
 
+LIVE_OPERATIONAL_SCRIPT_NAME_SET = {
+    "collect_vps_debug_bundle.ps1",
+    "doctor_norgate_client.py", "doctor_norgate_server.py",
+    "export_norgate_snapshot.py", "norgate_config_env.py",
+    "live_ops_heartbeat.py", "live_ops_watchdog.py",
+    "run_ibkr_performance_sync.ps1", "run_live_ops_watchdog.ps1",
+    "run_norgate_server_task.py", "run_norgate_server_task.ps1",
+    "serve_norgate_snapshot_api.py", "sync_norgate_snapshots_api.py",
+    "setup_ibkr_performance_task.ps1", "setup_live_ops_watchdog_task.ps1",
+    "setup_live_tasks.ps1", "start_norgate_server.cmd", "start_norgate_server.ps1",
+}
+
 TOOLING_TEST_TARGET_TUPLE = (
     "git diff --check",
     "targeted docs/tooling tests",
@@ -64,7 +77,7 @@ TOOLING_TEST_TARGET_TUPLE = (
 
 
 def normalize_path_str(path_str: str) -> str:
-    normalized_path_str = path_str.strip().replace("\\", "/")
+    normalized_path_str = path_str.replace("\\", "/")
     while normalized_path_str.startswith("./"):
         normalized_path_str = normalized_path_str[2:]
     return normalized_path_str
@@ -81,6 +94,15 @@ def _is_live_path_bool(path_str: str) -> bool:
         or path_str.startswith("docs/live/")
         or path_str.startswith("docs/reviews/live/")
         or path_str.startswith("tests/test_live_")
+        or path_str == "tests/test_norgate_snapshot_parity.py"
+        or path_str.startswith("tests/test_dashboard_")
+        or path_str.startswith(("tests/test_client_", "tests/test_ibkr_", "tests/test_other_account",
+                                "tests/test_monthly_report", "tests/test_manual_order", "tests/test_local_ibkr",
+                                "tests/test_local_measured", "tests/test_pod_cash", "tests/test_portfolio_capture"))
+        or path_str.startswith("scripts/live_debug/")
+        or (path_str.startswith("tests/dashboard_v") and path_str.endswith(".test.cjs"))
+        or (PurePosixPath(path_str).parent == PurePosixPath("scripts")
+            and _path_name_str(path_str) in LIVE_OPERATIONAL_SCRIPT_NAME_SET)
         or path_name_str.startswith("LIVE_")
         or path_name_str in {"INCUBATION_FLOW.MD", "LIVE_START_HERE.MD"}
     )
@@ -90,6 +112,14 @@ def _is_engine_or_shared_path_bool(path_str: str) -> bool:
     path_name_str = _path_name_str(path_str)
     return (
         path_str.startswith("alpha/engine/")
+        or path_str in {
+            "alpha/strategy_registry.py", "alpha/portfolio_registry.py",
+            "tests/test_strategy_registry.py", "tests/test_portfolio_registry.py",
+            "tests/test_portfolio.py", "tests/test_portfolio_manager.py",
+            "pyproject.toml", "uv.lock", ".gitattributes",
+            "tests/conftest.py", "tests/test_offline_test_guards.py",
+        }
+        or (path_name_str.startswith("requirements") and path_name_str.endswith(".txt"))
         or path_str.startswith("alpha/data/")
         or path_str.startswith("data/")
         or path_name_str
@@ -111,6 +141,8 @@ def _is_research_or_backtest_path_bool(path_str: str) -> bool:
     path_name_str = _path_name_str(path_str)
     return (
         path_str.startswith("strategies/")
+        or path_str.startswith(("alpha/scout/", "alpha/bench/", "tests/test_scout_", "tests/test_bench", "tests/test_research_"))
+        or (path_str.startswith("portfolios/") and path_str.endswith((".yaml", ".yml")))
         or path_str.startswith("notebooks/")
         or path_str.startswith("research/")
         or path_str.startswith("scripts/research/")
@@ -142,10 +174,23 @@ def classify_path(path_str: str) -> PathClassification:
             tier_int=1,
             reason_str="strategy, notebook, research, or backtest-only surface",
         )
+    if (
+        normalized_path_str.endswith((".md", ".rst"))
+        or (normalized_path_str.startswith("docs/") and normalized_path_str.endswith(".txt"))
+        or normalized_path_str in {
+            "scripts/review/triage.py", "tests/test_review_triage.py",
+        }
+    ):
+        return PathClassification(
+            path_str=normalized_path_str,
+            tier_int=0,
+            reason_str="documentation or known isolated verification tooling",
+        )
     return PathClassification(
         path_str=normalized_path_str,
-        tier_int=0,
-        reason_str="docs, comments, isolated tooling, or unclassified low-blast-radius path",
+        tier_int=3,
+        reason_str="UNCLASSIFIED: manual risk assessment required; provisional Tier 3",
+        unclassified_bool=True,
     )
 
 
@@ -197,14 +242,16 @@ def _read_git_path_list(command_list: Sequence[str]) -> list[str]:
         capture_output=True,
         check=False,
         text=True,
+        encoding="utf-8",
+        errors="surrogateescape",
     )
     if completed_process.returncode != 0:
         stderr_str = completed_process.stderr.strip()
         raise RuntimeError(stderr_str or f"{' '.join(command_list)} failed")
     return [
         path_str
-        for path_str in completed_process.stdout.splitlines()
-        if path_str.strip()
+        for path_str in completed_process.stdout.split("\0")
+        if path_str
     ]
 
 
@@ -213,14 +260,19 @@ def _dedupe_path_list(path_list: Sequence[str]) -> list[str]:
 
 
 def read_git_diff_name_only(base_str: str | None = None) -> list[str]:
-    diff_command_list = ["git", "diff", "--name-only"]
-    if base_str:
-        diff_command_list.append(base_str)
-    tracked_path_list = _read_git_path_list(diff_command_list)
-    untracked_path_list = _read_git_path_list(
-        ["git", "ls-files", "--others", "--exclude-standard"]
+    # Keep index and worktree changes separately: they may cancel relative to HEAD.
+    # Disable rename collapsing so the original path still contributes its risk.
+    unstaged_path_list = _read_git_path_list(
+        ["git", "diff", "--name-only", "-z", "--no-renames", "--"]
     )
-    return _dedupe_path_list([*tracked_path_list, *untracked_path_list])
+    staged_command_list = ["git", "diff", "--cached", "--name-only", "-z", "--no-renames"]
+    if base_str:
+        staged_command_list.append(base_str)
+    staged_path_list = _read_git_path_list([*staged_command_list, "--"])
+    untracked_path_list = _read_git_path_list(
+        ["git", "ls-files", "--others", "--exclude-standard", "-z"]
+    )
+    return _dedupe_path_list([*unstaged_path_list, *staged_path_list, *untracked_path_list])
 
 
 def format_triage_result(result: TriageResult) -> str:
@@ -230,6 +282,8 @@ def format_triage_result(result: TriageResult) -> str:
         f"tier_label={result.tier_label_str}",
         "live_impact_checklist_required_bool="
         f"{result.live_impact_checklist_required_bool}",
+        "manual_classification_required_bool="
+        f"{any(item.unclassified_bool for item in result.path_classification_tuple)}",
         "required_agent_list:",
     ]
     if result.required_agent_tuple:
@@ -248,7 +302,7 @@ def format_triage_result(result: TriageResult) -> str:
     else:
         line_list.append("- no changed paths -> Tier 0: nothing to classify")
 
-    line_list.append("suggested_test_target_list:")
+    line_list.append("suggested_test_target_list (expand wildcard paths before passing to pytest):")
     line_list.extend(
         f"- {target_str}" for target_str in result.suggested_test_target_tuple
     )
@@ -273,7 +327,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--base",
         default=None,
-        help="Optional git diff base, for example HEAD or origin/main.",
+        help="Compare the index with this base, also including unstaged and untracked paths.",
     )
     parser.add_argument(
         "--name-only",
@@ -300,7 +354,7 @@ def main(argv_list: Sequence[str] | None = None) -> int:
 
     result = classify_path_list(path_list)
     print(format_triage_result(result))
-    return 0
+    return 2 if any(item.unclassified_bool for item in result.path_classification_tuple) else 0
 
 
 if __name__ == "__main__":
