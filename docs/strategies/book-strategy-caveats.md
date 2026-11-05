@@ -241,9 +241,9 @@ Closed 2026-10-31 ([record](../research/RESIDUAL_MOMENTUM_20261031.md)). `strate
 | A fill at the next close | Small | Bench Timing: 0.2 to 0.35 points a year and 0.01 to 0.03 of Sharpe against the next open, so completing a cancelled order by MOC is cheap | Bench Timing 2026-11-03 |
 | Wired, not enabled | Status | Real modules, disabled templates and tests; no paper days and no fills. Record in `docs/live/MOMENTUM_LEGS_WIRING_20261103.md` | Build 2026-11-03 |
 
-## Beyond 60/40 trend tilt — `strategy_taa_beyond_6040_trend_tilt` (RESEARCH candidate, 2026-11-05)
+## Beyond 60/40 trend tilt — `strategy_taa_beyond_6040_trend_tilt` (WIRED 2026-11-05, no book slot)
 
-Record: [BEYOND_6040_20261105.md](../research/BEYOND_6040_20261105.md). Inverse-vol stocks / 20+y Treasury / gold, 8% vol target, per-asset 10-month SMA tilt (×1 above, ×0.5 below), monthly. Not in any book or template.
+Record: [BEYOND_6040_20261105.md](../research/BEYOND_6040_20261105.md). Inverse-vol stocks / 20+y Treasury / gold, 8% vol target, per-asset 10-month SMA tilt (×1 above, ×0.5 below), monthly, residual in BIL. WIRED with a disabled template ([wiring record](../live/BEYOND6040_T1_WIRING_20261105.md)); not in any book.
 
 | Caveat | Kind | Size | Source |
 | --- | --- | --- | --- |
@@ -254,4 +254,5 @@ Record: [BEYOND_6040_20261105.md](../research/BEYOND_6040_20261105.md). Inverse-
 | Same engine as CORE5 (stocks / bond / gold, risk-weighted, SMA10 on/off, vol control); CORE5 wins 2012→ by 0.37 Sharpe on its own era, T1 has the 1970–2006 record CORE5 cannot be tested on | Book | one pod per engine: CORE5 keeps the seat | A12 |
 | Turnover 2.5×/yr; 5% exposure band cuts it 20% at no cost | Cost | 5 bp → 10 bp costs 0.02 Sharpe | A1, A4 |
 | ILS reporting: unhedged halves the Sharpe (0.71 → 0.33); hedge the NAV (full or 50%); the trend-timed hedge has no edge on USD/ILS | FX | worst unhedged drawdowns are FX, not strategy | A10 |
+| Live execution re-sizes every session: ~580 small orders a year (~6× turnover); negligible in bps at fund scale, real at a small account with the $1 IBKR minimum. Related accounts can hit IBKR cross-cancels on GLD/TLT/BIL (CORE5 shares GLD, BIL) | Execution | see wiring record caveats | wiring 2026-11-05 |
 | Leverage (1.25–2×, financed at Fed funds + 1.5%) does not raise Sharpe; capped 1.5× on the tilted rule is +0.7 pp CAGR for −2.5 pp deeper max DD | Dial | Sharpe unchanged | A8 |

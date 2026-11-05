@@ -8,12 +8,14 @@ import yaml
 
 from alpha.live import scheduler_utils
 from alpha.live.models import LiveRelease
+from alpha.live.beyond6040_adapter import BEYOND6040_STRATEGY_IMPORT_STR, validate_beyond6040_release
 from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR, validate_core5_release
 from alpha.live.momentum_legs_adapter import MOMENTUM_LEGS_STRATEGY_IMPORT_TUPLE, validate_momentum_legs_release
 from alpha.live.mr_capsule_adapter import MR_CAPSULE_PROFILE_TUPLE, MR_CAPSULE_STRATEGY_IMPORT_TUPLE, validate_mr_capsule_release
 from alpha.live.ndx_e2_adapter import NDX_E2_STRATEGY_IMPORT_TUPLE, validate_ndx_e2_release
 from alpha.live.dv2_ind_adapter import DV2_IND_STRATEGY_IMPORT_STR, validate_dv2_ind_release
 from alpha.live.flow_vote_adapter import FLOW_VOTE_EXECUTION_POLICY_STR, FLOW_VOTE_STRATEGY_IMPORT_STR, validate_flow_vote_release
+from data.beyond6040_snapshot_contract import BEYOND6040_PROFILE_STR
 from data.flow_vote_snapshot_contract import FLOW_VOTE_PROFILE_STR
 from data.dv2_ind_snapshot_contract import DV2_IND_PROFILE_STR
 from data.momentum_legs_snapshot_contract import MOMENTUM_LEGS_PROFILE_TUPLE
@@ -31,6 +33,7 @@ SUPPORTED_STRATEGY_IMPORT_TUPLE: tuple[str, ...] = (
     *MR_CAPSULE_STRATEGY_IMPORT_TUPLE,
     CORE5_STRATEGY_IMPORT_STR,
     FLOW_VOTE_STRATEGY_IMPORT_STR,
+    BEYOND6040_STRATEGY_IMPORT_STR,
     "strategies.dv2.strategy_mr_dv2:DVO2Strategy",
     *HPI_STRATEGY_IMPORT_TUPLE,
     "strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash",
@@ -55,6 +58,7 @@ SUPPORTED_DATA_PROFILE_TUPLE: tuple[str, ...] = (
     *MR_CAPSULE_PROFILE_TUPLE,
     CORE5_PROFILE_STR,
     FLOW_VOTE_PROFILE_STR,
+    BEYOND6040_PROFILE_STR,
     "norgate_eod_sp500_pit",
     HPI_SP500_PROFILE_STR,
     "norgate_eod_etf_plus_vix_helper",
@@ -266,6 +270,10 @@ def validate_release_manifest(release_obj: LiveRelease, *, require_live_qualific
         raise ValueError("The Flow Vote data profile is reserved for the Month-End Flow Vote.")
     elif release_obj.execution_policy_str == FLOW_VOTE_EXECUTION_POLICY_STR:
         raise ValueError("next_close_moc is reserved for the Month-End Flow Vote.")
+    if release_obj.strategy_import_str == BEYOND6040_STRATEGY_IMPORT_STR:
+        validate_beyond6040_release(release_obj)
+    elif release_obj.data_profile_str == BEYOND6040_PROFILE_STR:
+        raise ValueError("The Beyond 60/40 data profile is reserved for the Beyond 60/40 trend tilt.")
     if release_obj.strategy_import_str not in SUPPORTED_STRATEGY_IMPORT_TUPLE:
         raise ValueError(
             "Unsupported strategy_import_str "
@@ -561,6 +569,15 @@ def validate_release_list(release_list: list[LiveRelease]) -> None:
         ):
             raise ValueError(
                 "CORE5 requires one dedicated account per pod. "
+                f"Enabled pods '{prior_release_obj.pod_id_str}' and '{release_obj.pod_id_str}' "
+                f"share account_route_str '{release_obj.account_route_str}' in mode '{release_obj.mode_str}'."
+            )
+        if prior_release_obj is not None and (
+            release_obj.strategy_import_str == BEYOND6040_STRATEGY_IMPORT_STR
+            or prior_release_obj.strategy_import_str == BEYOND6040_STRATEGY_IMPORT_STR
+        ):
+            raise ValueError(
+                "Beyond 60/40 requires one dedicated account per pod. "
                 f"Enabled pods '{prior_release_obj.pod_id_str}' and '{release_obj.pod_id_str}' "
                 f"share account_route_str '{release_obj.account_route_str}' in mode '{release_obj.mode_str}'."
             )

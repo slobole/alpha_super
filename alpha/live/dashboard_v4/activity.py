@@ -30,7 +30,10 @@ EVENT_DICT = {
     "core5_decision_blocked": ("alerts", "fail", "Decision blocked by a safety check.", "decision"),
     "core5_eod_source_untrusted": ("alerts", "fail", "Closing snapshot source could not be verified.", "events"),
     "core5_pre_submit_account_changed": ("alerts", "fail", "Account changed before submission. Orders blocked.", "orders"),
-    # Daily pods (CORE5, MR capsule). daily_cycle_reconciled is worded by its status below.
+    "beyond6040_decision_blocked": ("alerts", "fail", "Decision blocked by a safety check.", "decision"),
+    "beyond6040_eod_source_untrusted": ("alerts", "fail", "Closing snapshot source could not be verified.", "events"),
+    "beyond6040_pre_submit_account_changed": ("alerts", "fail", "Account changed before submission. Orders blocked.", "orders"),
+    # Daily pods (CORE5, Beyond 60/40, MR capsule). daily_cycle_reconciled is worded by its status below.
     "daily_cycle_reconciled": ("cycles", "done", "Daily check recorded.", "reconcile"),
     "daily_cycle_reconcile_retry": ("alerts", "fail", "Daily close check failed. Retrying.", "reconcile"),
     "daily_cycle_load_failed": ("alerts", "fail", "Daily cycle could not be read.", "events"),

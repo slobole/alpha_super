@@ -57,6 +57,7 @@ RELEASE_TEMPLATE_PATH_TUPLE: tuple[Path, ...] = (
     Path("docs/live/release_templates/pod_mo_capsule_leg2_residual_ndx_month_swap.yaml.example"),
     Path("docs/live/release_templates/pod_mo_capsule_leg3_residual_r1000_month_swap.yaml.example"),
     Path("docs/live/release_templates/pod_taa_month_end_flow_vote_daily_moc.yaml.example"),
+    Path("docs/live/release_templates/pod_taa_beyond_6040_trend_tilt_daily_moo.yaml.example"),
 )
 
 
@@ -208,8 +209,9 @@ def test_release_template_parses_and_starts_disabled(template_path_obj: Path):
     # (owner decision 2026-10-11). The Flow Vote too: its MOC send window is 15:40-15:45.
     # Every other template stays manual-first.
     flow_vote_template_bool = release_obj.strategy_import_str == "strategies.taa_beyond_6040.strategy_taa_month_end_flow_vote"
+    beyond6040_template_bool = release_obj.strategy_import_str == "strategies.taa_beyond_6040.strategy_taa_beyond_6040_trend_tilt"
     daily_template_bool = (release_obj.strategy_import_str == "strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5"
-        or release_obj.strategy_import_str.startswith("strategies.mr_capsule.") or flow_vote_template_bool)
+        or release_obj.strategy_import_str.startswith("strategies.mr_capsule.") or flow_vote_template_bool or beyond6040_template_bool)
     assert release_obj.auto_submit_enabled_bool is daily_template_bool
     assert release_obj.user_id_str == "your_user"
     assert release_obj.release_id_str.startswith("your_user.")
@@ -235,13 +237,17 @@ def test_release_template_parses_and_starts_disabled(template_path_obj: Path):
     elif flow_vote_template_bool:
         assert release_obj.mode_str == "live" and release_obj.account_route_str == "YOUR_FLOW_VOTE_ACCOUNT"
         assert release_obj.broker_client_id_int == 56
+    elif beyond6040_template_bool:
+        assert release_obj.mode_str == "live" and release_obj.account_route_str == "YOUR_BEYOND6040_ACCOUNT"
+        assert release_obj.broker_client_id_int == 57
+        assert release_obj.risk_profile_str == "beyond6040_long_only"
     else:
         assert release_obj.broker_client_id_int == 31
     assert release_obj.broker_timeout_seconds_float == 4.0
     assert release_obj.session_calendar_id_str == "XNYS"
-    expected_budget_float = 1.0 if release_obj.strategy_import_str == "strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5" or release_obj.strategy_import_str.startswith("strategies.mr_capsule.") or release_obj.strategy_import_str in NDX_E2_STRATEGY_IMPORT_TUPLE or release_obj.strategy_import_str == "strategies.dv2.strategy_mr_dv2_industry_etf:DVO2IndustryEtfStrategy" or release_obj.strategy_import_str in MOMENTUM_LEGS_STRATEGY_IMPORT_TUPLE or flow_vote_template_bool else 0.03
+    expected_budget_float = 1.0 if release_obj.strategy_import_str == "strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5" or release_obj.strategy_import_str.startswith("strategies.mr_capsule.") or release_obj.strategy_import_str in NDX_E2_STRATEGY_IMPORT_TUPLE or release_obj.strategy_import_str == "strategies.dv2.strategy_mr_dv2_industry_etf:DVO2IndustryEtfStrategy" or release_obj.strategy_import_str in MOMENTUM_LEGS_STRATEGY_IMPORT_TUPLE or flow_vote_template_bool or beyond6040_template_bool else 0.03
     assert release_obj.pod_budget_fraction_float == expected_budget_float
-    if core5_template_bool or flow_vote_template_bool:
+    if core5_template_bool or flow_vote_template_bool or beyond6040_template_bool:
         assert release_obj.params_dict == {}
     else:
         assert release_obj.params_dict["capital_base_float"] == 100000.0

@@ -67,6 +67,7 @@ import pandas as pd
 from alpha.data import LIVE_FRED_STALE_WARNING_BUSINESS_DAYS_INT
 from alpha.engine.strategy import Strategy
 from alpha.live import scheduler_utils
+from alpha.live.beyond6040_adapter import BEYOND6040_STRATEGY_IMPORT_STR, build_beyond6040_decision_plan
 from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR, build_core5_decision_plan
 from alpha.live.models import DecisionPlan, LiveRelease, PodState
 from alpha.live.dv2_ind_adapter import DV2_IND_STRATEGY_IMPORT_STR, build_dv2_ind_decision_plan
@@ -94,6 +95,7 @@ FULL_TARGET_DECISION_STRATEGY_IMPORT_SET: set[str] = {
     *MOMENTUM_LEGS_STRATEGY_IMPORT_TUPLE,
     CORE5_STRATEGY_IMPORT_STR,
     FLOW_VOTE_STRATEGY_IMPORT_STR,
+    BEYOND6040_STRATEGY_IMPORT_STR,
     "strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash",
     "strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash",
     "strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash",
@@ -1262,6 +1264,8 @@ def build_decision_plan_for_release(
             return build_core5_decision_plan(release_obj, as_of_ts, pod_state_obj)
         if release_obj.strategy_import_str == FLOW_VOTE_STRATEGY_IMPORT_STR:
             return build_flow_vote_decision_plan(release_obj, as_of_ts, pod_state_obj)
+        if release_obj.strategy_import_str == BEYOND6040_STRATEGY_IMPORT_STR:
+            return build_beyond6040_decision_plan(release_obj, as_of_ts, pod_state_obj)
         if release_obj.strategy_import_str == "strategies.dv2.strategy_mr_dv2:DVO2Strategy":
             return _build_dv2_decision_plan(release_obj, as_of_ts, pod_state_obj)
         if (

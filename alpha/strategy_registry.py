@@ -124,6 +124,9 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     # IBKR's own pre-trade checks decide funding and DBC borrow; the example
     # remains disabled. Research borrow remains fixed at 1%.
     "strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5": MaturityTier.WIRED,
+    # Beyond 60/40 trend tilt (T1): wired 2026-11-05 as a guarded next-open pod like CORE5 (docs/live/BEYOND6040_T1_WIRING_20261105.md);
+    # research record docs/research/BEYOND_6040_20261105.md. Disabled template, no account, no book slot while CORE5 holds the seat.
+    "strategies.taa_beyond_6040.strategy_taa_beyond_6040_trend_tilt": MaturityTier.WIRED,
     # Monthly four-regime Inflation Compass using SPY SMA200, FRED T5YIE,
     # sector-ratio confirmation, and causal next-open ETF rebalancing. PM-only:
     # current-vintage FRED data is not PAPER/LIVE release evidence. Re-checked

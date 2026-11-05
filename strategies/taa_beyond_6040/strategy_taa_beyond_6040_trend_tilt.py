@@ -4,7 +4,7 @@ Beyond 60/40 inverse-volatility strategy with a monthly 10-month SMA trend tilt
 
 Status
 ------
-RESEARCH / candidate. Not wired, no book slot, no LIVE route.
+WIRED candidate, route being built; see docs/live/BEYOND6040_T1_WIRING_20261105.md
 Source: docs/research/BEYOND_6040_20261105.md and
 scripts/research/beyond_6040_20261105/ (SPEC.md, out/a4, out/gates, out/vault).
 
@@ -46,13 +46,27 @@ Final weights:
     w_{i,t}^{final}
         = exposure_t * w_{i,t}^{base} * m_{i,t}
 
-    w_t^{cash}
+    w_t^{residual}
         = 1 - sum_i w_{i,t}^{final}
+
+Reserve (added for live, owner decision 2026-11-05): the residual is parked in
+BIL (``reserve_asset_str = "BIL"``), as CORE5 does; the research series
+credited Fed funds on idle cash and BIL is its tradable form. Before BIL's
+first observed session (2007-05-30) the residual stays in engine cash. BIL is
+a tradable only: it enters neither the inverse-volatility weights, nor the
+sleeve volatility overlay, nor the SMA tilt.
+
+    w_t^{BIL}  = w_t^{residual}   if Close_T(BIL) is observed, else 0
+    w_t^{cash} = w_t^{residual} - w_t^{BIL}
 
 No leverage, no shorts. Signals are decided after Close_T and fill at
 Open_(T+1) through the engine's previous-bar contract, exactly as the other
-Beyond 60/40 variants. Idle cash follows the engine's convention (0%, no
-reserve asset); dividends are credited as cash by the engine ledger.
+Beyond 60/40 variants. Dividends are credited as cash by the engine ledger.
+
+Data: VTI, TLT, GLD and BIL CAPITALSPECIAL (traded prices), VTI, TLT and GLD
+TOTALRETURN (trend signal) and the $SPX benchmark (read from $SPXTR), from
+VTI inception 2001-05-31. In snapshot mode the same frame is read from the
+``norgate_eod_beyond6040`` profile (data/beyond6040_snapshot_contract.py).
 
 Pre-registered caveats (keep with the strategy)
 -----------------------------------------------
@@ -74,7 +88,14 @@ from IPython.display import display
 
 from alpha.engine.backtest import run_daily
 from alpha.engine.report import save_results
-from data.norgate_loader import TOTALRETURN_ADJUSTMENT_STR, load_price_timeseries
+from data.beyond6040_snapshot_contract import BEYOND6040_HISTORY_START_STR, BEYOND6040_PROFILE_STR
+from data.norgate_loader import TOTALRETURN_ADJUSTMENT_STR, load_price_timeseries, load_raw_prices
+from data.norgate_snapshot_store import (
+    NorgateSnapshotValidationError,
+    is_snapshot_mode_enabled_bool,
+    load_valid_snapshot_manifest,
+    use_norgate_data_profile,
+)
 from strategies.taa_beyond_6040.strategy_taa_beyond_6040 import (
     Beyond6040Config,
     Beyond6040Strategy,
@@ -82,7 +103,6 @@ from strategies.taa_beyond_6040.strategy_taa_beyond_6040 import (
     build_signal_base_weight_df,
     compute_gross_exposure_float,
     compute_month_end_inverse_vol_weight_df,
-    get_beyond_6040_data,
     map_month_end_weights_to_rebalance_open_df,
 )
 
@@ -93,6 +113,7 @@ TRIGGER_PORTFOLIO_VOL_FLOAT = 0.085
 TREND_SMA_LOOKBACK_INT = 210
 TILT_STRENGTH_FLOAT = 0.5
 TREND_PRICE_FIELD_STR = "TotalReturnClose"
+RESERVE_ASSET_STR = "BIL"
 SLEEVE_LABEL_STR = "PortfolioSleeve"
 SLEEVE_RETURN_FIELD_STR = "base_weight_return_ser"
 
@@ -102,6 +123,12 @@ class Beyond6040TrendTiltConfig(Beyond6040Config):
     trend_sma_lookback_int: int = TREND_SMA_LOOKBACK_INT
     tilt_strength_float: float = TILT_STRENGTH_FLOAT
     trend_price_field_str: str = TREND_PRICE_FIELD_STR
+    # Live addition (owner decision 2026-11-05): the residual is parked in BIL;
+    # None keeps the research convention of idle engine cash.
+    reserve_asset_str: str | None = RESERVE_ASSET_STR
+    # The data profile's window: VTI inception. Nothing before it enters any
+    # signal (VTI has no earlier bar and every rule needs all three assets).
+    start_date_str: str = BEYOND6040_HISTORY_START_STR
 
     def __post_init__(self):
         super().__post_init__()
@@ -109,6 +136,14 @@ class Beyond6040TrendTiltConfig(Beyond6040Config):
             raise ValueError("trend_sma_lookback_int must be at least 2.")
         if not (0.0 <= self.tilt_strength_float <= 1.0):
             raise ValueError("tilt_strength_float must lie in [0, 1].")
+        if self.reserve_asset_str is not None and (
+            self.reserve_asset_str in self.asset_list or self.reserve_asset_str in self.benchmark_list
+        ):
+            raise ValueError("reserve_asset_str must not be a risk asset or a benchmark.")
+
+    @property
+    def tradable_list(self) -> list[str]:
+        return list(self.asset_list) + ([] if self.reserve_asset_str is None else [self.reserve_asset_str])
 
 
 DEFAULT_CONFIG = Beyond6040TrendTiltConfig(
@@ -117,15 +152,14 @@ DEFAULT_CONFIG = Beyond6040TrendTiltConfig(
 )
 
 
-def get_trend_tilt_data(config: Beyond6040TrendTiltConfig = DEFAULT_CONFIG) -> pd.DataFrame:
-    """
-    Load the base CAPITALSPECIAL/benchmark frame and attach one Total-Return
-    Close column per asset, (asset, "TotalReturnClose"), for the trend signal.
-
-    *** CRITICAL*** The total-return series is aligned on the base index without
-    any fill: a missing session stays NaN and the signal stays NaN.
-    """
-    pricing_data_df = get_beyond_6040_data(config=config)
+def _load_trend_tilt_frame_df(config: Beyond6040TrendTiltConfig) -> pd.DataFrame:
+    """The research frame: CAPITALSPECIAL tradables + benchmark, then one (asset, "TotalReturnClose") column per risk asset."""
+    pricing_data_df = load_raw_prices(
+        symbols=config.tradable_list,
+        benchmarks=list(config.benchmark_list),
+        start_date=config.start_date_str,
+        end_date=config.end_date_str,
+    )
     for asset_str in config.asset_list:
         total_return_df = load_price_timeseries(
             asset_str,
@@ -133,9 +167,36 @@ def get_trend_tilt_data(config: Beyond6040TrendTiltConfig = DEFAULT_CONFIG) -> p
             start_date_str=config.start_date_str,
             end_date_str=config.end_date_str,
         )
+        # *** CRITICAL*** The total-return series is aligned on the base index
+        # without any fill: a missing session stays NaN and the signal stays NaN.
         pricing_data_df[(asset_str, config.trend_price_field_str)] = (
             total_return_df["Close"].astype(float).reindex(pricing_data_df.index)
         )
+    return pricing_data_df
+
+
+def get_trend_tilt_data(config: Beyond6040TrendTiltConfig = DEFAULT_CONFIG) -> pd.DataFrame:
+    """
+    Load the CAPITALSPECIAL tradables (risk assets and the BIL reserve), the
+    benchmark, and one Total-Return Close column per risk asset,
+    (asset, "TotalReturnClose"), for the trend signal.
+
+    Direct mode reads Norgate. Snapshot mode reads the same series from the
+    qualified ``norgate_eod_beyond6040`` profile (observed rows, native fields
+    and dtypes), so the live frame equals the research frame.
+    """
+    if not is_snapshot_mode_enabled_bool():
+        return _load_trend_tilt_frame_df(config)
+    with use_norgate_data_profile(BEYOND6040_PROFILE_STR):
+        initial_manifest_obj = load_valid_snapshot_manifest(BEYOND6040_PROFILE_STR)
+        pricing_data_df = _load_trend_tilt_frame_df(config)
+        final_manifest_obj = load_valid_snapshot_manifest(BEYOND6040_PROFILE_STR)
+    # *** CRITICAL*** A publication between the reads must not mix two data vintages in one decision.
+    if (
+        initial_manifest_obj.snapshot_dir_path_obj != final_manifest_obj.snapshot_dir_path_obj
+        or initial_manifest_obj.manifest_hash_str != final_manifest_obj.manifest_hash_str
+    ):
+        raise NorgateSnapshotValidationError("Beyond 60/40 snapshot changed during the data load; retry with one complete snapshot.")
     return pricing_data_df
 
 
@@ -209,12 +270,20 @@ class Beyond6040TrendTiltStrategy(Beyond6040Strategy):
         trend_sma_lookback_int: int = DEFAULT_CONFIG.trend_sma_lookback_int,
         tilt_strength_float: float = DEFAULT_CONFIG.tilt_strength_float,
         trend_price_field_str: str = DEFAULT_CONFIG.trend_price_field_str,
+        reserve_asset_str: str | None = DEFAULT_CONFIG.reserve_asset_str,
         **base_kwargs,
     ):
         super().__init__(name=name, **base_kwargs)
         self.trend_sma_lookback_int = int(trend_sma_lookback_int)
         self.tilt_strength_float = float(tilt_strength_float)
         self.trend_price_field_str = str(trend_price_field_str)
+        self.reserve_asset_str = None if reserve_asset_str is None else str(reserve_asset_str)
+        if self.reserve_asset_str is not None and self.reserve_asset_str in self.asset_list:
+            raise ValueError("reserve_asset_str must not be a risk asset.")
+        # BIL is a tradable only; asset_list (the risk assets) drives every signal.
+        self.tradable_list = list(self.asset_list) + ([] if self.reserve_asset_str is None else [self.reserve_asset_str])
+        self.weight_column_list = self.tradable_list + ["Cash"]
+        self.daily_target_weights = pd.DataFrame(columns=self.weight_column_list, dtype=float)
         self.daily_exposure_map: dict[pd.Timestamp, float] = {}
         self.daily_exposure_ser = pd.Series(dtype=float)
         self.month_end_tilt_multiplier_df = pd.DataFrame(columns=self.asset_list, dtype=float)
@@ -296,6 +365,18 @@ class Beyond6040TrendTiltStrategy(Beyond6040Strategy):
             trigger_portfolio_vol_float=self.trigger_portfolio_vol_float,
         )
 
+    def _reserve_tradable_bool(self, close_row_ser: pd.Series) -> bool:
+        """BIL takes the residual only once it has an observed Close_T; before its inception the residual is cash."""
+        if self.reserve_asset_str is None:
+            return False
+        reserve_close_float = float(close_row_ser.get((self.reserve_asset_str, "Close"), np.nan))
+        return bool(np.isfinite(reserve_close_float) and reserve_close_float > 0.0)
+
+    def _record_daily_target_weight_ser(self, target_weight_ser: pd.Series):
+        ordered_weight_ser = target_weight_ser.reindex(self.weight_column_list).astype(float)
+        self.daily_target_weight_map[pd.Timestamp(self.current_bar)] = ordered_weight_ser
+        self.daily_target_weights.loc[pd.Timestamp(self.current_bar), ordered_weight_ser.index] = ordered_weight_ser
+
     def iterate(self, data_df: pd.DataFrame, close_row_ser: pd.Series, open_price_ser: pd.Series):
         if close_row_ser is None or data_df is None:
             return
@@ -304,8 +385,8 @@ class Beyond6040TrendTiltStrategy(Beyond6040Strategy):
         tilt_multiplier_ser = self._current_tilt_multiplier_ser(close_row_ser).astype(float)
         if base_weight_ser.isna().any() or tilt_multiplier_ser.isna().any():
             cash_only_weight_ser = pd.Series(
-                [0.0] * len(self.asset_list) + [1.0],
-                index=self.asset_list + ["Cash"],
+                [0.0] * len(self.tradable_list) + [1.0],
+                index=self.weight_column_list,
                 dtype=float,
             )
             self.daily_exposure_map[pd.Timestamp(self.current_bar)] = np.nan
@@ -318,25 +399,43 @@ class Beyond6040TrendTiltStrategy(Beyond6040Strategy):
         target_weight_ser = (base_weight_ser * tilt_multiplier_ser * gross_exposure_float).astype(float)
         if (target_weight_ser < -1e-12).any() or float(target_weight_ser.sum()) > 1.0 + 1e-12:
             raise ValueError(f"Tilted weights must lie in [0, 1] and sum to at most 1 on {self.current_bar}.")
-        cash_weight_float = float(1.0 - target_weight_ser.sum())
+        residual_weight_float = float(1.0 - target_weight_ser.sum())
+        reserve_tradable_bool = self._reserve_tradable_bool(close_row_ser)
+        reserve_weight_ser = pd.Series(dtype=float)
+        if self.reserve_asset_str is not None:
+            # *** CRITICAL*** Residual -> BIL once it has a Close_T; it never enters the vol weights or the tilt.
+            reserve_weight_ser = pd.Series(
+                {self.reserve_asset_str: residual_weight_float if reserve_tradable_bool else 0.0}, dtype=float,
+            )
+        cash_weight_float = float(residual_weight_float - reserve_weight_ser.sum())
         target_weight_ser = pd.concat(
-            [target_weight_ser, pd.Series({"Cash": cash_weight_float}, dtype=float)]
+            [target_weight_ser, reserve_weight_ser, pd.Series({"Cash": cash_weight_float}, dtype=float)]
         )
         self._record_daily_target_weight_ser(target_weight_ser)
 
-        current_position_ser = self.get_positions().reindex(self.asset_list, fill_value=0.0).astype(int)
+        current_position_ser = self.get_positions().reindex(self.tradable_list, fill_value=0.0).astype(int)
         budget_value_float = float(self.previous_total_value)
 
-        for asset_str in self.asset_list:
+        for asset_str in self.tradable_list:
             target_weight_float = float(target_weight_ser.loc[asset_str])
             current_share_int = int(current_position_ser.loc[asset_str])
+            if asset_str == self.reserve_asset_str and not reserve_tradable_bool:
+                if current_share_int != 0:
+                    raise RuntimeError(f"Reserve {asset_str} is held without an observed close on {self.current_bar}.")
+                continue
             open_price_float = float(open_price_ser.get(asset_str, np.nan))
             if not np.isfinite(open_price_float) or open_price_float <= 0.0:
                 raise RuntimeError(f"Invalid open price for target asset {asset_str} on {self.current_bar}.")
 
-            # *** CRITICAL*** Target shares come from previous-bar total value
-            # and fill at the current open; same-bar close data is forbidden.
-            target_share_int = int(np.floor(budget_value_float * target_weight_float / open_price_float))
+            # *** CRITICAL*** The trade/no-trade test uses Close_T, the same price
+            # that sizes the order (order_target_percent sizes from the previous
+            # close). Open_(T+1) is unknown at decision time, so a skip test on it
+            # cannot be reproduced live (wiring review 2026-11-05). Fills stay at
+            # the current open; same-bar close data is forbidden.
+            sizing_close_float = float(close_row_ser.get((asset_str, "Close"), np.nan))
+            if not np.isfinite(sizing_close_float) or sizing_close_float <= 0.0:
+                raise RuntimeError(f"Invalid Close_T for target asset {asset_str} on {self.current_bar}.")
+            target_share_int = int(np.floor(budget_value_float * target_weight_float / sizing_close_float))
             if target_share_int == current_share_int:
                 continue
 
@@ -355,6 +454,11 @@ class Beyond6040TrendTiltStrategy(Beyond6040Strategy):
 
     def finalize(self, current_data: pd.DataFrame):
         super().finalize(current_data)
+        if len(self.daily_target_weight_map) > 0:
+            # The base class keeps only the risk assets and Cash; keep the reserve column too.
+            self.daily_target_weights = pd.DataFrame.from_dict(self.daily_target_weight_map, orient="index").sort_index()
+            self.daily_target_weights.index = pd.to_datetime(self.daily_target_weights.index)
+            self.daily_target_weights = self.daily_target_weights.reindex(columns=self.weight_column_list)
         trend_key_list = self._trend_key_list()
         if all(key in current_data.columns for key in trend_key_list):
             _, _, month_end_multiplier_df = compute_month_end_tilt_multiplier_df(
@@ -375,6 +479,94 @@ class Beyond6040TrendTiltStrategy(Beyond6040Strategy):
             self.daily_exposure_ser.index = pd.to_datetime(self.daily_exposure_ser.index)
 
 
+def _build_strategy_obj(config: Beyond6040TrendTiltConfig) -> Beyond6040TrendTiltStrategy:
+    return Beyond6040TrendTiltStrategy(
+        name=STRATEGY_NAME_STR,
+        trend_sma_lookback_int=config.trend_sma_lookback_int,
+        tilt_strength_float=config.tilt_strength_float,
+        trend_price_field_str=config.trend_price_field_str,
+        reserve_asset_str=config.reserve_asset_str,
+        benchmarks=config.benchmark_list,
+        asset_list=config.asset_list,
+        asset_vol_lookback_int=config.asset_vol_lookback_int,
+        portfolio_vol_lookback_int=config.portfolio_vol_lookback_int,
+        target_portfolio_vol_float=config.target_portfolio_vol_float,
+        trigger_portfolio_vol_float=config.trigger_portfolio_vol_float,
+        capital_base=config.capital_base_float,
+        slippage=config.slippage_float,
+        commission_per_share=config.commission_per_share_float,
+        commission_minimum=config.commission_minimum_float,
+    )
+
+
+def _build_analysis_context_dict(
+    config: Beyond6040TrendTiltConfig = DEFAULT_CONFIG,
+    pricing_data_df: pd.DataFrame | None = None,
+    backtest_start_date_str: str | None = None,
+) -> dict[str, object]:
+    """One causal frame and fill calendar shared by Vanilla and the BENCH hooks."""
+    if pricing_data_df is None:
+        pricing_data_df = get_trend_tilt_data(config=config)
+    calendar_start_ts = get_first_actionable_tilted_rebalance_ts(pricing_data_df=pricing_data_df, config=config)
+    if backtest_start_date_str is not None:
+        calendar_start_ts = max(calendar_start_ts, pd.Timestamp(backtest_start_date_str))
+    # *** CRITICAL*** Keep the full pre-start price history for the volatility,
+    # trend and overlay signals; only the executable fill calendar is clipped.
+    calendar_idx = pricing_data_df.index[pricing_data_df.index >= calendar_start_ts]
+    return {"config_obj": config, "pricing_data_df": pricing_data_df, "calendar_idx": calendar_idx}
+
+
+def build_execution_timing_analysis_inputs() -> dict[str, object]:
+    """BENCH Timing inputs with the Vanilla frame, calendar and factory."""
+    context_dict = _build_analysis_context_dict()
+
+    def strategy_factory_fn() -> Beyond6040TrendTiltStrategy:
+        return _build_strategy_obj(context_dict["config_obj"])
+
+    return {
+        "strategy_factory_fn": strategy_factory_fn,
+        "pricing_data_df": context_dict["pricing_data_df"],
+        "calendar_idx": context_dict["calendar_idx"],
+        "order_generation_mode_str": "vanilla_current_bar",
+        "risk_model_str": "taa_rebalance",
+        "entry_timing_str_tuple": ("same_open", "same_close_moc", "next_open", "next_close"),
+        "exit_timing_str_tuple": ("same_open", "same_close_moc", "next_open", "next_close"),
+        "default_entry_timing_str": "same_open",
+        "default_exit_timing_str": "same_open",
+    }
+
+
+def build_stress_test_context_dict() -> dict[str, object]:
+    return _build_analysis_context_dict()
+
+
+def build_stress_test_strategy_obj(context_dict: dict[str, object]) -> Beyond6040TrendTiltStrategy:
+    return _build_strategy_obj(context_dict["config_obj"])
+
+
+def build_capacity_analysis_inputs(
+    show_display_bool: bool = False,
+    backtest_start_date_str: str | None = None,
+    capital_base_float: float = DEFAULT_CONFIG.capital_base_float,
+    end_date_str: str | None = None,
+) -> dict[str, object]:
+    """One full-engine BENCH Capacity point with default trading costs."""
+    strategy_obj = run_variant(
+        show_display_bool=show_display_bool,
+        save_results_bool=False,
+        backtest_start_date_str=backtest_start_date_str,
+        capital_base_float=float(capital_base_float),
+        end_date_str=end_date_str,
+    )
+    pricing_data_df = get_trend_tilt_data(replace(DEFAULT_CONFIG, end_date_str=end_date_str))
+    return {
+        "strategy_obj": strategy_obj,
+        "pricing_data_df": pricing_data_df,
+        "execution_policy_str": "MOO",
+        "impact_profile_str": "MOO_ETF_PROXY",
+    }
+
+
 def run_variant(
     show_display_bool: bool = True,
     save_results_bool: bool = True,
@@ -388,37 +580,13 @@ def run_variant(
         capital_base_float=capital_base_float,
         end_date_str=end_date_str,
     )
-    pricing_data_df = get_trend_tilt_data(config=config)
-    relevant_start_ts = get_first_actionable_tilted_rebalance_ts(pricing_data_df=pricing_data_df, config=config)
-    calendar_start_ts = relevant_start_ts
-    if backtest_start_date_str is not None:
-        calendar_start_ts = max(calendar_start_ts, pd.Timestamp(backtest_start_date_str))
-
-    # *** CRITICAL*** Keep the full pre-start price history for the volatility,
-    # trend and overlay signals; only the executable fill calendar is clipped.
-    calendar_index = pricing_data_df.index[pricing_data_df.index >= calendar_start_ts]
-
-    strategy_obj = Beyond6040TrendTiltStrategy(
-        name=STRATEGY_NAME_STR,
-        trend_sma_lookback_int=config.trend_sma_lookback_int,
-        tilt_strength_float=config.tilt_strength_float,
-        trend_price_field_str=config.trend_price_field_str,
-        benchmarks=config.benchmark_list,
-        asset_list=config.asset_list,
-        asset_vol_lookback_int=config.asset_vol_lookback_int,
-        portfolio_vol_lookback_int=config.portfolio_vol_lookback_int,
-        target_portfolio_vol_float=config.target_portfolio_vol_float,
-        trigger_portfolio_vol_float=config.trigger_portfolio_vol_float,
-        capital_base=config.capital_base_float,
-        slippage=config.slippage_float,
-        commission_per_share=config.commission_per_share_float,
-        commission_minimum=config.commission_minimum_float,
-    )
+    context_dict = _build_analysis_context_dict(config, backtest_start_date_str=backtest_start_date_str)
+    strategy_obj = _build_strategy_obj(config)
 
     run_daily(
         strategy_obj,
-        pricing_data_df,
-        calendar=calendar_index,
+        context_dict["pricing_data_df"],
+        calendar=context_dict["calendar_idx"],
         show_progress=show_display_bool,
         show_signal_progress_bool=show_display_bool,
         audit_override_bool=None,

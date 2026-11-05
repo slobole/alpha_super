@@ -10,6 +10,7 @@ from typing import Any, Callable
 from types import SimpleNamespace
 
 from alpha.live import scheduler_utils, strategy_host
+from alpha.live.beyond6040_adapter import BEYOND6040_STRATEGY_IMPORT_STR
 from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR
 from alpha.live.flow_vote_adapter import FLOW_VOTE_STRATEGY_IMPORT_STR
 from alpha.live.daily_reconcile import DAILY_TERMINAL_STATUS_SET, is_daily_reconcile_release_bool
@@ -1428,11 +1429,12 @@ def _compute_doctor_verdict_impl(
         broker_position_map_dict=broker_snapshot_obj.position_amount_map,
     )
     try:
-        if release_obj.strategy_import_str in (CORE5_STRATEGY_IMPORT_STR, FLOW_VOTE_STRATEGY_IMPORT_STR):
+        if release_obj.strategy_import_str in (CORE5_STRATEGY_IMPORT_STR, FLOW_VOTE_STRATEGY_IMPORT_STR, BEYOND6040_STRATEGY_IMPORT_STR):
             # *** CRITICAL *** match the runner's frozen Close_T price contract.
-            # Later quotes must neither resize nor block CORE5's or the Flow Vote's frozen targets.
+            # Later quotes must neither resize nor block CORE5's, the Flow Vote's or Beyond 60/40's frozen targets.
             close_price_dict = dict(decision_plan_obj.snapshot_metadata_dict["sizing_close_price_map_dict"])
-            frozen_source_str = "core5.frozen_close_t" if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR else "flow_vote.frozen_close_t"
+            frozen_source_str = ("core5.frozen_close_t" if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR
+                else "beyond6040.frozen_close_t" if release_obj.strategy_import_str == BEYOND6040_STRATEGY_IMPORT_STR else "flow_vote.frozen_close_t")
             live_price_snapshot_obj = LivePriceSnapshot(
                 account_route_str=decision_plan_obj.account_route_str,
                 snapshot_timestamp_ts=decision_plan_obj.signal_timestamp_ts,

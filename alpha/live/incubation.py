@@ -175,6 +175,9 @@ class IncubationBrokerAdapter(BrokerAdapter):
     def get_flow_vote_account_snapshot(self, account_route_str: str, *, include_portfolio_valuation_bool: bool = False) -> BrokerSnapshot:
         return self.get_account_snapshot(account_route_str)
 
+    def get_beyond6040_account_snapshot(self, account_route_str: str, *, include_portfolio_valuation_bool: bool = False) -> BrokerSnapshot:
+        return self.get_account_snapshot(account_route_str)
+
     def get_live_price_snapshot(
         self,
         account_route_str: str,

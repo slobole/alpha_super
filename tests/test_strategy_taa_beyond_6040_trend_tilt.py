@@ -1,9 +1,11 @@
 import os
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
+import pytest
 
 TEST_NORGATEDATA_ROOT = Path(__file__).resolve().parents[1] / ".tmp_norgatedata"
 TEST_NORGATEDATA_ROOT.mkdir(exist_ok=True)
@@ -17,10 +19,11 @@ MODULE_IMPORT_STR = "strategies.taa_beyond_6040.strategy_taa_beyond_6040_trend_t
 ASSET_LIST = ["VTI", "GLD", "TLT"]
 
 
-def make_pricing_data_df(num_days_int: int = 420) -> pd.DataFrame:
+def make_pricing_data_df(num_days_int: int = 420, bil_inception_str: str | None = None) -> pd.DataFrame:
     """Synthetic VTI/GLD/TLT frame with a TotalReturnClose field per asset.
 
     VTI trends up (above its SMA), TLT trends down (below its SMA), GLD wobbles.
+    With ``bil_inception_str`` a BIL series exists from that date on (NaN before it, as Norgate's unpadded history).
     """
     date_index = pd.date_range("2022-01-03", periods=num_days_int, freq="B")
     bar_idx_vec = np.arange(num_days_int, dtype=float)
@@ -36,6 +39,9 @@ def make_pricing_data_df(num_days_int: int = 420) -> pd.DataFrame:
         "TLT": 110.0 * np.cumprod(1.0 + tlt_return_vec),
         "$SPX": 4000.0 * np.cumprod(1.0 + benchmark_return_vec),
     }
+    if bil_inception_str is not None:
+        bil_close_vec = 91.0 * np.cumprod(1.0 + np.full(num_days_int, 0.00015))
+        close_map_dict["BIL"] = np.where(date_index < pd.Timestamp(bil_inception_str), np.nan, bil_close_vec)
 
     pricing_data_dict: dict[tuple[str, str], np.ndarray] = {}
     for symbol_str, close_vec in close_map_dict.items():
@@ -64,6 +70,54 @@ def test_default_config_is_t1():
     assert tilt_module.DEFAULT_CONFIG.trend_sma_lookback_int == 210
     assert tilt_module.DEFAULT_CONFIG.tilt_strength_float == 0.5
     assert tilt_module.DEFAULT_CONFIG.asset_list == ("VTI", "GLD", "TLT")
+    assert tilt_module.DEFAULT_CONFIG.reserve_asset_str == "BIL"
+    assert tilt_module.DEFAULT_CONFIG.tradable_list == ["VTI", "GLD", "TLT", "BIL"]
+    assert tilt_module.DEFAULT_CONFIG.start_date_str == "2001-05-31"
+    with pytest.raises(ValueError):
+        replace(tilt_module.DEFAULT_CONFIG, reserve_asset_str="GLD")
+
+
+BIL_INCEPTION_STR = "2023-03-01"
+
+
+def test_bil_takes_the_residual_once_it_exists_and_cash_before():
+    pricing_data_df = make_pricing_data_df(bil_inception_str=BIL_INCEPTION_STR)
+    strategy_obj = run_fixture_strategy(pricing_data_df)
+    daily_weight_df = strategy_obj.daily_target_weights
+    assert list(daily_weight_df.columns) == ASSET_LIST + ["BIL", "Cash"]
+    assert np.allclose(daily_weight_df.sum(axis=1).to_numpy(dtype=float), 1.0, atol=1e-12)
+    risky_sum_ser = daily_weight_df[ASSET_LIST].sum(axis=1)
+    # The decision at Close_T applies to bar T+1: BIL's first observed close is the inception bar itself.
+    first_bil_bar_ts = pricing_data_df.index[pricing_data_df.index.get_loc(pd.Timestamp(BIL_INCEPTION_STR)) + 1]
+    before_df = daily_weight_df.loc[: pd.Timestamp(BIL_INCEPTION_STR)]
+    after_df = daily_weight_df.loc[first_bil_bar_ts:]
+    assert len(before_df) > 20 and len(after_df) > 20
+    assert (before_df["BIL"] == 0.0).all()
+    assert np.allclose(before_df["Cash"].to_numpy(dtype=float), (1.0 - risky_sum_ser.loc[before_df.index]).to_numpy(dtype=float), atol=1e-12)
+    assert (after_df["Cash"] == 0.0).all()
+    assert np.allclose(after_df["BIL"].to_numpy(dtype=float), (1.0 - risky_sum_ser.loc[after_df.index]).to_numpy(dtype=float), atol=1e-12)
+    assert (after_df["BIL"] > 0.0).any()
+    transaction_df = strategy_obj.get_transactions()
+    bil_transaction_df = transaction_df.loc[transaction_df["asset"] == "BIL"]
+    assert len(bil_transaction_df) > 0
+    assert pd.to_datetime(bil_transaction_df["bar"]).min() >= first_bil_bar_ts
+    assert (strategy_obj.results["total_value"] > 0).all()
+
+
+def test_bil_is_never_in_the_vol_weights_or_the_tilt():
+    with_bil_df = make_pricing_data_df(bil_inception_str=BIL_INCEPTION_STR)
+    without_bil_df = make_pricing_data_df()
+    with_bil_obj = run_fixture_strategy(with_bil_df)
+    signal_df = with_bil_obj.compute_signals(with_bil_df)
+    assert not any(col[0] == "BIL" and col[1] in ("base_weight_ser", "tilt_multiplier_ser", "volatility_ser", "trend_sma_ser") for col in signal_df.columns)
+    # The research convention (no reserve) on the same risk assets: identical risky weights and exposure every day.
+    with patch.object(tilt_module, "DEFAULT_CONFIG", replace(tilt_module.DEFAULT_CONFIG, reserve_asset_str=None)):
+        no_reserve_obj = run_fixture_strategy(without_bil_df)
+    assert list(no_reserve_obj.daily_target_weights.columns) == ASSET_LIST + ["Cash"]
+    pd.testing.assert_frame_equal(with_bil_obj.daily_target_weights[ASSET_LIST], no_reserve_obj.daily_target_weights[ASSET_LIST])
+    pd.testing.assert_series_equal(with_bil_obj.daily_exposure_ser, no_reserve_obj.daily_exposure_ser)
+    assert (no_reserve_obj.daily_target_weights["Cash"] > 0.0).any()
+    assert "BIL" not in set(no_reserve_obj.get_transactions()["asset"])
 
 
 def test_tilt_multiplier_is_zero_below_sma_and_one_above():

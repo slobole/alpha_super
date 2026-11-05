@@ -777,7 +777,7 @@ class LiveStateStore(CoreLiveStateStore):
             # A partial/missed rebalance is closed operationally but is not an
             # execution receipt. Replay can catch it up at the following open.
             target_dict = metadata_dict.get("fixed_target_share_map_dict")
-            for receipt_prefix_str in ("core5", "flow_vote"):
+            for receipt_prefix_str in ("core5", "flow_vote", "beyond6040"):
                 candidate_receipt_dict = metadata_dict.get(f"{receipt_prefix_str}_candidate_execution_receipt_dict")
                 if candidate_receipt_dict is not None and target_dict is not None:
                     actual_dict = broker_snapshot_obj.position_amount_map
@@ -1000,6 +1000,7 @@ class LiveStateStore(CoreLiveStateStore):
 
     def insert_vplan(self, vplan_obj: VPlan) -> VPlan:
         from alpha.live.mr_capsule_adapter import MR_CAPSULE_CONTRACT_STR
+        from alpha.live.beyond6040_adapter import BEYOND6040_CONTRACT_STR
         from alpha.live.core5_adapter import CORE5_CONTRACT_STR
         from alpha.live.flow_vote_adapter import FLOW_VOTE_CONTRACT_STR
 
@@ -1038,7 +1039,7 @@ class LiveStateStore(CoreLiveStateStore):
                 decision_row_obj["snapshot_metadata_json_str"]
             ).get("sizing_contract_str") == MR_CAPSULE_CONTRACT_STR
             frozen_share_bool = decision_row_obj is not None and json.loads(
-                decision_row_obj["snapshot_metadata_json_str"]).get("sizing_contract_str") in (CORE5_CONTRACT_STR, FLOW_VOTE_CONTRACT_STR)
+                decision_row_obj["snapshot_metadata_json_str"]).get("sizing_contract_str") in (CORE5_CONTRACT_STR, FLOW_VOTE_CONTRACT_STR, BEYOND6040_CONTRACT_STR)
             if capsule_bool or frozen_share_bool or (decision_row_obj is not None and json.loads(
                     decision_row_obj["snapshot_metadata_json_str"]).get("sizing_contract_str") == DV2_IND_SIZING_CONTRACT_STR):
                 # Serialize creation with abandonment and another worker's creation.
@@ -1212,6 +1213,7 @@ class LiveStateStore(CoreLiveStateStore):
 
     def claim_vplan_for_submission(self, vplan_id_int: int) -> bool:
         from alpha.live.mr_capsule_adapter import MR_CAPSULE_CONTRACT_STR
+        from alpha.live.beyond6040_adapter import BEYOND6040_CONTRACT_STR
         from alpha.live.core5_adapter import CORE5_CONTRACT_STR
         from alpha.live.flow_vote_adapter import FLOW_VOTE_CONTRACT_STR
 
@@ -1231,7 +1233,7 @@ class LiveStateStore(CoreLiveStateStore):
                 decision_row_obj["snapshot_metadata_json_str"]
             ).get("sizing_contract_str") == MR_CAPSULE_CONTRACT_STR
             frozen_share_bool = decision_row_obj is not None and json.loads(
-                decision_row_obj["snapshot_metadata_json_str"]).get("sizing_contract_str") in (CORE5_CONTRACT_STR, FLOW_VOTE_CONTRACT_STR)
+                decision_row_obj["snapshot_metadata_json_str"]).get("sizing_contract_str") in (CORE5_CONTRACT_STR, FLOW_VOTE_CONTRACT_STR, BEYOND6040_CONTRACT_STR)
             if capsule_bool or frozen_share_bool or (decision_row_obj is not None and json.loads(
                     decision_row_obj["snapshot_metadata_json_str"]).get("sizing_contract_str") == DV2_IND_SIZING_CONTRACT_STR):
                 connection_obj.execute("BEGIN IMMEDIATE")

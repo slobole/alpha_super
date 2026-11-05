@@ -1,4 +1,4 @@
-"""Daily settlement (CORE5, capsules, DV2-IND, Flow Vote) from fresh holdings and all-client open orders.
+"""Daily settlement (CORE5, capsules, DV2-IND, Flow Vote, Beyond 60/40) from fresh holdings and all-client open orders.
 
 Fills are reporting records. They never determine whether this cycle can close.
 """
@@ -8,6 +8,7 @@ import json
 import math
 
 from alpha.live import scheduler_utils
+from alpha.live.beyond6040_adapter import BEYOND6040_CONTRACT_STR, BEYOND6040_STRATEGY_IMPORT_STR
 from alpha.live.core5_adapter import CORE5_CONTRACT_STR, CORE5_STRATEGY_IMPORT_STR
 from alpha.live.execution_engine import build_broker_order_request_list_from_vplan
 from alpha.live.models import BrokerOrderRequest, BrokerSnapshot
@@ -17,9 +18,11 @@ from alpha.live.mr_capsule_adapter import MR_CAPSULE_STRATEGY_IMPORT_TUPLE
 
 
 DAILY_TERMINAL_STATUS_SET = {"completed", "completed_with_exceptions"}
-DAILY_STRATEGY_IMPORT_TUPLE = (*MR_CAPSULE_STRATEGY_IMPORT_TUPLE, DV2_IND_STRATEGY_IMPORT_STR, FLOW_VOTE_STRATEGY_IMPORT_STR, CORE5_STRATEGY_IMPORT_STR)
+# CORE5 stays last: the V4 demo reads the CORE5 import string from the tuple's end.
+DAILY_STRATEGY_IMPORT_TUPLE = (*MR_CAPSULE_STRATEGY_IMPORT_TUPLE, DV2_IND_STRATEGY_IMPORT_STR, FLOW_VOTE_STRATEGY_IMPORT_STR,
+    BEYOND6040_STRATEGY_IMPORT_STR, CORE5_STRATEGY_IMPORT_STR)
 QUANTITY_TOLERANCE_FLOAT = 1e-9
-FROZEN_SHARE_CONTRACT_SET = frozenset({CORE5_CONTRACT_STR, FLOW_VOTE_CONTRACT_STR})
+FROZEN_SHARE_CONTRACT_SET = frozenset({CORE5_CONTRACT_STR, FLOW_VOTE_CONTRACT_STR, BEYOND6040_CONTRACT_STR})
 # A closing-auction cycle settles after the auction prints, never at the close bell itself.
 MOC_SETTLEMENT_GRACE_SECONDS_INT = 300
 

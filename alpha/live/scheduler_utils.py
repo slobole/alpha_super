@@ -31,6 +31,7 @@ import pandas as pd
 from alpha.live.models import LiveRelease
 from data.dv2_ind_snapshot_contract import DV2_IND_PROFILE_STR
 from data.momentum_legs_snapshot_contract import MOMENTUM_LEGS_NDX_PROFILE_STR, MOMENTUM_LEGS_R1000_PROFILE_STR
+from data.beyond6040_snapshot_contract import BEYOND6040_PROFILE_STR
 from data.flow_vote_snapshot_contract import FLOW_VOTE_PROFILE_STR
 from data.norgate_loader import is_snapshot_mode_enabled_bool, load_latest_snapshot_session_label_ts
 from data.norgate_snapshot_store import CORE5_PROFILE_STR, MR_CAPSULE_DV2_PROFILE_STR, MR_CAPSULE_HPI_PROFILE_STR, NDX_E2_PROFILE_STR
@@ -64,6 +65,7 @@ DATA_PROFILE_HEARTBEAT_SYMBOL_MAP: dict[str, str] = {
     MOMENTUM_LEGS_NDX_PROFILE_STR: "$SPX",
     MOMENTUM_LEGS_R1000_PROFILE_STR: "$SPX",
     CORE5_PROFILE_STR: "$SPX",
+    BEYOND6040_PROFILE_STR: "$SPX",
     MR_CAPSULE_DV2_PROFILE_STR: "$SPX",
     MR_CAPSULE_HPI_PROFILE_STR: "$SPX",
     "norgate_eod_sp500_pit": "$SPX",

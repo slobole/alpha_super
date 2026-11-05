@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from dataclasses import replace
 import json
 
+from alpha.live.beyond6040_adapter import BEYOND6040_STRATEGY_IMPORT_STR
 from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR
 from alpha.live.dv2_ind_adapter import DV2_IND_STRATEGY_IMPORT_STR
 from alpha.live.flow_vote_adapter import FLOW_VOTE_STRATEGY_IMPORT_STR
@@ -11,7 +12,8 @@ from alpha.live.mr_capsule_adapter import MR_CAPSULE_STRATEGY_IMPORT_TUPLE
 
 
 def is_guarded_release_bool(release_obj):
-    return (release_obj.strategy_import_str in (CORE5_STRATEGY_IMPORT_STR, DV2_IND_STRATEGY_IMPORT_STR, FLOW_VOTE_STRATEGY_IMPORT_STR)
+    return (release_obj.strategy_import_str in (CORE5_STRATEGY_IMPORT_STR, DV2_IND_STRATEGY_IMPORT_STR, FLOW_VOTE_STRATEGY_IMPORT_STR,
+            BEYOND6040_STRATEGY_IMPORT_STR)
         or release_obj.strategy_import_str in MR_CAPSULE_STRATEGY_IMPORT_TUPLE)
 
 

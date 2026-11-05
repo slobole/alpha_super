@@ -117,6 +117,9 @@ def test_supported_deployment_strategies_expose_auto_reference_contract():
         elif strategy_import_str == "strategies.taa_beyond_6040.strategy_taa_month_end_flow_vote":
             assert support_dict["supported_bool"] is False
             assert support_dict["reason_str"] == "flow_vote_accounting_bridge_required"
+        elif strategy_import_str == "strategies.taa_beyond_6040.strategy_taa_beyond_6040_trend_tilt":
+            assert support_dict["supported_bool"] is False
+            assert support_dict["reason_str"] == "beyond6040_accounting_bridge_required"
         else:
             assert support_dict["supported_bool"] is True
         assert support_dict["missing_parameter_list"] == []
