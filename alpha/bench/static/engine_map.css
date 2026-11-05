@@ -347,3 +347,8 @@
 .emap text.neg { fill: var(--color-loss); }
 .emap .spark .fz, .emap .chart .fz { stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 3 3; opacity: .55; }
 .emap .spark .lv, .emap .chart .lv { stroke: var(--ink-2); stroke-width: 1; opacity: .6; }
+/* cluster colours: one per group of strategies that move together, grey for one on its own */
+.emap { --k1: var(--color-cluster-1); --k2: var(--color-cluster-2); --k3: var(--color-cluster-3); --k4: var(--color-cluster-4); --k0: color-mix(in srgb, var(--color-muted) 70%, var(--color-page)); }
+.emap .ckey { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; }
+.emap .ckey > span { display: inline-flex; align-items: center; gap: 6px; }
+.emap .ckey i { width: 10px; height: 10px; border-radius: 50%; background: var(--c); display: inline-block; }

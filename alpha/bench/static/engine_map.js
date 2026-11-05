@@ -210,7 +210,7 @@ function heatCell(v, cap, text, tipText) {
 }
 const tipAttr = (text) => text ? ` data-tip="${esc(text)}"` : '';
 const plainCell = (text, tipText) => `<td class="plain"${tipAttr(tipText)}>${esc(text)}</td>`;
-const nameCell = (e) => `<td class="n${e.stage === 'LIVE' ? ' live' : ''}"${tipAttr(e.sub)}><span class="dot s s-${stageKey(e.stage)}"></span>${eName(e)}</td>`;
+const nameCell = (e) => `<td class="n${e.stage === 'LIVE' ? ' live' : ''}"${tipAttr(e.sub)}><span class="dot s s-${stageKey(e.stage)}"${cc(e)}></span>${eName(e)}</td>`;
 const sharpeText = (s, e) => s.sharpe != null ? num(s.sharpe) : s.n < SHARPE_MIN ? 'Too few days' : e && e.parked ? 'In cash' : 'Too flat';
 const sharpeTip = (e, s) => {
   if (s.sharpe != null) return '';
@@ -244,6 +244,15 @@ function sessionsBehind() {
   for (let t = Date.parse(D.asOf) + 864e5; t < today; t += 864e5) { const day = new Date(t).getUTCDay(); if (day > 0 && day < 6) n++; }
   return n;
 }
+function renderKey() {
+  const ink = ' style="--c:var(--ink-2)"';
+  const shapes = [['LIVE', '<circle cx="6" cy="6" r="5.5" fill="var(--c)"/>'], ['WIRED', '<circle cx="6" cy="6" r="4.5" fill="var(--c)"/>'], ['PM READY', '<circle cx="6" cy="6" r="4.5" fill="var(--surface)" stroke="var(--c)" stroke-width="2"/>'], ['CANDIDATE', '<circle cx="6" cy="6" r="4.5" fill="var(--surface)" stroke="var(--c)" stroke-width="1.5" stroke-dasharray="2 2"/>']]
+    .map(([s, mark]) => `<span${ink}${tipAttr(stageTip(s))}><svg width="12" height="12" aria-hidden="true">${mark}</svg>${esc(stageWord(s))}</span>`).join('');
+  const colours = CGROUPS.slice().sort((p, q) => p.k - q.k).map((g) => `<span style="--c:var(--k${g.k})"${tipAttr(g.members.map((i) => E[i].name).join(', '))}><i></i>${esc(g.name)}</span>`).join('') +
+    `<span style="--c:var(--k0)"${tipAttr('On its own at this cut, or past the fourth group. Move the slider under "Which strategies are really the same bet?" to change the cut.')}><i></i>Other</span>`;
+  const html = `<span class="ckey"${tipAttr(`Colour: the group it moves with over the whole history, at a correlation of ${cutValue.toFixed(2)}. Shape: its stage.`)}>${colours}</span><span class="ckey">${shapes}</span>`;
+  $('mapkey').innerHTML = html;
+}
 function renderHeader() {
   const behind = sessionsBehind();
   $('asof').innerHTML = esc(`Last close ${shortLabel(D.asOf)}, updated ${D.built}`) + (behind >= 2 ? ` <span class="ttag" style="position:static">${esc(`Data ${behind} sessions old`)}</span>` : '');
@@ -257,9 +266,7 @@ function renderHeader() {
   $('n-all').textContent = E.length;
   if (D.scopeNote) $('t-all').dataset.tip = D.scopeNote;
   [['live', 'LIVE'], ['wired', 'WIRED'], ['pm', 'PM READY'], ['cand', 'CANDIDATE']].forEach(([k, s]) => { $(`n-${k}`).textContent = E.filter((e) => stageKey(e.stage) === k).length; if (stageTip(s)) $(`t-${k}`).dataset.tip = stageTip(s); });
-  $('mapkey').innerHTML = [['live', 'LIVE', '<circle cx="6" cy="6" r="5.5" fill="var(--c)"/>'], ['wired', 'WIRED', '<circle cx="6" cy="6" r="5" fill="var(--c)"/>'], ['pm', 'PM READY', '<circle cx="6" cy="6" r="4.5" fill="var(--surface)" stroke="var(--c)" stroke-width="2"/>']]
-    .map(([k, s, mark]) => `<span class="s-${k}"${tipAttr(stageTip(s))}><svg width="12" height="12" aria-hidden="true">${mark}</svg>${esc(stageWord(s))}</span>`).join('') +
-    `<span class="s-cand"${tipAttr(stageTip('CANDIDATE'))}><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="4.5" fill="var(--surface)" stroke="var(--c)" stroke-width="1.5" stroke-dasharray="2 2"/></svg>${esc(stageWord('CANDIDATE'))}</span>`;
+  renderKey();
   $('foot').innerHTML = esc(`Backtests, ${periodWords()} to ${shortLabel(D.asOf)}. After trading costs, before fund fees. Idle cash earns T-bills less 0.5%; that rate is held at its Aug 19 value. Sharpe is over T-bills. Through Aug 19, 2026 the history is the fund study's, then fresh runs of the same rules. Flow Vote and the SPMO versions: their own research runs. TAA before Oct 2012 is a proxy run, with stand-in funds until they listed in 2010-11. Factors: ${factorSpan()}. Shown where t is at least 2.`) + (D.scopeNote ? `<div>${esc(D.scopeNote)}</div>` : '') + (D.leftOut ? `<div>${esc(D.leftOut)}</div>` : '') + (D.offMap.length ? `<div>${esc(`Not on this map yet: ${D.offMap.map((s) => (D.offMapWhy && D.offMapWhy[s] ? `${D.offMapWhy[s].name} (${D.offMapWhy[s].why})` : s.replace(/^strategy_/, '').replace(/_/g, ' '))).join('; ')}.`)}</div>` : '') +
     ((D.candidatesOff || []).length ? `<div>${esc(`Scout candidates not on this map: ${D.candidatesOff.map((c) => `${c.name} (${c.why})`).join('; ')}.`)}</div>` : '');
   $('yearstitle').innerHTML = esc('Every engine, every year, every QQQ fall');
@@ -379,7 +386,7 @@ function renderMap() {
   if (!mapNodes || mapNodes.W !== W || mapNodes.H !== H) {
     const nodes = E.map((e) => {
       const hollow = chipClass(e.stage) === 'PM';
-      return `<g class="mover pt s-${stageKey(e.stage)}" data-open="${e.id}" data-hover="${e.id}" tabindex="0" role="button" aria-label="${esc(e.name)}"><circle class="hit" r="16"/><circle class="mk" r="${rOf(e)}" style="fill:${hollow ? 'var(--surface)' : 'var(--c)'};stroke:${hollow ? 'var(--c)' : 'var(--surface)'}" stroke-width="2.5"/></g><text class="mover lbl${e.stage === 'LIVE' ? ' live' : ''}" data-lbl="${e.id}" data-open="${e.id}" data-hover="${e.id}">${esc(e.name)}</text>`;
+      return `<g class="mover pt s-${stageKey(e.stage)}"${cc(e)} data-open="${e.id}" data-hover="${e.id}" tabindex="0" role="button" aria-label="${esc(e.name)}"><circle class="hit" r="16"/><circle class="mk" r="${rOf(e)}" style="fill:${hollow ? 'var(--surface)' : 'var(--c)'};stroke:${hollow ? 'var(--c)' : 'var(--surface)'}" stroke-width="2.5"/></g><text class="mover lbl${e.stage === 'LIVE' ? ' live' : ''}" data-lbl="${e.id}" data-open="${e.id}" data-hover="${e.id}">${esc(e.name)}</text>`;
     }).join('');
     box.innerHTML = `<svg class="noanim" viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="Return against worst fall for each engine"><g id="m-grid"></g><g id="m-leaders"></g><g id="m-refs"></g><g id="m-pts">${nodes}</g></svg>`;
     mapNodes = { W, H }; fresh = true;
@@ -497,7 +504,7 @@ function tileHTML(e, scale) {
   const s = e.s;
   if (!s) return `<button class="panel tile nodata" data-open="${e.id}" data-hover="${e.id}" aria-label="${esc(e.name)}, ${esc(chipWord(e))}: no data in this period"><div class="thead"><span class="tname">${eName(e)}</span>${chipFor(e)}</div><div class="tsub">${esc(e.sub)}</div><div class="tempty">No data in this period</div></button>`;
   const words = tileTag(e), tag = words ? `<div class="ttag"${tipAttr(words)}>${esc(words)}</div>` : '';
-  return `<button class="panel tile" data-open="${e.id}" data-hover="${e.id}" aria-label="${esc(e.name)}, ${esc(chipWord(e))}: ${pct(s.ret)} ${wordOf(s)}, Sharpe ${sharpeText(s, e)}, ${pct(s.dd)} Max DD${words ? `. ${esc(words)}` : ''}">` +
+  return `<button class="panel tile"${cc(e)} data-open="${e.id}" data-hover="${e.id}" aria-label="${esc(e.name)}, ${esc(chipWord(e))}: ${pct(s.ret)} ${wordOf(s)}, Sharpe ${sharpeText(s, e)}, ${pct(s.dd)} Max DD${words ? `. ${esc(words)}` : ''}">` +
     `<div class="thead"><span class="tname">${eName(e)}</span>${chipFor(e)}</div><div class="tsub">${esc(e.sub)}</div><div class="sparkwrap">${chartHTML(e, scale)}${tag}</div>` +
     `<div class="nums"><div><b${s.ret < 0 ? ' class="neg"' : ''}>${pct(s.ret)}</b><span>${wordOf(s)}</span></div><div><b${sharpeTip(e, s)}>${sharpeText(s, e)}</b><span>Sharpe</span></div><div><b${s.dd < 0 ? ' class="neg"' : ''}>${pct(s.dd)}</b><span>Max DD</span></div></div></button>`;
 }
@@ -545,7 +552,7 @@ const parkedFlat = (e) => e.parked && e.s.sharpe == null;
 const nowCol = (name, key) => [name, (e) => nowStale(e, key) ? null : e.now[key], (e) => nowStale(e, key) ? '<small>no data</small>' : pct(e.now[key]), (e) => e.lastI < LAST ? tipAttr(staleTip(e, key)) : ''];
 // each column: name, sort key (null sorts last either way), cell, cell attributes, tip on its head
 const COLS = [
-  ['Strategy', (e) => e.name, (e) => `<span class="dot s s-${stageKey(e.stage)}"></span>${esc(e.name)}`, (e) => tipAttr(e.sub)],
+  ['Strategy', (e) => e.name, (e) => `<span class="dot s s-${stageKey(e.stage)}"${cc(e)}></span>${esc(e.name)}`, (e) => tipAttr(e.sub)],
   ['Stage', (e) => stages.indexOf(e.stage), (e) => chipFor(e), null, D.stageHeadTip],
   ['Scout', (e) => e.card && e.card.verdict ? VERDICTS.indexOf(e.card.verdict) : e.gradeOnly ? VERDICTS.indexOf(e.gradeOnly.verdict) : null, (e) => !e.card ? `<small>${esc(e.gradeOnly ? e.gradeOnly.word : 'No Scout card')}</small>` : e.card.verdict ? verdictWord(e.card.verdict) : '<small>Not tested</small>', (e) => tipAttr(e.card ? cardOf(e) : e.cardNote), D.scoutTip],
   ['CAGR', (e) => e.s ? e.s.ret : null, (e) => e.s ? retCell(e.s) : '<small>No data</small>', (e) => e.s ? '' : tipAttr('No data in this period.')],
@@ -775,7 +782,7 @@ function renderSim() {
   const dots = E.map((e, i) => {
     if (!simOn[i]) return '';
     const hollow = chipClass(e.stage) === 'PM', state = (shows(e) ? '' : ' dim') + (e.parked ? ' parked' : '');
-    return `<g class="pt s-${stageKey(e.stage)}${state}" data-open="${e.id}" data-hover="${e.id}" tabindex="0" role="button" aria-label="${esc(e.name)}"><circle class="hit" cx="${pts[i][0]}" cy="${pts[i][1]}" r="16"/><circle class="mk" cx="${pts[i][0]}" cy="${pts[i][1]}" r="${rOf(e)}" style="fill:${hollow ? 'var(--surface)' : 'var(--c)'};stroke:${hollow ? 'var(--c)' : 'var(--surface)'}" stroke-width="2.5"/></g><text class="lbl${e.stage === 'LIVE' ? ' live' : ''}${state}" data-open="${e.id}" data-hover="${e.id}" x="${labels[i].x}" y="${labels[i].y}">${esc(e.name)}</text>`;
+    return `<g class="pt s-${stageKey(e.stage)}${state}"${cc(e)} data-open="${e.id}" data-hover="${e.id}" tabindex="0" role="button" aria-label="${esc(e.name)}"><circle class="hit" cx="${pts[i][0]}" cy="${pts[i][1]}" r="16"/><circle class="mk" cx="${pts[i][0]}" cy="${pts[i][1]}" r="${rOf(e)}" style="fill:${hollow ? 'var(--surface)' : 'var(--c)'};stroke:${hollow ? 'var(--c)' : 'var(--surface)'}" stroke-width="2.5"/></g><text class="lbl${e.stage === 'LIVE' ? ' live' : ''}${state}" data-open="${e.id}" data-hover="${e.id}" x="${labels[i].x}" y="${labels[i].y}">${esc(e.name)}</text>`;
   }).join('');
   box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="Engines by how much they move together">${hulls}${pairs}${lines}${glabels}<g id="s-hover"></g>${dots}<text class="axis-t" x="${capX}" y="${H - 8}">${esc(caption)}</text></svg>`;
   // wider than its box, it opens on its middle, where the groups are; after that the place is the reader's
@@ -825,7 +832,7 @@ function renderCorr() {
   let names = '', s = '';
   order.forEach((id, k) => {
     const a = E[id], y = TOP + k * CELL, on = (a.stage === 'LIVE' ? ' live' : '') + (shows(a) && simOn[id] ? '' : ' dim');
-    names += `<g class="s-${stageKey(a.stage)}${shows(a) && simOn[id] ? '' : ' dim'}"><circle cx="8" cy="${y + CELL / 2 - 1}" r="4.5" style="fill:${chipClass(a.stage) === 'PM' ? 'var(--surface)' : 'var(--c)'};stroke:var(--c);stroke-width:1.5"/></g><text class="rowl${on}" data-r="${id}" data-open="${a.id}"${tipAttr(a.sub)} x="${LABEL - 8}" y="${y + CELL / 2 + 4}" text-anchor="end">${esc(a.name)}</text>`;
+    names += `<g class="s-${stageKey(a.stage)}${shows(a) && simOn[id] ? '' : ' dim'}"${cc(a)}><circle cx="8" cy="${y + CELL / 2 - 1}" r="4.5" style="fill:${chipClass(a.stage) === 'PM' ? 'var(--surface)' : 'var(--c)'};stroke:var(--c);stroke-width:1.5"/></g><text class="rowl${on}" data-r="${id}" data-open="${a.id}"${tipAttr(a.sub)} x="${LABEL - 8}" y="${y + CELL / 2 + 4}" text-anchor="end">${esc(a.name)}</text>`;
     s += `<text class="rowl${on}" data-c="${id}" data-open="${a.id}"${tipAttr(a.sub)} transform="translate(${k * CELL + CELL / 2 + 3},${TOP - 8}) rotate(-52)">${esc(a.name)}</text>`;
     order.forEach((jd, j) => {
       if (!simOn[id] || !simOn[jd]) return;
@@ -844,9 +851,25 @@ function renderCorr() {
   $('corrnote').textContent = fewWeeks() ? `Whole history: ${plural(windowWeeks(), 'week')} is too short.` : '';
   $('corrbox').innerHTML = `<div class="corrparts" role="img" aria-label="Weekly correlation between engines, by cluster">${part(TREEW, treePart)}${part(LABEL, names, 'corrnames')}${part(SW, s)}</div>`;
 }
+// Each group's colour follows its main type, so the momentum group stays one colour as the slider moves; a second group of
+// one type takes a free colour; past four groups, and alone, grey. The whole history, so a period never repaints.
+const FAM_SLOT = { rotation: 1, momentum: 2, dips: 3, macro: 4 };
+let CC = {}, CGROUPS = [];
+function paintClusters() {
+  const groups = betGroups(TREE_ALL).filter((g) => g.length > 1).sort((p, q) => q.length - p.length || p[0] - q[0]);
+  const used = new Set(), slotOf = new Map();
+  groups.forEach((g) => { const fam = majorityFamily(g), f = FAM.find((x) => x.name === fam), k = f && FAM_SLOT[f.id]; if (k && !used.has(k)) { used.add(k); slotOf.set(g, k); } });
+  groups.forEach((g) => { if (slotOf.has(g)) return; const k = [1, 2, 3, 4].find((x) => !used.has(x)); if (k) { used.add(k); slotOf.set(g, k); } });
+  CC = Object.fromEntries(E.map((e) => [e.id, 'var(--k0)']));
+  // a small group reads by its members, a large one by its main type
+  CGROUPS = groups.filter((g) => slotOf.has(g)).map((g) => ({ k: slotOf.get(g), members: g, name: g.length <= 3 ? g.map((i) => E[i].name).join(', ') : `${majorityFamily(g)} group` }));
+  CGROUPS.forEach((g) => g.members.forEach((i) => { CC[E[i].id] = `var(--k${g.k})`; }));
+}
+const ccOf = (e) => CC[e.id] || 'var(--k0)';
+const cc = (e) => ` style="--c:${ccOf(e)}"`;
 function setCutFill() { $('b-cut').style.setProperty('--fill', ((cutValue - 0.2) / 0.7 * 100) + '%'); }
 function renderBets() { computeCorr(); computeCoords(); renderBetStats(); renderSim(); renderCorr(); }
-function renderCut() { renderBetStats(); renderSim(); renderCorr(); if (groupMode === 'cluster') renderTiles(); }
+function renderCut() { paintClusters(); renderKey(); renderBetStats(); renderSim(); renderCorr(); renderMap(); renderNow(); renderTiles(); renderStress(); if (!$('tableview').hidden) renderTable(); }
 
 /* calm and stress: all history, weekly. Stress is a week that ends with QQQ 10%+ below its peak, or one of QQQ's worst 10% of weeks */
 const QW = weeklyOf(QQQ);
@@ -910,7 +933,7 @@ function renderStress() {
   list.forEach((r, k) => {
     const e = E[r.i], y = TOP + k * RH + RH / 2, dim = shows(e) ? '' : ' dim';
     const cTip = `${e.name}, correlation with QQQ: calm ${corrWord(r.c)}, stress ${corrWord(r.s)} on ${plural(r.s.n, 'week')}, noise about ±${(2 / Math.sqrt(Math.max(1, r.s.n))).toFixed(2)}`;
-    s += `<g class="s-${stageKey(e.stage)}${dim}"><circle cx="8" cy="${y}" r="4.5" style="fill:${chipClass(e.stage) === 'PM' ? 'var(--surface)' : 'var(--c)'};stroke:var(--c);stroke-width:1.5"/></g>`;
+    s += `<g class="s-${stageKey(e.stage)}${dim}"${cc(e)}><circle cx="8" cy="${y}" r="4.5" style="fill:${chipClass(e.stage) === 'PM' ? 'var(--surface)' : 'var(--c)'};stroke:var(--c);stroke-width:1.5"/></g>`;
     s += `<text class="rowl${e.stage === 'LIVE' ? ' live' : ''}${dim}" data-open="${e.id}"${tipAttr(e.sub)} x="${NAME - 10}" y="${y + 4}" text-anchor="end">${esc(e.name)}</text>`;
     s += `<g class="${dim.trim()}">`;
     if (!Number.isNaN(r.s.v)) { const nz = 2 / Math.sqrt(r.s.n), lo = Math.max(CLO, r.s.v - nz), hiv = Math.min(1, r.s.v + nz); s += `<rect class="k-noise" x="${cx(lo)}" y="${y - 7}" width="${cx(hiv) - cx(lo)}" height="14" rx="3"/>`; }
@@ -942,7 +965,7 @@ function renderStress() {
     const e = E[r.i], y = TTOP + k * RH + RH / 2, dim = shows(e) ? '' : ' dim';
     const noise = 2 * Math.sqrt(0.1 * 0.9 / r.n);
     const tTip = `${e.name}: in ${r.hit} of QQQ's ${plural(r.n, 'worst week')} it had one of its own. Unrelated moves would give about 10%, ±${Math.round(noise * 100)}% from noise.`;
-    g += `<g class="s-${stageKey(e.stage)}${dim}"><circle cx="8" cy="${y}" r="4.5" style="fill:${chipClass(e.stage) === 'PM' ? 'var(--surface)' : 'var(--c)'};stroke:var(--c);stroke-width:1.5"/></g>`;
+    g += `<g class="s-${stageKey(e.stage)}${dim}"${cc(e)}><circle cx="8" cy="${y}" r="4.5" style="fill:${chipClass(e.stage) === 'PM' ? 'var(--surface)' : 'var(--c)'};stroke:var(--c);stroke-width:1.5"/></g>`;
     g += `<text class="rowl${e.stage === 'LIVE' ? ' live' : ''}${dim}" data-open="${e.id}"${tipAttr(e.sub)} x="${TNAME - 10}" y="${y + 4}" text-anchor="end">${esc(e.name)}</text>`;
     g += `<g class="${dim.trim()}"><rect x="${t0}" y="${y - 6}" width="${Math.max(1, tx(r.share) - t0)}" height="12" rx="2" fill="var(${r.share > 0.1 + noise ? '--neg' : '--ink-3'})" opacity="${r.share > 0.1 + noise ? '.85' : '.45'}"${tipAttr(tTip)}/>`;
     g += `<text class="axis-t" x="${TW - 4}" y="${y + 4}" text-anchor="end">${Math.round(r.share * 100)}% of ${r.n}</text></g>`;
@@ -1305,6 +1328,7 @@ function lockPage(on) {
 }
 function openDrawer(id) {
   const e = byId[id]; if (!e) return;
+  $('drawer').style.setProperty('--c', ccOf(e));
   const a = winA(), s = e.s, dr = $('drawer'), ei = E.indexOf(e), firstOpen = dr.hidden, same = openId === id, had = document.activeElement, top = same ? dr.scrollTop : 0, cmp = same ? compareId : '';
   // walking redraws the drawer: focus stays on the control in use, or goes to Close when that control is gone
   const keep = !had || !dr.contains(had) ? null : had.dataset.step ? `[data-step="${had.dataset.step}"]` : had.id ? `#${had.id}` : '.dclose';
@@ -1314,7 +1338,7 @@ function openDrawer(id) {
   const versions = e.versions.length ? `<div class="dsec"><h4>Other versions</h4><table class="mini"><thead><tr><th aria-label="Version"></th><th>${retWord()}</th><th>Sharpe</th><th>Max DD</th><th>Since</th></tr></thead><tbody>${e.versions.map((v) => { const st = statsOf(R[v.key], a, LAST); let first = 0; while (first < N && Number.isNaN(R[v.key][first])) first++; return st ? `<tr><td>${esc(v.name)}</td><td>${retCell(st)}</td><td>${sharpeText(st)}</td><td>${pct(st.dd)}</td><td>${YEAR[first]}</td></tr>` : ''; }).join('')}</tbody></table></div>` : '';
   const options = ['<option value="">Compare with</option>'].concat(E.filter((o) => o.id !== id).map((o) => `<option value="${o.id}"${cmp === o.id ? ' selected' : ''}>${esc(o.name)}</option>`)).join('');
   // the whole text first: a bad field leaves the page as it was
-  const html = `<div class="dhead"><span class="dot s-${stageKey(e.stage)}"></span><h2>${eName(e)}</h2>${chipFor(e)}<div class="dnav"><button class="dstep" data-step="-1">Previous</button><button class="dstep" data-step="1">Next</button><button class="dclose" data-close="1">Close</button></div></div>` +
+  const html = `<div class="dhead"><span class="dot s-${stageKey(e.stage)}"${cc(e)}></span><h2>${eName(e)}</h2>${chipFor(e)}<div class="dnav"><button class="dstep" data-step="-1">Previous</button><button class="dstep" data-step="1">Next</button><button class="dclose" data-close="1">Close</button></div></div>` +
     `<div class="dwords">${esc(e.words)}</div>` +
     (s ? `<div><div class="dstats"><div><b>${pct(s.ret)}</b><span>${wordOf(s)}</span></div><div><b${sharpeTip(e, s)}>${sharpeText(s, e)}</b><span>Sharpe</span></div><div><b>${pct(s.dd)}</b><span>Max DD</span></div><div><b>${pct(s.vol)}</b><span>Vol</span></div></div><div class="dfine">${esc(`Backtest, ${periodWords()} to ${shortLabel(e.end)}`)}</div></div>` : `<div class="dfine">No data in this period</div>`) +
     (e.used.length ? `<div class="dsec"><h4>In portfolios</h4><div class="pills"${tipAttr(D.portfolioTip)}>${e.used.map((u) => (presetNamed(u.p) ? `<button class="pill" data-pill="${esc(u.p)}">${esc(u.p)} <b>${u.w}%</b></button>` : `<span class="pill">${esc(u.p)} <b>${u.w}%</b></span>`)).join('')}</div></div>` : '') +
@@ -1587,7 +1611,7 @@ function renderMix() {
   const rest = (x) => `${x.gain == null ? '' : `${minus(x.gain, 0)}% of return, `}${(x.w * 100).toFixed(0)}% of money`;
   $('m-risk').innerHTML = thin ? '' : st.shares.filter((x) => x.share > 0.3).map((x) => `<i class="c-${x.e.fam}" style="flex:${x.share.toFixed(1)} 0 0" data-tip="${esc(x.e.name)}: ${minus(x.share, 0)}% of risk, ${rest(x)}"></i>`).join('');
   // only money shows under a quarter of weeks, so money sets the order
-  $('m-risklist').innerHTML = (thin ? st.shares.slice().sort((p, q) => q.w - p.w) : st.shares).map((x) => `<span data-open="${x.e.id}"${tipAttr(x.e.sub)}><span class="dot s s-${stageKey(x.e.stage)}"></span>${eName(x.e)} ${thin ? `${(x.w * 100).toFixed(0)}% of money` : `<b>${minus(x.share, 0)}%</b> of risk, ${rest(x)}`}</span>`).join('');
+  $('m-risklist').innerHTML = (thin ? st.shares.slice().sort((p, q) => q.w - p.w) : st.shares).map((x) => `<span data-open="${x.e.id}"${tipAttr(x.e.sub)}><span class="dot s s-${stageKey(x.e.stage)}"${cc(x.e)}></span>${eName(x.e)} ${thin ? `${(x.w * 100).toFixed(0)}% of money` : `<b>${minus(x.share, 0)}%</b> of risk, ${rest(x)}`}</span>`).join('');
   const stops = m.b < LAST ? m.ids.filter((id) => byId[id].lastI === m.b).map((id) => byId[id].name) : [];
   const one = thin ? `Too few weeks to split the risk: ${plural(weeksHeld, 'week')}.` : lineOne(mix, m.a, st), faded = lineFade(mix, m.a, base);
   $('m-lines').innerHTML = `<div${tipAttr(one.includes('If its edge stops') ? EDGE_TIP : '')}>${esc(one)}</div><div${tipAttr(NEXT_TIP)}>${esc(lineTwo(mix, m.a))}</div>` + (faded ? `<div${tipAttr(FADE_TIP)}>${esc(faded)}</div>` : '') + (stops.length ? `<div>${esc(`This mix ends ${dayLabel(m.b)}: ${stops.join(' and ')} ${stops.length > 1 ? 'have' : 'has'} no later data.`)}</div>` : '') + (legsOut.length ? `<div>${esc(`Computed without ${legsOut.join(' and ')}: no data in this period.`)}</div>` : '');
@@ -1779,7 +1803,7 @@ function refreshAll() {
   renderMix();
   if (openId) openDrawer(openId);
 }
-setCutFill(); renderHeader(); renderNow(); computeCorr(); computeCoords(); renderMap(); renderTiles(); renderBetStats(); renderSim(); renderCorr(); renderStress(); renderYears(); renderFactors(); renderWeights(); renderMix();
+setCutFill(); paintClusters(); renderHeader(); renderNow(); computeCorr(); computeCoords(); renderMap(); renderTiles(); renderBetStats(); renderSim(); renderCorr(); renderStress(); renderYears(); renderFactors(); renderWeights(); renderMix();
 setBarHeight();
 ROOT.classList.add('ready');
 window.EM = { openDrawer, rollSharpeAt, get chartMode() { return chartMode; }, statsOf, ownWorst, R, E, TB, QQQ, idxOf, LAST, D, get simCoords() { return simCoords; }, get simOn() { return simOn; }, get CORR() { return CORR; }, FRAME, COORDS, lineOne, lineTwo, lineFade,

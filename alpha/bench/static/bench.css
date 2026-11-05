@@ -33,6 +33,11 @@
   --color-warning-wash: #fffbeb;
   --color-loss-wash: #fef2f2;
   --color-benchmark-dark: #64748b;
+  /* cluster hues for the strategy map: four that stay apart for every pair, colour-blind included */
+  --color-cluster-1: #2a78d6;
+  --color-cluster-2: #eb6834;
+  --color-cluster-3: #1baf7a;
+  --color-cluster-4: #b8338a;
   --font-figure: "IBM Plex Mono", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
   --font-prose: "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
   --font-code: "IBM Plex Mono", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
