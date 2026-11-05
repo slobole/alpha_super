@@ -214,7 +214,7 @@ def test_catalog_lists_strategies_and_flags_wired():
     # + the month-end flow vote (2026-11-01).
     # + the VRP RSI2 sleeve (2026-11-04).
     # + the three momentum capsule legs (2026-11-03).
-    assert len(capacity_entry_list) == 62
+    assert len(capacity_entry_list) == 61
     assert {
         f"strategies.mr_capsule.strategy_mr_{family_str}_{parking_str}"
         for family_str in ("dv2_vix_gated", "hpi_vote_vix_gated")

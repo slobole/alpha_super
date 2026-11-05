@@ -111,32 +111,6 @@ ENGINE_DEVIATION_TUPLE = ENGINE_DEVIATION_TUPLE + (
 
 ENGINE_DEVIATION_TUPLE = ENGINE_DEVIATION_TUPLE + (
     EngineDeviation(
-        deviation_id_str="tfi_current_vintage_fred",
-        issue_description_str=(
-            "TFI reads frozen CURRENT-vintage FRED files (DGS10, DGS3MO, DAAA, DBAA). They hold later backfills: FRED "
-            "stopped Moody's DAAA/DBAA after 2016-10-07 and backfilled them in March 2017, so the frozen contract "
-            "decided 2016-10..2017-02 with values nobody could see then. Before 2014-04 no ALFRED vintage exists, so "
-            "those decisions cannot be verified."
-        ),
-        expected_bias_direction_str=(
-            "Look-ahead in the data, not in the rule; measured not optimistic: the point-in-time replay is equal or better."
-        ),
-        impact_level_str=(
-            "2026-10-01, BIL ledger, $100K, 2002-08..2026-08 (engine ALFRED mode): frozen CAGR 3.029% / Sharpe 0.694; "
-            "ALFRED decision-date vintage 3.029% / 0.696 (0 of 284 targets change, 5 stale decisions hold); ALFRED "
-            "previous-session vintage 3.131% / 0.711 (5 targets change, 5 hold)."
-        ),
-        mitigation_str=(
-            "Parity mode reproduces the frozen contract (the engine default). Truth mode = the engine's "
-            "fred_data_mode_str='alfred_point_in_time' (not re-implemented in the Scout spec). Readiness audit: TFI NOT "
-            "READY until the owner approves a point-in-time snapshot and the stale rule for PAPER/LIVE."
-        ),
-        affected_strategy_list=("strategy_taa_tactical_fixed_income_ief_lqd",),
-    ),
-)
-
-ENGINE_DEVIATION_TUPLE = ENGINE_DEVIATION_TUPLE + (
-    EngineDeviation(
         deviation_id_str="xnys_closure_hindsight",
         issue_description_str=(
             "The month-end flow counts dtme on today's exchange_calendars XNYS list, which includes unscheduled closures "

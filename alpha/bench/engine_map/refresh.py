@@ -70,7 +70,6 @@ RUNS: dict[str, tuple[str, dict]] = {
     "trinity": ("strategies.taa_beyond_6040.strategy_taa_trinity_vol_control_8_bil", {}),
     "compass": ("strategies.taa_df.strategy_taa_inflation_compass", {}),
     "compass_qqq": ("strategies.taa_df.strategy_taa_inflation_compass_qqq", {}),
-    # Tactical FI is left out on purpose: its guard refuses prices past the governed snapshot, so the page shows it to Aug 19.
     "eom_flow": ("strategies.taa_beyond_6040.strategy_taa_month_end_rebalancing_flow", {}),
     # No column in the frozen frame, here and for the two SPMO versions above: build.py takes the history from the newest saved research run that covers its start.
     # A short run is safe, its drift history loads from 2002 whatever the start.

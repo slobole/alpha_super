@@ -9,7 +9,7 @@ The gated NDX siblings (plain ATR, NATR20, NATR20 VXN) reuse the NDX grid around
 The gated TAA engine variants (1/N, linearity, 2x) are wired through `taa_variant_family` the same way.
 Inflation Compass and its QQQ variant (PM_READY) are wired through `compass_family`.
 CORE5 adaptive macro (PM_READY, gated 2026-10-01) is `core5_family`.
-The PM_READY pods TFI and Trinity (2026-10-01) are wired through `tfi_family` and `trinity_family`.
+The PM_READY pod Trinity (2026-10-01) is wired through `trinity_family`; TFI was deleted on 2026-11-05.
 The month-end rebalancing flow (PM_READY, MOC execution) is `eom_family` (no luck band: offset_count_int = 1).
 The PM_READY sector ETF IBS event pods (2026-10-02) are `sector_ibs_family` and `dispersion_ibs_family`.
 The WIRED DV2 mean-reversion pod on point-in-time S&P 500 members is `dv2_family`, its Nasdaq-100 variant `dv2_ndx_family`
@@ -237,16 +237,7 @@ def core5_family(inputs=None) -> FamilyRunner:
     )
 
 
-# ---------------------------------------------------------------- TFI and Trinity (PM_READY, 2026-10-01)
-# TFI: the rule asks "is the spread above its own long-run typical level?". Two axes move that question around the
-# frozen rule (the default is the expanding median): how much history defines "typical" (rolling 5, 10 or 20 years,
-# then the expanding history, coded 0 and placed last as the longest), and how high the bar sits (the 40th, 50th or
-# 60th percentile of that history). The spreads, the sleeve weights and the publication lag are the rule's identity,
-# not tuning knobs, and stay fixed. 12 configurations.
-TFI_GRID_DICT = {
-    "history_month_int": (60, 120, 240, 0),
-    "threshold_quantile_float": (0.4, 0.5, 0.6),
-}
+# ---------------------------------------------------------------- Trinity (PM_READY, 2026-10-01)
 # Trinity: the three numbers that define a volatility-targeted inverse-volatility book: the asset volatility window
 # (one, three and six months), the base-portfolio volatility window of the overlay (same three) and the volatility
 # target with its trigger kept 0.5 pp above it (6/6.5%, the live 8/8.5%, 10/10.5%). The 5 pp no-trade band is an
@@ -274,10 +265,6 @@ def _spec_family(spec_module_str: str, name_str: str, family_id_str: str, grid_d
         name_str=name_str, family_id_str=family_id_str, param_grid_dict=grid_dict,
         live_config_dict={k: getattr(spec_module.LIVE_CONFIG, k) for k in grid_dict}, simulate_fn=simulate_fn,
     )
-
-
-def tfi_family(inputs=None) -> FamilyRunner:
-    return _spec_family("tfi", "TFI", "macro_regime_allocation", TFI_GRID_DICT, inputs)
 
 
 def trinity_family(inputs=None) -> FamilyRunner:

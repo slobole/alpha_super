@@ -142,7 +142,6 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     # spreads, IEF/LQD sleeves, a BIL cash sleeve (25% withholding, from
     # 2026-09-28; legacy DGS3MO accrual selectable), and next-open fills. The
     # research verdict remains diagnostic; PM_READY certifies plumbing only.
-    "strategies.taa_beyond_6040.strategy_taa_tactical_fixed_income_ief_lqd": MaturityTier.PM_READY,
     # Passive BIL (T-bills) as a cash pod, so a fund book can hold a fixed cash
     # sleeve in the Portfolio Manager (owner request 2026-10-01, fund products
     # study). Buy-and-hold BIL, 25% dividend withholding, 0% on residual cash.

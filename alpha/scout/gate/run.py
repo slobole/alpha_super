@@ -143,7 +143,7 @@ GATED_SPEC_DICT["core5"] = GatedSpec(
 
 
 def _run_beyond_6040_spec(spec_module_str: str, capital_float: float):
-    """TFI and Trinity: the spec simulates with the engine's own cost model (their engines differ from CostModel())."""
+    """Beyond 60/40 specs: the spec simulates with the engine's own cost model (their engines differ from CostModel())."""
     spec_module = importlib.import_module(f"alpha.scout.specs.{spec_module_str}")
     inputs = spec_module.load_inputs()
     result = spec_module.simulate_config(inputs, spec_module.LIVE_CONFIG, spec_module.ENGINE_COST_MODEL, capital_float)
@@ -158,9 +158,8 @@ def _beyond_6040_gated_spec(name_str: str, spec_module_str: str, strategy_import
     )
 
 
-# PM_READY "beyond 60/40" pods (2026-10-01): alpha/scout/specs/tfi.py and alpha/scout/specs/trinity.py.
+# PM_READY "beyond 60/40" pods (2026-10-01): alpha/scout/specs/trinity.py (TFI deleted 2026-11-05).
 GATED_SPEC_DICT.update({
-    "tfi": _beyond_6040_gated_spec("tfi", "tfi", "strategies.taa_beyond_6040.strategy_taa_tactical_fixed_income_ief_lqd"),
     "trinity": _beyond_6040_gated_spec("trinity", "trinity", "strategies.taa_beyond_6040.strategy_taa_trinity_vol_control_8_bil"),
     # Month-end rebalancing flow (PM_READY, 2026-10-01): MOC fills, close-and-reopen orders, a TLT short with borrow
     # (alpha/scout/specs/eom.py).

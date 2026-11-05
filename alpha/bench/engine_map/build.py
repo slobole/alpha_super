@@ -94,7 +94,6 @@ FROZEN_SINCE: dict[str, tuple[str, str]] = {
     "core5": ("2026-09-27", "Last logic change: month ends on exchange sessions; parameters unchanged since Sep 1. Wiring note: rules unchanged."),
     "trinity": ("2026-09-01", "Last logic change: volatility control on the base portfolio's 63-day returns, exposure capped at 1.0."),
     "compass": ("2026-09-28", "Last logic change: the inflation-expectation series read as published (lag fix). Study spec frozen the same day."),
-    "tfi": ("2026-09-29", "Last logic change: cash held as a real BIL position. The signal itself is the older Pakal rule."),
     "eom": ("2026-09-16", "Unchanged since it was created."),
     "eom_vote": ("2026-11-01", "Study spec frozen Nov 1; the module landed Nov 4 unchanged from it."),
     "mo_leg1": ("2026-10-31", "The owner closed the capsule as three legs on Oct 31; the modules of Nov 3 carry that rule."),
@@ -104,15 +103,15 @@ FROZEN_SINCE: dict[str, tuple[str, str]] = {
     "vrp": ("2026-11-03", "Owner lock and frozen spec of Nov 3."),
     "t1": ("2026-11-05", "Study spec frozen and module added Nov 5; PM READY the same day."),
 }
-PARKED = {"tfi"}
+PARKED: set[str] = set()
 LIVE_TIP = "Live by your note of Oct 20. The registry still says {tier}."
 LIVE_NOTE = {"taa3x": "Account funded Apr to May. First fills Jul 1, June return 0."}
 # Added to the alpha cell's own tip, Gross and Net. TFI sits in T-bills: its gross lag is withholding on BIL, its net lag mostly the fee, in points read from its own two alphas.
 ALPHA_TIP = {
     "compass": "Lucky peak: 826 trials, honest Sharpe about 0.85.", "dispersion": "Scout: Rejected. Does not beat shuffled prices, p 0.14.",
-    "eom_vote": "Plan on Sharpe 0.95: the 2023-on stretch shaped this rule.", "tfi": "In T-bills: mostly withholding on BIL, no fee. Data to {end}.",
+    "eom_vote": "Plan on Sharpe 0.95: the 2023-on stretch shaped this rule.",
 }
-ALPHA_NET_TIP = {"tfi": "In T-bills: {fee:.0f} of the {net:.1f} points are the fee. Not bold: parked in T-bills. Data to {end}."}
+ALPHA_NET_TIP: dict[str, str] = {}
 
 SPMO_WORD = "Idle money in SPMO, from Oct 2017"  # first SPMO fill in both saved runs: Oct 30, 2017. Before it such a row is the T-bill rule.
 ENGINES = [
@@ -144,7 +143,6 @@ ENGINES = [
     ("t1", "t1", "Beyond 60/40 T1", "Stocks, long bonds, gold, each out below its trend", "macro", [], None),
     ("trinity", "trinity", "Trinity", "Stocks, bonds, gold at 8% volatility", "macro", [], "trinity_reaudition_20261002"),
     ("compass", "compass", "Compass", "Sectors by growth and inflation", "macro", [("compass_qqq", "QQQ in the growth cell")], "compass_reaudition_20261002"),
-    ("tfi", "tactical_fi", "TFI", "Bonds by yield spreads", "macro", [], "tfi_reaudition_20261002"),
     ("eom", "eom_flow", "EOM", "Month-end stock and bond flow", "macro", [], "eom_reaudition_20261002"),
     ("eom_vote", "eom_vote", "Flow Vote", "Month-end stocks and bonds, by three votes", "macro", [], "eom_tradable_retro_20261101"),
     ("vrp", "vrp", "VRP", "Short volatility through SVXY, VIXM hedge", "vol", [], "vrp_rsi2_locked_retro_20261103"),
@@ -219,7 +217,7 @@ _CARD_NOTE_CAP = "The pair, to Oct 2: the sector cap passed its registered rule,
 _CARD_NOTE_GATE = "Own test: the stress gate beats 99.8% of 2,000 placebo gates in the Growth portfolio; alone it adds no Sharpe."
 GRADE_WORD = {"growth_mr_products_20261101": "Candidate, Nov 1, as the MR form of the Growth products"}
 CARD_NOTE = {"ndx_cap_atr": _CARD_NOTE_CAP, "ndx_cap_natr": _CARD_NOTE_CAP, "dv2_g": _CARD_NOTE_GATE, "hpi_g": _CARD_NOTE_GATE, "capsule": _CARD_NOTE_GATE}
-TRADES_NOTE = {"capsule": "Half DV2-G, half HPI-G", "mo_capsule": "A third each in Mom leg 1, Mom leg 2 and Mom leg 3", "tfi": "In T-bills: only small BIL orders in the last 3 years."}
+TRADES_NOTE = {"capsule": "Half DV2-G, half HPI-G", "mo_capsule": "A third each in Mom leg 1, Mom leg 2 and Mom leg 3"}
 TRADES_OPENS = {"capsule": ["dv2_g", "hpi_g"], "mo_capsule": ["mo_leg1", "mo_leg2", "mo_leg3"]}  # engines named in the note above, each opens its own drawer
 # Stage words, owner's definitions of 2026-10-10: alpha/strategy_registry.py lines 15 to 36. A tier is a claim about plumbing, not about edge.
 _PLUMBING = "Says the plumbing holds, not that it makes money."
@@ -391,11 +389,6 @@ CAVEATS = {
         ("Optimistic", "Settings sit at a lucky peak: 826 trials, failed the pre-2003 holdout. In sample about 0.85, holdout 0.74."),
         ("Failed", "Below the bar against T-bills in TAA 3x + NDX VXN: better on {c_slot}% of paths, bar 80%."),
         ("Conservative", "Withholding: about 0.6 points a year."),
-    ],
-    "tfi": [
-        ("Note", "All in T-bills since June 2022. {tfi20}% a year since 2020 against T-bills {tb20}%."),
-        ("Data", "Stops at Aug 19, 2026: its data check refuses newer prices until the price file is reviewed."),
-        ("Optimistic", "38 variants; family-wide p 0.77."),
     ],
     "eom": [
         ("Unmeasured", "Assumes close-auction fills. Sharpe by era (2003-12, 2013-22, 2023 on) at the same day's open 0.85, 0.76, 0.95. An earlier study at the next day's open: 0.80, 0.38, 0.89, eras not on record."),
@@ -808,7 +801,7 @@ found_tiers = re.findall(r'"(strategies\.[\w.]+(?::\w+)?)":\s*MaturityTier\.(\w+
 registry_stems = {route.split(":")[0].rsplit(".", 1)[1] for route, tier in found_tiers if tier in ("PM_READY", "WIRED", "LIVE")}
 # Off the page by choice, with the words the footer prints for them.
 OFF_MAP_OK = {"strategy_mr_dv2_vix_gated_cash": "DV2-G and HPI-G with idle money in cash", "strategy_mr_hpi_vote_vix_gated_cash": "DV2-G and HPI-G with idle money in cash", "strategy_passive_bil": "passive T-bills"}
-PAGE_STEMS = {module.rsplit(".", 1)[1] for module, _ in RUNS.values()} | {"strategy_taa_tactical_fixed_income_ief_lqd"}
+PAGE_STEMS = {module.rsplit(".", 1)[1] for module, _ in RUNS.values()}
 off_map = sorted(registry_stems - PAGE_STEMS - set(OFF_MAP_OK))
 # What each promoted module still off the page is, in plain words; a stem not listed reads as itself
 PLAIN_NAME = {
@@ -944,7 +937,7 @@ for engine_id, key in (("taa3x", "taa3x"), ("eom", "eom_flow"), ("ndx_vxn", "ndx
 
 returns_plus5 = {engine_id: lab(PLUS5[key]) for engine_id, key, *_ in ENGINES if key in PLUS5.columns}
 index = pd.DatetimeIndex(sorted(set(qqq.index) | set(tbill.index) | {d for s in series_for_page.values() for d in s.index}))
-# The last close is the engines' own: QQQ or T-bills reading a later session cannot move it. TFI's guard parks it on an older date.
+# The last close is the engines' own: QQQ or T-bills reading a later session cannot move it.
 index = index[(index >= pd.Timestamp(LAB[0])) & (index <= max(returns_by_id[e["id"]].index[-1] for e in engines if not e["parked"]))]
 as_of = str(index[-1].date())
 reg_start, reg_end, ff_months = f"{pd.Timestamp(REG[0]):%b %Y}", regression_end(pd.Timestamp(as_of)), FACTOR_FRAMES[REG][1].index
