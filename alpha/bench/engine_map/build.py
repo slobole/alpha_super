@@ -185,7 +185,7 @@ PLAN_FROM_STUDY = {
     "core5": (0.80, "plan", "Plan of record: the median of 200 random settings; its own read 0.95. Apr 2008 to 2022, no rate taken off. docs/research/SCOUT_ROBUSTNESS_20261002.md"),
     "compass": (0.85, "in-sample", "Honest in-sample figure, May 2003 to Aug 2026, no rate taken off. Holdout 1983 to 2002: 0.74. docs/research/INFLATION_COMPASS_DEEP_RESEARCH_20260928.md"),
     "mo_capsule": (0.65, "plan", "Plan of record: 11% / 0.65 / -26%. The backtest is the best of 11 day pairs, median Sharpe 0.72. docs/research/RESIDUAL_MOMENTUM_20261031.md"),
-    "t1": (0.65, "plan", "Over cash, 1970 to 2022 development sample with synthetic history before 2004; the 2023 to 2026 vault 0.50. docs/research/BEYOND_6040_20261105.md"),
+    "t1": (0.65, "plan", "Over cash, 1970 to 2022 development sample with synthetic history before 2004, idle cash earning Fed funds (0.61 in T-bills, 0.30 at 0%); the 2023 to 2026 vault 0.50. docs/research/BEYOND_6040_20261105.md"),
     "vrp": (0.70, "plan", "Plan of record about 0.70, not the backtest's 0.93: the RSI2 boost, the threshold and VIXM were chosen after 460 trials. docs/research/VRP_RSI2_BUILD_20261103.md"),
     "eom_vote": (0.95, "plan", "Plan of record: what is left if the vote fades, always TLT in the final week plus the pair. 2003 to Oct 30, 2026, idle cash at 0%, no rate taken off. docs/research/EOM_TRADABLE_20261101.md"),
 }
@@ -197,9 +197,7 @@ SAME_IDEA = {"eom": "month-end flow", "eom_vote": "month-end flow",
              # the sized pods are DV2-G and HPI-G with other entry sizes: one pod per engine
              "dv2_g": "DV2-G", "dv2_g_liq": "DV2-G", "hpi_g": "HPI-G", "hpi_g_liq": "HPI-G",
              # the capsule and its legs are one engine: a mix holds the capsule or legs, never both
-             "mo_leg1": "momentum capsule", "mo_leg2": "momentum capsule", "mo_leg3": "momentum capsule", "mo_capsule": "momentum capsule",
-             # T1 and CORE5 are one engine (stocks, bonds, gold, risk-weighted, trend on/off, volatility control): CORE5 keeps the seat
-             "t1": "trend allocator", "core5": "trend allocator"}
+             "mo_leg1": "momentum capsule", "mo_leg2": "momentum capsule", "mo_leg3": "momentum capsule", "mo_capsule": "momentum capsule"}
 # Each module declares its execution policy (execution_policy_str, default timing): MOC for these two, MOO for every other engine, the capsule's two legs included.
 CLOSE_AUCTION = {"eom", "eom_vote"}
 MENU_NOTE = "Growth weights are proposals, not decided."
@@ -289,7 +287,7 @@ CAVEATS = {
         ("Optimistic", "Before Nov 2004 its study history is synthetic and the 1970s lean on one gold bull; this page shows the ETF run only."),
         ("Regime", "Insurance: trails the plain rule when stocks and bonds do not fall together, about 0.7 points a year 2008 to 2022; vault 2023 to 2026 7.9% vs 11.2%."),
         ("Regime", "Loses to 60/40 in long bull decades: Sharpe 0.44 vs 0.87 in the 1990s, 0.97 vs 1.38 in the 2010s."),
-        ("Design", "Same engine as CORE5, which wins from 2012 by 0.37 Sharpe: one pod per engine, CORE5 keeps the seat."),
+        ("Design", "The edge needs idle cash in T-bills: Sharpe 0.61 in T-bills, 0.30 with cash at 0%, below 60/40 0.45. Not the same engine as CORE5 (correlation 0.61)."),
     ],
     "vrp": [
         ("Optimistic", "RSI2 boost, 0.98 threshold and VIXM chosen after 460 trials on 2011-2026: plan Sharpe about 0.70, not 0.93."),
