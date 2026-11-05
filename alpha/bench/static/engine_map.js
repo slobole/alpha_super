@@ -54,14 +54,15 @@ const STAGE_WORD = { LIVE: 'Live', WIRED: 'Wired', 'PM READY': 'PM ready', CANDI
 const stageWord = (s) => STAGE_WORD[s] || s;
 const chip = (s) => `<span class="maturity maturity-${BADGE[stageKey(s)]}"${tipAttr(stageTip(s))}>${esc(s)}</span>`;
 // LIVE says for how long; the stage itself still counts and filters as LIVE
+const MODEL_NOTE = 'The figures here are the backtest, not the account.';
 function chipWord(e) {
   if (!e.live) return e.stage;
-  const days = (Date.parse(D.asOf) - Date.parse(e.live)) / 864e5, weeks = Math.max(1, Math.ceil(days / 7));
-  return days < 0 ? `First trade ${monthDay(e.live)}` : days < 56 ? `LIVE ${weeks} week${weeks === 1 ? '' : 's'}` : `LIVE ${Math.round(days / 30.44)} months`;
+  const days = (Date.parse(D.asOf) - Date.parse(e.live)) / 864e5;
+  return days < 0 ? `First trade ${monthDay(e.live)}` : `LIVE since ${monthDay(e.live)}`;
 }
 function chipFor(e) {
   if (!e.live) return chip(e.stage);
-  return `<span class="maturity maturity-${BADGE[stageKey(e.stage)]}"${tipAttr(e.liveTip || stageTip(e.stage))}>${esc(chipWord(e))}</span>`;
+  return `<span class="maturity maturity-${BADGE[stageKey(e.stage)]}"${tipAttr(`${e.liveTip || stageTip(e.stage) || ''} ${MODEL_NOTE}`.trim())}>${esc(chipWord(e))}</span>`;
 }
 const stages = [...new Set(['LIVE', 'WIRED', 'PM READY', 'CANDIDATE', ...E.map((e) => e.stage)])];
 const eName = (e) => `${esc(e.name)}`;
@@ -412,8 +413,8 @@ const nowStale = (e, col) => e.lastI < LAST && (col === 'ytd' ? YEAR[e.lastI] !=
 const toEnd = (e) => `to ${YEAR[e.lastI] === YEAR[LAST] ? monthDay(e.end) : shortLabel(e.end)}`;
 const staleTip = (e, col) => nowStale(e, col) ? `${e.name}: data to ${shortLabel(e.end)}.${e.parked ? ` ${PARKED_NOTE}.` : ''}` : toEnd(e);
 function renderNow() {
-  $('nowtag').textContent = `To ${shortLabel(D.asOf)}`;
-  $('nowtitle').innerHTML = esc(`To the close of ${shortLabel(D.asOf)}, in percent. Green is up, red is down, darker is bigger. Worst: the deepest fall since 2008 ends at this close. Hover a cell to see how rare it is for that engine. Click a column to sort.`);
+  $('nowtag').textContent = `Backtest, to ${shortLabel(D.asOf)}`;
+  $('nowtitle').innerHTML = esc(`The model's returns to the close of ${shortLabel(D.asOf)}, in percent, not the account's. Green is up, red is down, darker is bigger. Worst: the deepest fall since 2008 ends at this close. Hover a cell to see how rare it is for that engine. Click a column to sort.`);
   const head = `<thead><tr>${TH_NAME}${NOWCOLS.map((c) => sortTh('now', c[0], c[1])).join('')}</tr></thead>`;
   E.forEach((e) => { e.now = e.now || nowRow(R[e.id], e.lastI); });
   const cell = (e, c) => {
@@ -431,6 +432,14 @@ function renderNow() {
 
 /* tiles */
 let sparkData = {};
+// the two dates that split a chart into seen and unseen: rules frozen (dashed), real money (solid). Only inside the window
+function splitLines(e, a, X, H) {
+  let s = '';
+  const fz = e.frozen ? idxOf(e.frozen) : -1, lv = e.live && e.live <= ISO[LAST] ? idxOf(e.live) : -1;
+  if (fz > a && fz < LAST) s += `<line class="fz" x1="${X(fz).toFixed(1)}" x2="${X(fz).toFixed(1)}" y1="0" y2="${H}"/>`;
+  if (lv > a && lv < LAST && lv !== fz) s += `<line class="lv" x1="${X(lv).toFixed(1)}" x2="${X(lv).toFixed(1)}" y1="0" y2="${H}"/>`;
+  return s;
+}
 function sparkHTML(e, scale) {
   const W = 300, EQ = 112, TOP = 118, DDH = 32, H = TOP + DDH, a = winA();
   const X = (i) => ((i - a) / Math.max(1, LAST - a)) * W;
@@ -447,7 +456,7 @@ function sparkHTML(e, scale) {
   const area = `${eq}L${lastX.toFixed(1)} ${EQ}L0 ${EQ}Z`;
   const ten = Math.log(10) > scale.lo && Math.log(10) < scale.hi ? `<line x1="0" x2="${W}" y1="${Y(10)}" y2="${Y(10)}" stroke="var(--grid)"/>` : '';
   const one = `<line x1="0" x2="${W}" y1="${Y(1)}" y2="${Y(1)}" stroke="var(--grid)"/>`;
-  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" data-spark="${e.id}" data-mode="growth" aria-hidden="true">${bands}${one}${ten}<path d="${area}" fill="var(--c)" fill-opacity=".10"/><path d="${tb}" fill="none" stroke="var(--ref)" stroke-width="1"/><path d="${eq}" fill="none" stroke="var(--c)" stroke-width="2.25" stroke-linejoin="round"/><path d="${dd}" fill="var(--c)" fill-opacity=".42"/><line class="xl" x1="0" x2="0" y1="0" y2="${H}" stroke="var(--ink-3)" stroke-width="1" visibility="hidden"/></svg>`;
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" data-spark="${e.id}" data-mode="growth" aria-hidden="true">${bands}${one}${ten}<path d="${area}" fill="var(--c)" fill-opacity=".10"/><path d="${tb}" fill="none" stroke="var(--ref)" stroke-width="1"/><path d="${eq}" fill="none" stroke="var(--c)" stroke-width="2.25" stroke-linejoin="round"/><path d="${dd}" fill="var(--c)" fill-opacity=".42"/>${splitLines(e, a, X, H)}<line class="xl" x1="0" x2="0" y1="0" y2="${H}" stroke="var(--ink-3)" stroke-width="1" visibility="hidden"/></svg>`;
 }
 // the Charts switch: Sharpe over T-bills on the last 756 sessions, once 600 of them have data, on one scale of -1 to 3
 const ROLL = 756, ROLL_MIN = 600, ROLL_LO = -1, ROLL_HI = 3;
@@ -471,7 +480,7 @@ function sharpeHTML(e) {
   sparkData[e.id] = pts;
   // dashed: its own Sharpe since 2008, whatever the period
   const whole = statsOf(R[e.id], 0, LAST), ref = whole && whole.sharpe != null ? `<line x1="0" x2="${W}" y1="${Y(whole.sharpe).toFixed(1)}" y2="${Y(whole.sharpe).toFixed(1)}" stroke="var(--ink-3)" stroke-dasharray="4 3"/>` : '';
-  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" data-spark="${e.id}" data-mode="sharpe" aria-hidden="true"><line x1="0" x2="${W}" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--edge)"/><line x1="0" x2="${W}" y1="${Y(1)}" y2="${Y(1)}" stroke="var(--grid)"/>${ref}<path d="${d}" fill="none" stroke="var(--c)" stroke-width="1.6" stroke-linejoin="round"/><line class="xl" x1="0" x2="0" y1="0" y2="${H}" stroke="var(--ink-3)" stroke-width="1" visibility="hidden"/></svg>`;
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" data-spark="${e.id}" data-mode="sharpe" aria-hidden="true"><line x1="0" x2="${W}" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--edge)"/><line x1="0" x2="${W}" y1="${Y(1)}" y2="${Y(1)}" stroke="var(--grid)"/>${ref}<path d="${d}" fill="none" stroke="var(--c)" stroke-width="1.6" stroke-linejoin="round"/>${splitLines(e, a, X, H)}<line class="xl" x1="0" x2="0" y1="0" y2="${H}" stroke="var(--ink-3)" stroke-width="1" visibility="hidden"/></svg>`;
 }
 const chartHTML = (e, scale) => (chartMode === 'sharpe' ? sharpeHTML(e) : sparkHTML(e, scale));
 // at most one tag, on the whole history whatever the period; the first rule that matches wins
@@ -519,7 +528,7 @@ function renderTiles() {
   const shaded = D.shaded.filter((c) => idxOf(c.to) >= winA()).map((c) => c.name);
   $('tiletag').textContent = chartMode === 'sharpe' ? 'Dashed: its Sharpe since 2008' : '';
   if (chartMode === 'sharpe') $('sparknote').innerHTML = esc(`Sharpe over T-bills on the last 3 years (756 sessions) at each date, drawn once 600 of them have data, ${periodWords()}. One scale for all charts, −1 to 3; a value past it sits on the edge. The dashed line is its own Sharpe since 2008, the thin line 1.0, the darker one zero.`);
-  else $('sparknote').innerHTML = esc(`Growth of $1 from ${winA() ? `the close of ${dayLabel(winA() - 1)}` : dayLabel(0)}, on one scale across all charts so you can compare by eye. Below the line: the fall from peak. The thin line is T-bills.${shaded.length ? ` Grey bands: ${shaded.join(', ')}.` : ''}`);
+  else $('sparknote').innerHTML = esc(`Growth of $1 from ${winA() ? `the close of ${dayLabel(winA() - 1)}` : dayLabel(0)}, on one scale across all charts so you can compare by eye. Below the line: the fall from peak. The thin line is T-bills. Dashed upright line: the rules froze there, everything after is out of sample; solid upright line: real money.${shaded.length ? ` Grey bands: ${shaded.join(', ')}.` : ''}`);
   $('groupby').innerHTML = GROUP_MODES.map(([k, n]) => `<button class="filter-chip" data-group="${k}" aria-pressed="${groupMode === k}">${n}</button>`).join('');
 }
 
@@ -1073,8 +1082,8 @@ const endSpans = (lines, x) => lines.map((t, k) => `<tspan x="${x}"${k ? ' dy="1
 // a main line's label takes its colour, deep enough to read as text in both themes
 const strongInk = (color) => `color-mix(in oklab, ${color} 70%, var(--ink))`;
 function growthChart(el, list, a, b, right = 116) {
-  // list: [{name, r, base, color, width, strong, opacity, label, dashTo, dashLabel, mark, markLabel}]
-  const marked = list.find((c) => c.mark != null && c.mark >= a && c.mark <= b);
+  // list: [{name, r, base, color, width, strong, opacity, label, dashTo, dashLabel, marks: [{i, label, dashed}]}]
+  const marks = list.flatMap((c) => (c.marks || []).filter((k) => k.i >= a && k.i <= b)), marked = marks.length > 0;
   const W = el.clientWidth, H = 340, m = { l: 42, r: right, t: marked ? 26 : 10, b: 26 }; if (W <= m.l + m.r) return; // no room yet, as in a hidden frame: it draws on the resize when it shows
   let lo = 1, hi = 1;
   list.forEach((s) => sampled(s.r, a, b, 400, s.base || 0).forEach((p) => { if (p.eq < lo) lo = p.eq; if (p.eq > hi) hi = p.eq; }));
@@ -1115,10 +1124,12 @@ function growthChart(el, list, a, b, right = 116) {
       s += `<text class="axis-t" x="${tx.toFixed(1)}" y="${ty.toFixed(1)}" text-anchor="${anchor}">${esc(c.dashLabel)}</text>`;
     });
   }
-  if (marked) {
-    const mx = X(marked.mark), fits = mx - axisWidth(marked.markLabel) >= m.l;
-    s += `<line x1="${mx.toFixed(1)}" x2="${mx.toFixed(1)}" y1="${m.t}" y2="${m.t + 10}" stroke="var(--ink-2)" stroke-width="1.5"/><text class="axis-t" x="${mx.toFixed(1)}" y="${m.t - 5}" text-anchor="${fits ? 'end' : 'start'}">${esc(marked.markLabel)}</text>`;
-  }
+  // labels read away from each other when two marks sit close
+  marks.sort((p, q) => p.i - q.i).forEach((k, n) => {
+    const mx = X(k.i), prevX = n ? X(marks[n - 1].i) : -1e9, close = mx - prevX < axisWidth(k.label) + 12;
+    const fits = !close && mx - axisWidth(k.label) >= m.l;
+    s += `<line class="${k.dashed ? 'fz' : 'lv'}" x1="${mx.toFixed(1)}" x2="${mx.toFixed(1)}" y1="${m.t}" y2="${H - m.b}"/><text class="axis-t" x="${mx.toFixed(1)}" y="${m.t - 5}" text-anchor="${fits ? 'end' : 'start'}">${esc(k.label)}</text>`;
+  });
   const ends = list.filter((c) => c.label !== false).map((c) => ({ c, v: eqAt(c.r, a, b, c.base || 0) })).sort((p, q) => Y(p.v) - Y(q.v));
   let prev = -99;
   ends.forEach(({ c, v }) => {
@@ -1249,8 +1260,16 @@ function tradesHTML(e) {
   if (!cells.length) return `<div class="dsec">${head}<div class="drow"><div class="dwide">${note}</div></div></div>`;
   return `<div class="dsec">${head}<div class="drow"${tipAttr(`Last 3 years of its saved run${t.end ? `, to ${shortLabel(t.end)}` : ''}. T-bill parking left out. Holds counts trading sessions. Turnover counts buys plus sells.`)}>${cells.join('')}</div></div>`;
 }
+function frozenHTML(e) {
+  if (!e.frozen) return '';
+  const i = idxOf(e.frozen), s = i < LAST ? statsOf(R[e.id], i, LAST) : null;
+  // a Sharpe on a few weeks says nothing: it waits for half a year of sessions
+  const span = i < LAST ? `${plural(LAST - i + 1, 'session')}, ${pct(s && s.ret)}${s && s.ann ? ' a year' : ''}${s && s.n >= 126 ? `, Sharpe ${sharpeText(s, e)}` : ', too short for a Sharpe'}` : 'no session yet';
+  return `<span${tipAttr(`${e.frozenWhy || ''} Everything after this date is out of sample for these rules; weeks or months prove little either way.`.trim())}>Rules frozen ${shortLabel(e.frozen)}: ${span}</span>`;
+}
 function forwardHTML(e) {
   const parts = [], f = e.forward;
+  if (e.frozen) parts.push(frozenHTML(e));
   if (e.live) parts.push(e.live > ISO[LAST] ? `First trade ${monthDay(e.live)}` : `<span${tipAttr(e.liveTip)}>${e.fillsOnRecord ? 'Real money' : `${e.liveWord} ${monthDay(e.live)}, fills not read here`}: ${plural(LAST - idxOf(e.live) + 1, 'session')}</span>`);
   if (f) {
     const months = plural(Math.ceil(f.months), 'month');
@@ -1329,7 +1348,10 @@ const drawerRight = () => ($('d-growth').clientWidth < 420 ? 100 : 116);
 function drawDrawerGrowth(e, a) {
   // the line stays the model: dashes where its early years are not the traded rule, a tick where real money starts
   const standIn = (o) => o.standIn ? { dashTo: idxOf(o.standIn.to), dashLabel: standInLabel(o) } : {};
-  const live = e.live && e.live <= ISO[LAST] ? { mark: idxOf(e.live), markLabel: `${e.fillsOnRecord ? 'Live' : e.liveWord === 'Switched on' ? 'On' : e.liveWord} ${monthDay(e.live)}` } : {};
+  const marks = [];
+  if (e.frozen) marks.push({ i: idxOf(e.frozen), label: `Rules frozen ${monthDay(e.frozen)}`, dashed: true });
+  if (e.live && e.live <= ISO[LAST] && e.live !== e.frozen) marks.push({ i: idxOf(e.live), label: `${e.fillsOnRecord ? 'Live' : e.liveWord === 'Switched on' ? 'On' : e.liveWord} ${monthDay(e.live)}` });
+  const live = marks.length ? { marks } : {};
   // no data in the window: no line to draw and no $1.00 to print
   const list = [{ name: e.name, r: R[e.id], color: 'var(--c)', width: 2.5, strong: true, ...standIn(e), ...live, ...(e.s ? {} : { label: false }) }];
   e.versions.forEach((v) => list.push({ name: v.name, r: R[v.key], color: 'var(--c)', width: 1.25, opacity: 0.45, label: false }));
@@ -1381,7 +1403,7 @@ function settlePreset() { const p = presetNamed(basePreset); activePreset = p &&
 try {
   const saved = JSON.parse(store.get('em-mix') || 'null');
   if (saved && saved.mix) {
-    mix = Object.fromEntries(Object.entries(saved.mix).filter(([k, v]) => k !== 'capsule' && E.some((e) => e.id === k) && Number.isFinite(v) && v > 0).map(([k, v]) => [k, Math.min(v, 100)]));
+    mix = Object.fromEntries(Object.entries(saved.mix).filter(([k, v]) => E.some((e) => e.id === k && !e.blend) && Number.isFinite(v) && v > 0).map(([k, v]) => [k, Math.min(v, 100)]));
     basePreset = [saved.base, saved.preset].find((n) => presetNamed(n)) || '';
   }
 } catch (e) { /* use the default below */ }
@@ -1488,7 +1510,7 @@ function lineTwo(w = mix, a = winA()) {
   const holds = (c) => { const votes = NEXT_ERAS.map(([x, y]) => gap(c.e.id, x, Math.min(y, c.end))).filter((v) => v != null); return votes.filter((v) => Math.sign(v) === Math.sign(c.d)).length >= (votes.length > 2 ? 3 : 2); };
   // one idea counts once: a mix holding either rule of it takes neither
   const ideas = new Set(Object.keys(w).filter((k) => w[k] > 0 && byId[k] && byId[k].idea).map((k) => byId[k].idea));
-  const kept = E.filter((e) => !(w[e.id] > 0) && e.id !== 'capsule' && !e.parked && e.candidate !== false && !ideas.has(e.idea)).map((e) => { const end = Math.min(m.b, e.lastI); return { e, end, d: gap(e.id, a, end) }; }).filter((c) => c.d != null && Math.abs(c.d) > 0.03 && holds(c));
+  const kept = E.filter((e) => !(w[e.id] > 0) && !e.blend && !e.parked && e.candidate !== false && !ideas.has(e.idea)).map((e) => { const end = Math.min(m.b, e.lastI); return { e, end, d: gap(e.id, a, end) }; }).filter((c) => c.d != null && Math.abs(c.d) > 0.03 && holds(c));
   const best = kept.filter((c) => c.d > 0).sort((p, q) => q.d - p.d)[0], worst = kept.filter((c) => c.d < 0).sort((p, q) => p.d - q.d)[0];
   // a lower Sharpe to say alongside the gain, whole history only; later windows claim no haircut
   const fade = (c) => {
@@ -1512,7 +1534,7 @@ function lineFade(w = mix, a = winA(), base = null) {
   const from = base ? seriesStats(mixSeries(start, a, end, cutsOf(Object.keys(start).filter((id) => start[id] > 0)).map((c) => c.cut))) : null;
   return `At ${held.map(({ e }) => `${e.name}'s ${e.fade.label} ${num(e.fade.sharpe)}`).join(' and ')}: Sharpe ${num(s.sharpe)}${from && from.sharpe != null ? `, ${changeText(s.sharpe - from.sharpe, 2)} vs ${basePreset}` : ''}.`;
 }
-const BETS_TIP = 'How many unrelated bets of equal risk this mix is like, given its weights. Two copies of one engine read 1.0.';
+const BETS_TIP = 'An estimate: how many unrelated bets of equal risk this mix is like, from its weights and correlations (a capped diversification ratio). Two copies of one engine read 1.0.';
 const NEXT_TIP = ['Takes 10% from the rest of the mix. A name shows only if the Sharpe moves more than 0.03 and the sign holds in 3 of the eras that vote, or 2 of 2. An era with no Sharpe does not vote. Eras: 2008 to Sep 2012, Oct 2012 to 2017, 2018 to 2022, 2023 on.',
   ...E.filter((e) => e.candidate === false).map((e) => `${e.name} is not offered: ${e.candidateWhy}.`),
   ...[...new Set(E.map((e) => e.idea).filter(Boolean))].map((idea) => `A mix holding ${E.filter((e) => e.idea === idea).map((e) => e.name).join(' or ')} takes neither.`)].join(' ');
@@ -1527,7 +1549,7 @@ function renderWeights() {
   let h = '';
   FAM.forEach((f) => {
     h += `<div class="wfam c-${f.id}"><span class="dot s" style="margin:0"></span>${esc(f.name)}</div>`;
-    E.filter((e) => e.fam === f.id && e.id !== 'capsule').forEach((e) => {
+    E.filter((e) => e.fam === f.id && !e.blend).forEach((e) => {
       const w = mix[e.id] || 0;
       h += `<div class="wrow c-${e.fam}${w > 0 ? ' on' : ''}"><label for="w-${e.id}"${tipAttr(e.sub)}>${eName(e)}</label><input id="w-${e.id}" type="range" min="0" max="100" step="1" value="${w}" style="--fill:${w}%" data-w="${e.id}" aria-label="Weight of ${esc(e.name)}"><input id="wn-${e.id}" type="number" min="0" max="100" step="any" value="${+w.toFixed(1)}" data-w="${e.id}" aria-label="Weight of ${esc(e.name)} in percent"></div>`;
     });
@@ -1552,7 +1574,7 @@ function renderMix() {
   const now = base && base.b < m.b ? mixStats(mix, m.a, base.b) : st;
   // the row keeps its room with no base, so the charts below stay put when a slider moves
   const change = (key, d) => `<small>${!base || now[key] == null || base[key] == null ? '&nbsp;' : changeText(now[key] - base[key], d)}</small>`;
-  $('mixstats').innerHTML = `<div><b>${pct(st.ret)}</b><span>${st.ann ? 'CAGR' : 'Return'}</span>${change('ret', 1)}</div><div><b${sharpeTip(null, st)}>${sharpeText(st)}</b><span>Sharpe</span>${change('sharpe', 2)}</div><div><b>${pct(st.dd)}</b><span>Max DD</span>${change('dd', 1)}</div><div><b>${pct(st.vol)}</b><span>Vol</span>${change('vol', 1)}</div><div${tipAttr(BETS_TIP)}>${thin ? '<b class="word">Too few weeks</b>' : `<b>${st.bets.toFixed(1)}</b>`}<span>Independent bets</span>${change(thin ? '' : 'bets', 1)}</div><div class="mixbase"${base ? tipAttr(CHANGE_TIP) : ''}>${base ? esc(`Change against ${basePreset}`) : '&nbsp;'}</div>`;
+  $('mixstats').innerHTML = `<div><b>${pct(st.ret)}</b><span>${st.ann ? 'CAGR' : 'Return'}</span>${change('ret', 1)}</div><div><b${sharpeTip(null, st)}>${sharpeText(st)}</b><span>Sharpe</span>${change('sharpe', 2)}</div><div><b>${pct(st.dd)}</b><span>Max DD</span>${change('dd', 1)}</div><div><b>${pct(st.vol)}</b><span>Vol</span>${change('vol', 1)}</div><div${tipAttr(BETS_TIP)}>${thin ? '<b class="word">Too few weeks</b>' : `<b>${st.bets.toFixed(1)}</b>`}<span>Spread of bets</span>${change(thin ? '' : 'bets', 1)}</div><div class="mixbase"${base ? tipAttr(CHANGE_TIP) : ''}>${base ? esc(`Change against ${basePreset}`) : '&nbsp;'}</div>`;
   $('s-build').style.setProperty('--c', 'var(--ink-2)');
   const label = activePreset || (basePreset ? 'Changed' : 'Portfolio'), right = buildRight($('m-growth').clientWidth);
   const baseLine = base ? { name: basePreset, r: base.series.out, base: m.a } : null;

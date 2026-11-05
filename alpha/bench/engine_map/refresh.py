@@ -75,6 +75,11 @@ RUNS: dict[str, tuple[str, dict]] = {
     # No column in the frozen frame, here and for the two SPMO versions above: build.py takes the history from the newest saved research run that covers its start.
     # A short run is safe, its drift history loads from 2002 whatever the start.
     "eom_vote": ("strategies.taa_beyond_6040.strategy_taa_month_end_flow_vote", {}),
+    # No column in the frozen frame either: history from the saved research run of Nov 5, 2026. Leg 3 is the heaviest run on the page.
+    "mo_leg1": ("strategies.momentum.strategy_mo_capsule_leg1_natr_ndx", {}),
+    "mo_leg2": ("strategies.momentum.strategy_mo_capsule_leg2_residual_ndx", {}),
+    "mo_leg3": ("strategies.momentum.strategy_mo_capsule_leg3_residual_r1000", {}),
+    "vrp": ("strategies.vix_stuff.strategy_vrp_svxy_vixm_rsi2", {}),
 }
 HEAVY = ("hpi_vote", "hpi_g", "hpi_g_spmo", "hpi_ibs_rsi", "dv2", "dv2_g", "dv2_g_spmo", "dv2_g_liq", "hpi_g_liq", "ndx_vxn", "ndx_atr", "ndx_atr_cap", "ndx_natr_cap")
 RETRY_UNTIL_SECONDS = 1200  # no retry starts this long after the first run started, so one refresh stays near 30 minutes
@@ -120,6 +125,16 @@ class _Stub:
     def __setstate__(self, state) -> None:
         self.__dict__.update(state if isinstance(state, dict) else {"state": state})
 
+    # a saved dict or list subclass (the momentum legs keep one) is rebuilt item by item: keep the items, read none of them
+    def __setitem__(self, key, value) -> None:
+        self.__dict__.setdefault("_items", {})[key] = value
+
+    def append(self, value) -> None:
+        self.__dict__.setdefault("_list", []).append(value)
+
+    def extend(self, values) -> None:
+        self.__dict__.setdefault("_list", []).extend(values)
+
 
 class _StubUnpickler(pickle.Unpickler):
     def find_class(self, module: str, name: str):
@@ -160,6 +175,28 @@ def dtb3_rate(index: pd.DatetimeIndex) -> pd.Series:
     """The frame's saved DTB3 column, already a decimal rate on the prior observation; the last value carries forward."""
     rate = pd.read_parquet(DTB3)["dtb3"].dropna().sort_index()
     return rate.reindex(rate.index.union(index)).ffill().reindex(index)
+
+
+# A new run must reproduce the frozen frame where they overlap, or the map keeps its last build: a silent gap would reach the page as history.
+OVERLAP_LIMITS = {"min_days": 200, "min_corr": 0.999, "max_gap_bp": 5.0, "max_mean_gap_bp_year": 25.0}
+
+
+def overlap_failures(checks: list[dict]) -> list[str]:
+    """One line per check outside the limits, empty when every run reproduces its frozen history."""
+    out = []
+    for c in checks:
+        why = []
+        if c["days"] < OVERLAP_LIMITS["min_days"]:
+            why.append(f"{c['days']} days overlap")
+        if c["corr"] < OVERLAP_LIMITS["min_corr"]:
+            why.append(f"corr {c['corr']}")
+        if c["max_gap_bp"] > OVERLAP_LIMITS["max_gap_bp"]:
+            why.append(f"max gap {c['max_gap_bp']} bp")
+        if abs(c["mean_gap_bp_year"]) > OVERLAP_LIMITS["max_mean_gap_bp_year"]:
+            why.append(f"mean gap {c['mean_gap_bp_year']} bp a year")
+        if why:
+            out.append(f"{c['alias']}: {', '.join(why)}")
+    return out
 
 
 def overlap_check(alias: str, frozen_house: pd.DataFrame) -> dict:
@@ -242,12 +279,20 @@ def main(argv: list[str] | None = None) -> int:
         status["seconds"] = round(time.time() - started, 1)
         status["finished"] = datetime.now().isoformat(timespec="seconds")
         status_path.write_text(json.dumps(status, indent=1), encoding="utf-8")
+    checks = []
     for alias in aliases:
         if (DAILY / f"{alias}.parquet").exists() and alias in frozen_house.columns:
-            print(json.dumps(overlap_check(alias, frozen_house)), flush=True)
+            checks.append(overlap_check(alias, frozen_house))
+            print(json.dumps(checks[-1]), flush=True)
+    overlap_bad = overlap_failures(checks)
+    for line in overlap_bad:
+        print("FAILED overlap", line, flush=True)
+    if not args.check:
+        status["overlap_failed"] = overlap_bad
+        status_path.write_text(json.dumps(status, indent=1), encoding="utf-8")
     failed = [a for a, r in status["runs"].items() if not r.get("ok")]
     print("failed:", failed, "| seconds:", status.get("seconds"), flush=True)
-    return 1 if failed or status.get("bench_error") else 0
+    return 1 if failed or overlap_bad or status.get("bench_error") else 0
 
 
 if __name__ == "__main__":

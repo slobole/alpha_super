@@ -59,7 +59,7 @@ def expect(holds: bool, text: str) -> None:
 
 LAB = ("2008-03-04", "2026-08-19")
 SHADED = [("2008", "2008-09-01", "2009-03-09"), ("2020", "2020-02-19", "2020-03-23"), ("2022", "2022-01-03", "2022-12-30")]
-FAMILIES = [("rotation", "Rotation"), ("momentum", "Momentum"), ("dips", "Mean reversion"), ("macro", "Macro and calendar")]
+FAMILIES = [("rotation", "Rotation"), ("momentum", "Momentum"), ("dips", "Mean reversion"), ("macro", "Macro and calendar"), ("vol", "Volatility")]
 
 # Stage comes from the registry. These three are live since the owner's switch-on of 2026-10-20, whatever the registry says yet.
 LIVE_BY_OWNER = {"btal_qqq", "core5", "etf_dv2"}
@@ -70,6 +70,38 @@ FILLS_ON_RECORD = {"taa3x", "ndx_vxn", "core5"}; LIVE_WORD = {"dv2_ind": "Switch
 STAND_IN = {
     "taa3x": ("2012-10-02", "Proxy run"), "taa3x_1n": ("2012-10-02", "Proxy run"), "taa2x": ("2012-10-02", "Proxy run"), "btal_qqq": ("2012-10-02", "Proxy run"),
     "dv2_ind": ("2012-02-01", "Early run"), "downshock": ("2013-01-02", "Thin years"),
+}
+# Rules frozen: the last commit that changed the strategy's trading logic, by engine id. After this date every session is out of sample.
+# Filled from the git history on 2026-11-05; a later logic change must move the date, or the line lies.
+OLD_RULE = "This repository starts on Mar 11, 2026 and the rule was carried in unchanged: it is older than this date."
+FROZEN_SINCE: dict[str, tuple[str, str]] = {
+    "taa3x": ("2026-04-04", OLD_RULE), "taa3x_1n": ("2026-04-04", OLD_RULE), "taa2x": ("2026-04-04", OLD_RULE), "btal_qqq": ("2026-04-04", OLD_RULE),
+    "ndx_vxn": ("2026-09-27", "Last logic change: ATR in unadjusted dollars and month ends on exchange sessions (corporate-action fix), after the June go-live."),
+    "ndx_atr": ("2026-09-27", "Last logic change: ATR in unadjusted dollars and month ends on exchange sessions (corporate-action fix)."),
+    "ndx_cap_atr": ("2026-10-04", "Design of record from the sector-cap study; later commits are live wiring."),
+    "ndx_cap_natr": ("2026-10-04", "Design of record from the sector-cap study; later commits are live wiring."),
+    "dv2": ("2026-03-31", "Last logic change: the 126-day return filter moved from above 0 to above 5%."),
+    "dv2_g": ("2026-10-05", "Last logic change: the gate switch reads the previous pricing date. Study spec frozen Oct 3."),
+    "hpi": ("2026-07-27", "Unchanged since it entered this repository; the Jul 31 membership loader rewrite claims parity."),
+    "hpi_g": ("2026-10-05", "Last logic change: the gate switch reads the previous pricing date. Study spec frozen Oct 3."),
+    "capsule": ("2026-10-05", "The later of its two pods' freeze dates."),
+    "dv2_g_liq": ("2026-11-02", "Frozen rule in its wiring note; study spec frozen Nov 1."),
+    "hpi_g_liq": ("2026-11-02", "Frozen rule in its wiring note; study spec frozen Nov 1."),
+    "hpi_rsi": ("2026-07-27", "Unchanged since it entered this repository."),
+    "dv2_ind": ("2026-09-27", "Unchanged since it was created."),
+    "downshock": ("2026-07-27", "Unchanged since it entered this repository; later commits add timing hooks only."),
+    "dispersion": ("2026-07-12", "Created in that commit, which also moved sizing to 1/N."),
+    "core5": ("2026-09-27", "Last logic change: month ends on exchange sessions; parameters unchanged since Sep 1. Wiring note: rules unchanged."),
+    "trinity": ("2026-09-01", "Last logic change: volatility control on the base portfolio's 63-day returns, exposure capped at 1.0."),
+    "compass": ("2026-09-28", "Last logic change: the inflation-expectation series read as published (lag fix). Study spec frozen the same day."),
+    "tfi": ("2026-09-29", "Last logic change: cash held as a real BIL position. The signal itself is the older Pakal rule."),
+    "eom": ("2026-09-16", "Unchanged since it was created."),
+    "eom_vote": ("2026-11-01", "Study spec frozen Nov 1; the module landed Nov 4 unchanged from it."),
+    "mo_leg1": ("2026-10-31", "The owner closed the capsule as three legs on Oct 31; the modules of Nov 3 carry that rule."),
+    "mo_leg2": ("2026-10-31", "The owner closed the capsule as three legs on Oct 31; the modules of Nov 3 carry that rule."),
+    "mo_leg3": ("2026-10-31", "The owner closed the capsule as three legs on Oct 31; the modules of Nov 3 carry that rule."),
+    "mo_capsule": ("2026-10-31", "The owner closed the capsule as three legs on Oct 31."),
+    "vrp": ("2026-11-03", "Owner lock and frozen spec of Nov 3."),
 }
 PARKED = {"tfi"}
 LIVE_TIP = "Live by your note of Oct 20. The registry still says {tier}."
@@ -92,6 +124,10 @@ ENGINES = [
     ("ndx_atr", "ndx_atr", "NDX ATR", "NDX VXN's picks, no volatility sizing", "momentum", [], "ndx_atr_reaudition_20261002"),
     ("ndx_cap_atr", "ndx_atr_cap", "NDX cap ATR", "Max 4 names per sector", "momentum", [], "ndx_e2_sector_cap_20261004"),
     ("ndx_cap_natr", "ndx_natr_cap", "NDX cap NATR", "Picks by percent range, max 4 per sector", "momentum", [], "ndx_e2_sector_cap_20261004"),
+    ("mo_leg1", "mo_leg1", "Mom leg 1", "Nasdaq-100 momentum by percent range", "momentum", [], "residual_momentum_round21_20261031"),
+    ("mo_leg2", "mo_leg2", "Mom leg 2", "Nasdaq-100 momentum beyond the market's", "momentum", [], "residual_momentum_round21_20261031"),
+    ("mo_leg3", "mo_leg3", "Mom leg 3", "Russell 1000 momentum beyond the market's", "momentum", [], "residual_momentum_round21_20261031"),
+    ("mo_capsule", None, "Mom capsule", "The three momentum legs, a third each", "momentum", [], "residual_momentum_round21_20261031"),
     ("dv2", "dv2", "DV2", "S&P 500 dips, weak two-day close", "dips", [], "dv2_reaudition_20261002"),
     ("dv2_g", "dv2_g", "DV2-G", "S&P 500 dips, only in stressed markets", "dips", [("dv2_g_spmo", SPMO_WORD)], None),
     ("hpi", "hpi_vote", "HPI", "S&P 500 dips, unusually deep fall", "dips", [], "hpi_vote_reaudition_20261002"),
@@ -109,7 +145,13 @@ ENGINES = [
     ("tfi", "tactical_fi", "TFI", "Bonds by yield spreads", "macro", [], "tfi_reaudition_20261002"),
     ("eom", "eom_flow", "EOM", "Month-end stock and bond flow", "macro", [], "eom_reaudition_20261002"),
     ("eom_vote", "eom_vote", "Flow Vote", "Month-end stocks and bonds, by three votes", "macro", [], "eom_tradable_retro_20261101"),
+    ("vrp", "vrp", "VRP", "Short volatility through SVXY, VIXM hedge", "vol", [], "vrp_rsi2_locked_retro_20261103"),
 ]
+# Fixed mixes of cards above: parts, weights, reset ("month" or "year"), stage, words. The MR capsule's figures on the frozen window are checked below.
+BLENDS = {
+    "capsule": (["dv2_g", "hpi_g"], [0.5, 0.5], "month", "WIRED", "Two S&P 500 dip rules at half each, buying only in stressed markets, idle money in T-bills."),
+    "mo_capsule": (["mo_leg1", "mo_leg2", "mo_leg3"], [1 / 3, 1 / 3, 1 / 3], "year", "WIRED", "The three momentum legs at a third each, reset once a year: Nasdaq-100 by percent range, and Nasdaq-100 and Russell 1000 by momentum beyond the market's. Each decides on a month's last session and 10 sessions before it."),
+}
 # What an engine does, where the mapping run (numbers_factors.json) has no row, or words that do not match the rule in its module.
 WORDS = {
     "taa3x_1n": "TAA 3x's rotation, but each defensive ETF gets an equal 20% slot; failed slots go to 3x Nasdaq or cash.",
@@ -123,6 +165,11 @@ WORDS = {
     # module docstrings of strategies/mr_capsule/strategy_mr_*_vix_gated_liq_bil.py, in plain words
     "dv2_g_liq": "DV2-G's dip-buying, new entries only while the VIX stress gate is open, idle money in T-bills; each new entry is a tenth of the portfolio scaled by the stock's trading volume, between half and double.",
     "hpi_g_liq": "HPI-G's vote on deep falls, new entries only while the VIX stress gate is open, idle money in T-bills; each new entry is a tenth of the portfolio scaled by the stock's trading volume, between half and double.",
+    # strategies/momentum/momentum_capsule_legs.py and strategies/vix_stuff/strategy_vrp_svxy_vixm_rsi2.py, in plain words
+    "mo_leg1": "Nasdaq-100 stocks ranked by 12-month momentum per unit of daily percent range, only while the market is above its trend; half the book set on a month's last session, half 10 sessions before.",
+    "mo_leg2": "Nasdaq-100 stocks ranked by momentum left after taking out the market's move (residual momentum), with a rank buffer; half the book set on a month's last session, half 10 sessions before.",
+    "mo_leg3": "Russell 1000 stocks ranked by residual momentum, with a rank buffer and sector caps; half the book set on a month's last session, half 10 sessions before.",
+    "vrp": "Hold SVXY (short VIX futures) while VIX futures are in contango, more when SPY's two-day RSI is low; buy VIXM when the curve turns. Idle money in T-bills.",
     "disp": "Any of five industry ETFs that closes near its low on a wide-range day, above its 200-day average, gets a 20% slot.",
 }
 EOM_OPEN = 0.85
@@ -135,6 +182,8 @@ PLAN_FROM_STUDY = {
     "ndx_cap_atr": (0.66, "for the pair", _PLAN_PAIR), "ndx_cap_natr": (0.66, "for the pair", _PLAN_PAIR),
     "core5": (0.80, "plan", "Plan of record: the median of 200 random settings; its own read 0.95. Apr 2008 to 2022, no rate taken off. docs/research/SCOUT_ROBUSTNESS_20261002.md"),
     "compass": (0.85, "in-sample", "Honest in-sample figure, May 2003 to Aug 2026, no rate taken off. Holdout 1983 to 2002: 0.74. docs/research/INFLATION_COMPASS_DEEP_RESEARCH_20260928.md"),
+    "mo_capsule": (0.65, "plan", "Plan of record: 11% / 0.65 / -26%. The backtest is the best of 11 day pairs, median Sharpe 0.72. docs/research/RESIDUAL_MOMENTUM_20261031.md"),
+    "vrp": (0.70, "plan", "Plan of record about 0.70, not the backtest's 0.93: the RSI2 boost, the threshold and VIXM were chosen after 460 trials. docs/research/VRP_RSI2_BUILD_20261103.md"),
     "eom_vote": (0.95, "plan", "Plan of record: what is left if the vote fades, always TLT in the final week plus the pair. 2003 to Oct 30, 2026, idle cash at 0%, no rate taken off. docs/research/EOM_TRADABLE_20261101.md"),
 }
 # Next 10% in Build, and the line under it for a mix holding the engine: a lower Sharpe to say alongside the gain, only under Since 2008.
@@ -143,7 +192,9 @@ FADE = {"eom": {"sharpe": EOM_OPEN, "word": "if filled at the open", "label": "o
 NOT_CANDIDATE = {"eom": "Flow Vote is the newer rule of this family"}
 SAME_IDEA = {"eom": "month-end flow", "eom_vote": "month-end flow",
              # the sized pods are DV2-G and HPI-G with other entry sizes: one pod per engine
-             "dv2_g": "DV2-G", "dv2_g_liq": "DV2-G", "hpi_g": "HPI-G", "hpi_g_liq": "HPI-G"}
+             "dv2_g": "DV2-G", "dv2_g_liq": "DV2-G", "hpi_g": "HPI-G", "hpi_g_liq": "HPI-G",
+             # the capsule and its legs are one engine: a mix holds the capsule or legs, never both
+             "mo_leg1": "momentum capsule", "mo_leg2": "momentum capsule", "mo_leg3": "momentum capsule", "mo_capsule": "momentum capsule"}
 # Each module declares its execution policy (execution_policy_str, default timing): MOC for these two, MOO for every other engine, the capsule's two legs included.
 CLOSE_AUCTION = {"eom", "eom_vote"}
 MENU_NOTE = "Growth weights are proposals, not decided."
@@ -161,8 +212,8 @@ _CARD_NOTE_CAP = "The pair, to Oct 2: the sector cap passed its registered rule,
 _CARD_NOTE_GATE = "Own test: the stress gate beats 99.8% of 2,000 placebo gates in the Growth portfolio; alone it adds no Sharpe."
 GRADE_WORD = {"growth_mr_products_20261101": "Candidate, Nov 1, as the MR form of the Growth products"}
 CARD_NOTE = {"ndx_cap_atr": _CARD_NOTE_CAP, "ndx_cap_natr": _CARD_NOTE_CAP, "dv2_g": _CARD_NOTE_GATE, "hpi_g": _CARD_NOTE_GATE, "capsule": _CARD_NOTE_GATE}
-TRADES_NOTE = {"capsule": "Half DV2-G, half HPI-G", "tfi": "In T-bills: only small BIL orders in the last 3 years."}
-TRADES_OPENS = {"capsule": ["dv2_g", "hpi_g"]}  # engines named in the note above, each opens its own drawer
+TRADES_NOTE = {"capsule": "Half DV2-G, half HPI-G", "mo_capsule": "A third each in Mom leg 1, Mom leg 2 and Mom leg 3", "tfi": "In T-bills: only small BIL orders in the last 3 years."}
+TRADES_OPENS = {"capsule": ["dv2_g", "hpi_g"], "mo_capsule": ["mo_leg1", "mo_leg2", "mo_leg3"]}  # engines named in the note above, each opens its own drawer
 # Stage words, owner's definitions of 2026-10-10: alpha/strategy_registry.py lines 15 to 36. A tier is a claim about plumbing, not about edge.
 _PLUMBING = "Says the plumbing holds, not that it makes money."
 CANDIDATE_TIP = "Passed the Scout research gate; not portfolio-ready yet. Says the research held, not that it is wired."
@@ -199,7 +250,7 @@ _NDX_CAP_NATR = [
     *_NDX_CAP_REST,
     ("Design", "Since 2023 {y_own}% a year here, {y_vxn}% in NDX VXN, which has no cap and ranks differently. The 40% sector cap lags technology booms (pair, to Oct 2: 19.7% vs 24.9%) and saved {cap_saved} points against the same rule uncapped, Jul 1 to Oct 22, 2026."),
 ]
-_MR_TRIALS = "Gate and parking were chosen after about 100 variants. Chance the capsule's Sharpe is real after 410 trials: 90%, 65% since 2018."
+_MR_TRIALS = "Gate and parking were chosen after about 100 variants; 410 trials counted. Deflated Sharpe (Bailey and Lopez de Prado) 90% on the whole history, 65% since 2018: it discounts the trials, it does not show an economic edge."
 _MR_GATED = [
     ("Optimistic", _MR_TRIALS),
     ("Optimistic", _PLUS5),
@@ -213,7 +264,28 @@ _MR_SIZED = [
     ("Optimistic", "The liquidity part of the gain is concentrated in time: t 1.7, flat without 2020 and 2024-26."),
     ("Risk", "One name reaches about 24% of the pod, against about 13% with equal entries."),
 ]
+_MOM_LEG = [
+        ("Optimistic", "Chosen over 21 research rounds and about 3,000 series, no holdout, no deflated Sharpe; kept by the owner's decision after missing the frozen bar twice."),
+        ("Optimistic", "No measurable alpha since 2017: over the S&P 500, 6.0% a year, t 1.52; from 2022 t 0.82."),
+        ("Live risk", "Legs share names: on 85% of swap days since 2021 two legs hold opposite orders, and IBKR cancels the later in related accounts."),
+        ("Note", "Bench costs 2.5 bp a side and 0% cash; the research record used 5 bp plus half-spread and T-bill cash."),
+    ]
 CAVEATS = {
+    "mo_leg1": [*_MOM_LEG[:3], ("Optimistic, small", "No guard against a pinned price, unlike legs 2 and 3: 0.01 to 0.035 of Sharpe in research.")],
+    "mo_leg2": _MOM_LEG,
+    "mo_leg3": [*_MOM_LEG[:3], ("Limit", "Leg 3's decision peaks near 7.8 GB of memory; the VPS needs 16 GB.")],
+    "mo_capsule": [
+        ("Optimistic", "Plan on 11% / 0.65 / -26%: the backtest is the best of 11 day pairs, median Sharpe 0.72, deepest -30.5%."),
+        ("Optimistic", "Sharpe by era: 2000-07 0.54, 2008-12 0.78, 2013-21 1.07, 2022-26 0.43. No alpha since 2017, t 1.52."),
+        ("Note", "Does not earn its slot in Growth: ahead on 0.33 of paired paths against the bar of 0.80."),
+        ("Live risk", "Opposite orders between legs on 85% of swap days: one account for the capsule, or ask IBKR, before paper."),
+    ],
+    "vrp": [
+        ("Optimistic", "RSI2 boost, 0.98 threshold and VIXM chosen after 460 trials on 2011-2026: plan Sharpe about 0.70, not 0.93."),
+        ("Tail", "A doubling of front VIX futures is about -50% for SVXY, about -15% for the pod at a typical 0.3 weight."),
+        ("Live risk", "One missed session is expensive: a day late, Sharpe 0.93 to 0.62 and Feb 2018 -3% to -23%."),
+        ("Limit", "SVXY turnover sets capacity: 15 bp a side at a $300-400K pod, about a $3-4M fund at 10 points. Fill cost not measured."),
+    ],
     "dv2_g_liq": [*_MR_SIZED, ("Optimistic", "Capacity at the open: Bench suggests about $250K a pod, the route model's $5M for the book is too high.")],
     "hpi_g_liq": [*_MR_SIZED, ("Optimistic", "Capacity at the open: Bench suggests about $100K a pod, the route model's $5M for the book is too high.")],
     "taa3x": [
@@ -356,7 +428,12 @@ def lab(series: pd.Series) -> pd.Series:
 
 def saved_history(key: str) -> pd.Series:
     """A module with no frozen column: the newest saved research run that covers the page's start, same fair-cash add, cut to that start."""
-    path = path_of(saved_run(RUNS[key][0].rsplit(".", 1)[1], covers=LAB[0])[1]["results"])
+    stem = RUNS[key][0].rsplit(".", 1)[1]
+    try:
+        state = saved_run(stem, covers=LAB[0])[1]
+    except FileNotFoundError:  # its saved run starts after the page's start: it shows from its own first session
+        state = saved_run(stem)[1]
+    path = path_of(state["results"])
     returns = house_returns(path) + cash_add(path, dtb3_rate(path.index)).reindex(path.index).fillna(0.0)
     return returns.loc[LAB[0]:].dropna()
 
@@ -391,21 +468,26 @@ def bench_series() -> tuple[pd.Series, pd.Series]:
             pd.concat([frozen_t, bench["BIL"].loc[bench.index > frozen_t.index[-1]].dropna()]))
 
 
-def monthly_blend(a: pd.Series, b: pd.Series) -> pd.Series:
-    """Half and half, rebalanced at each month start: reproduces the recorded MR capsule."""
-    frame = pd.concat([a, b], axis=1).dropna()
-    weights = np.array([0.5, 0.5])
-    held, values, last_month = weights.copy(), [], None
+def blend(parts: list[pd.Series], weights: list[float], reset: str = "month") -> pd.Series:
+    """A fixed mix, back to its weights at the first session of each month or year: half and half by month reproduces the recorded MR capsule."""
+    frame = pd.concat(parts, axis=1).dropna()
+    weights = np.array(weights, dtype=float)
+    held, values, last = weights.copy(), [], None
     for date, row in frame.iterrows():
-        if last_month is not None and date.month != last_month:
+        period = date.month if reset == "month" else date.year
+        if last is not None and period != last:
             held = weights * held.sum()
         held = held * (1 + row.to_numpy())
         values.append(held.sum())
-        last_month = date.month
+        last = period
     equity = pd.Series(values, index=frame.index)
     returns = equity.pct_change()
     returns.iloc[0] = equity.iloc[0] - 1
     return returns
+
+
+def monthly_blend(a: pd.Series, b: pd.Series) -> pd.Series:
+    return blend([a, b], [0.5, 0.5], "month")
 
 
 # ----------------------------------------------------------------- factors, same method as the mapping run
@@ -751,11 +833,16 @@ page_names: dict[str, str] = {}
 engines = []
 for engine_id, key, name, sub, family, versions, registration in ENGINES:
     if key is None:
-        returns = monthly_blend(returns_by_id["dv2_g"], returns_by_id["hpi_g"])
+        parts, weights, reset, stage, words = BLENDS[engine_id]
+        if any(part not in returns_by_id for part in parts):
+            warn(f"{name}: a part has no history tonight, left off the page")
+            continue
+        returns = blend([returns_by_id[part] for part in parts], weights, reset)
         end = str(returns.index[-1].date())
-        check = frozen_stats(returns)
-        expect(abs(check["cagr"] - 16.8) < 0.1 and abs(check["sharpe"] - 1.02) < 0.01 and abs(check["dd"] + 21.4) < 0.1, f"MR capsule no longer reads 16.8, 1.02, -21.4 on the frozen window: {check}")
-        tier, stage, words = "WIRED", "WIRED", "Two S&P 500 dip rules at half each, buying only in stressed markets, idle money in T-bills."
+        if engine_id == "capsule":
+            check = frozen_stats(returns)
+            expect(abs(check["cagr"] - 16.8) < 0.1 and abs(check["sharpe"] - 1.02) < 0.01 and abs(check["dd"] + 21.4) < 0.1, f"MR capsule no longer reads 16.8, 1.02, -21.4 on the frozen window: {check}")
+        tier = stage
     else:
         returns, end = extended(key)
         if returns.empty:
@@ -786,8 +873,10 @@ for engine_id, key, name, sub, family, versions, registration in ENGINES:
         page_names[version_key] = f"{name}: {version_name}"
         # a version that stopped before its engine says to when, as an engine does
         version_rows.append({"key": version_key, "name": f"{version_name}, data to {full_date(version_end)}" if version_end < end else version_name, "stage": registry_tier(version_key), "end": version_end})
-    if key is None:
+    if engine_id == "capsule":
         plus5 = frozen_stats(monthly_blend(lab(PLUS5["dv2_g"]), lab(PLUS5["hpi_g"])))["sharpe"]
+    elif key is None:
+        plus5 = None
     else:
         plus5 = frozen_stats(lab(PLUS5[key]))["sharpe"] if key in PLUS5.columns else None
     stand_in = STAND_IN.get(engine_id)
@@ -799,7 +888,7 @@ for engine_id, key, name, sub, family, versions, registration in ENGINES:
         trades = None
     engines.append({
         "id": engine_id, "name": name, "sub": sub, "fam": family, "stage": "PM READY" if stage == "PM_READY" else stage, "words": words, "end": end,
-        "tier": tier, "live": LIVE_SINCE.get(engine_id), "fillsOnRecord": engine_id in FILLS_ON_RECORD, "liveWord": LIVE_WORD.get(engine_id),
+        "tier": tier, "blend": key is None, "frozen": FROZEN_SINCE.get(engine_id, (None, None))[0], "frozenWhy": FROZEN_SINCE.get(engine_id, (None, None))[1], "live": LIVE_SINCE.get(engine_id), "fillsOnRecord": engine_id in FILLS_ON_RECORD, "liveWord": LIVE_WORD.get(engine_id),
         "liveTip": LIVE_TIP.format(tier=tier.replace("_", " ")) if key in LIVE_BY_OWNER and tier != "LIVE" else LIVE_NOTE.get(engine_id),
         "alphaTip": ALPHA_TIP[engine_id].format(end=full_date(end)) if engine_id in ALPHA_TIP else None, "alphaNetTip": ALPHA_NET_TIP[engine_id].format(fee=abs(load["net_alpha"] - load["etf"]["alpha"]) * 100, net=abs(load["net_alpha"]) * 100, end=full_date(end)) if engine_id in ALPHA_NET_TIP else ALPHA_TIP.get(engine_id), "standIn": {"to": stand_in[0], "word": stand_in[1]} if stand_in else None, "parked": engine_id in PARKED,
         "etf": {c: {"b": round(load["etf"]["beta"][c], 2), "t": t_value(load["etf"]["t"][c])} for c in ETF_COLS}, "etfR2": round(load["etf"]["r2"], 2),

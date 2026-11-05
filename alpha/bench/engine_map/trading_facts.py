@@ -38,6 +38,7 @@ ENGINE_STEMS = {
     "downshock": "strategy_mr_us_sector_etf_ibs_downshock_vox_iyr", "dispersion": "strategy_mr_sector_dispersion_ibs_kie_ihi_asset_sma200", "core5": "strategy_taa_adaptive_macro_core5",
     "trinity": "strategy_taa_trinity_vol_control_8_bil", "compass": "strategy_taa_inflation_compass", "tfi": "strategy_taa_tactical_fixed_income_ief_lqd", "eom": "strategy_taa_month_end_rebalancing_flow",
     "eom_vote": "strategy_taa_month_end_flow_vote", "dv2_g_liq": "strategy_mr_dv2_vix_gated_liq_bil", "hpi_g_liq": "strategy_mr_hpi_vote_vix_gated_liq_bil",
+    "mo_leg1": "strategy_mo_capsule_leg1_natr_ndx", "mo_leg2": "strategy_mo_capsule_leg2_residual_ndx", "mo_leg3": "strategy_mo_capsule_leg3_residual_r1000", "vrp": "strategy_vrp_svxy_vixm_rsi2",
 }
 YEARS = 3.0
 

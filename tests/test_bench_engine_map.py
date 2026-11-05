@@ -217,3 +217,16 @@ def test_date_words_match_the_page():
     assert pages._date_words_str("2026-10-30", with_time_bool=False) == "Oct 30, 2026"
     assert pages._date_words_str("2026-11-05T00:09:50", with_time_bool=True) == "Nov 5, 00:09"
     assert pages._date_words_str(None, with_time_bool=True) is None
+
+
+def test_overlap_gate_names_the_run_outside_the_limits():
+    from alpha.bench.engine_map.refresh import OVERLAP_LIMITS, overlap_failures
+
+    good_dict = {"alias": "fine", "days": 252, "corr": 1.0, "max_gap_bp": 0.2, "mean_gap_bp_year": -0.3}
+    bad_dict = {"alias": "drift", "days": 252, "corr": 0.98, "max_gap_bp": 40.0, "mean_gap_bp_year": 3.0}
+    short_dict = {"alias": "short", "days": OVERLAP_LIMITS["min_days"] - 1, "corr": 1.0, "max_gap_bp": 0.0, "mean_gap_bp_year": 0.0}
+    assert overlap_failures([good_dict]) == []
+    failure_list = overlap_failures([good_dict, bad_dict, short_dict])
+    assert [line_str.split(":")[0] for line_str in failure_list] == ["drift", "short"]
+    assert "corr 0.98" in failure_list[0] and "max gap 40.0 bp" in failure_list[0]
+    assert "days overlap" in failure_list[1]

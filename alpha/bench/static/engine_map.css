@@ -345,3 +345,5 @@
 .emap .jumps td span[data-open]:hover { text-decoration: underline; text-underline-offset: 3px; }
 @media (max-width: 1100px) { .emap .stressgrid { grid-template-columns: minmax(0, 1fr); } }
 .emap text.neg { fill: var(--color-loss); }
+.emap .spark .fz, .emap .chart .fz { stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 3 3; opacity: .55; }
+.emap .spark .lv, .emap .chart .lv { stroke: var(--ink-2); stroke-width: 1; opacity: .6; }

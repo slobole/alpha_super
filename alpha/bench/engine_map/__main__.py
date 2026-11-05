@@ -46,6 +46,9 @@ def run_refresh(refresh_arg_list: list[str]) -> int:
     if status_dict.get("finished", "") < started_str:
         print("refresh did not finish: the map keeps its last build", flush=True)
         return 1
+    if status_dict.get("overlap_failed"):
+        print(f"a run does not reproduce its frozen history ({'; '.join(status_dict['overlap_failed'])}): the map keeps its last build", flush=True)
+        return 1
     if status_dict.get("bench_error"):
         print(f"QQQ and T-bills not refreshed ({status_dict['bench_error']}): the map keeps its last build", flush=True)
         return 1
