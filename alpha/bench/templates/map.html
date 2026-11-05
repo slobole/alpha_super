@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% set active_nav = "map" %}
+{% block title %}Strategy map{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='engine_map.css') }}">{% endblock %}
+{% block content %}
+{# Everything the map draws lives inside .emap: its stylesheet is scoped to it,
+   and the drawer, tooltip and scrim sit inside so they read the same tokens. #}
+<div class="emap{{ ' ready' if not data_ready_bool }}" id="emap" data-src="{{ url_for('map_data_fn') }}">
+  <header class="catalog-head map-head">
+    <div>
+      <div class="page-kicker">Research control panel</div>
+      <h1 class="catalog-title">Strategy map</h1>
+      <p class="catalog-strapline">Backtests after trading costs, before fund fees.</p>
+      <p class="map-asof" id="asof">{% if last_close_str %}Last close {{ last_close_str }}{% if built_str %}, updated {{ built_str }}{% endif %}{% endif %}</p>
+    </div>
+    <div class="map-refresh">
+      {% if refresh_job %}
+      <a class="btn" href="{{ url_for('jobs_page_fn') }}">Refresh running · see Jobs</a>
+      {% else %}
+      <form class="inline" method="post" action="{{ url_for('map_refresh_api_fn') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">
+        <button class="btn btn-run" type="submit" title="Re-runs every engine from 2024 to the last close, then rebuilds the map. About 6 to 9 minutes.">Refresh map</button>
+      </form>
+      {% endif %}
+    </div>
+  </header>
+
+  {% if not data_ready_bool %}
+  <div class="notice notice-info map-missing">
+    <div class="notice-title">The map has no data yet.</div>
+    <div class="notice-detail">Refresh map runs every engine and builds it, in about 6 to 9 minutes. With the working files already in place, <span class="mono">python -m alpha.bench.engine_map build</span> builds it in seconds.</div>
+  </div>
+  {% else %}
+  {% if warning_list %}
+  <div class="notice notice-warn map-warnings">
+    <div class="notice-title">The last build left {{ warning_list|length }} warning{{ '' if warning_list|length == 1 else 's' }}.</div>
+    <div class="notice-detail">{% for warning_str in warning_list %}<div>{{ warning_str }}</div>{% endfor %}</div>
+  </div>
+  {% endif %}
+  <div class="emap-body">
+    <section class="catalog-stat-band map-band" aria-label="Map totals">
+      <div id="t-all"><span>On the map</span><b id="n-all">–</b></div>
+      <div id="t-live"><span>Live</span><b id="n-live">–</b></div>
+      <div id="t-wired"><span>Wired</span><b id="n-wired">–</b></div>
+      <div id="t-pm"><span>PM ready</span><b id="n-pm">–</b></div>
+      <div id="t-cand"><span>Candidate</span><b id="n-cand">–</b></div>
+    </section>
+
+    <div class="hero">
+      <section id="s-map" aria-label="Strategy map">
+        <div class="shead"><h2><span id="maptitle"></span><button class="qbtn" aria-expanded="false" aria-label="What this shows: Map">?</button></h2><p>Each dot is one strategy: higher is better, further left is a smaller loss. CVaR 5% is the average of its worst 5% of days.</p></div>
+        <div class="ctrl">
+          <div class="toolbar-group"><span class="toolbar-group-label">Maturity</span><span class="chips" role="group" aria-label="Maturity" id="stagefilter"></span></div>
+          <div class="toolbar-group"><span class="toolbar-group-label">Period</span><span class="chips" role="group" aria-label="Period" id="periods"></span></div>
+          <div class="toolbar-group"><span class="toolbar-group-label">Up</span><span class="chips" role="group" aria-label="Up axis" id="mapy"></span></div>
+          <div class="toolbar-group"><span class="toolbar-group-label">Across</span><span class="chips" role="group" aria-label="Across axis" id="mapx"></span></div>
+        </div>
+        <div class="panel pad">
+          <div class="panelhead"><div class="mapkey" id="mapkey"></div></div>
+          <div class="chartbox" id="mapbox"><span class="pnote">Loading the strategies</span></div>
+        </div>
+      </section>
+      <section id="s-lately" aria-label="Latest">
+        <div class="shead"><h2>What happened lately<button class="qbtn" aria-expanded="false" aria-label="What this shows: Lately">?</button><span class="stag" id="nowtag"></span></h2><p id="nowtitle"></p></div>
+        <div class="panel pad"><div class="nowgrid" id="nowbox"></div></div>
+      </section>
+    </div>
+
+    <section id="s-engines">
+      <div class="shead"><h2>Every strategy on its own chart<button class="qbtn" aria-expanded="false" aria-label="What this shows: Strategies">?</button><span class="stag" id="tiletag"></span></h2><p id="sparknote"></p></div>
+      <div class="ctrl">
+        <div class="toolbar-group"><span class="toolbar-group-label">Charts</span><span class="chips" role="group" aria-label="Charts" id="chartmode"></span></div>
+        <div class="toolbar-group"><span class="toolbar-group-label">Group by</span><span class="chips" role="group" aria-label="Group by" id="groupby"></span></div>
+        <div class="toolbar-group"><span class="toolbar-group-label">View</span><span class="chips" role="group" aria-label="View">
+          <button class="filter-chip" id="v-chart" aria-pressed="true">Charts</button><button class="filter-chip" id="v-table" aria-pressed="false">Table</button>
+        </span></div>
+      </div>
+      <div class="bands" id="bands"></div>
+      <div class="panel tablewrap" id="tableview" hidden></div>
+    </section>
+
+    <section id="s-bets">
+      <div class="shead"><h2>Which strategies are really the same bet?<button class="qbtn" aria-expanded="false" aria-label="What this shows: Clusters">?</button></h2><p id="simnote"></p></div>
+      <div class="panel pad">
+        <div class="betstats">
+          <div class="big" id="b-count"><b id="b-groups"></b><span>Groups</span><small id="b-split"></small></div>
+          <label class="slider" for="b-cut"><span id="b-cutlabel"></span><input id="b-cut" type="range" min="0.2" max="0.9" step="0.05" value="0.6"></label>
+        </div>
+        <div class="chartbox" id="simbox"></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="shead"><h2>Who moves with whom<button class="qbtn" aria-expanded="false" aria-label="What this shows: Correlations">?</button></h2><p>Each cell is the weekly correlation between two strategies. Dark green means they move together, red that they move apart. Frames are the groups from the slider above; the tree on the left shows who joined whom.</p></div>
+      <div class="panel pad">
+        <div class="panelhead"><span class="corrnote" id="corrnote"></span><span class="scale">&minus;1<i></i>+1</span></div>
+        <div class="corrwrap">
+          <div class="scroll" id="corrbox"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="s-stress">
+      <div class="shead"><h2>Calm and stress<button class="qbtn" aria-expanded="false" aria-label="What this shows: Calm and stress">?</button><span class="stag">All history, weekly</span></h2><p>Every week is calm or stress, by what QQQ did. Stress has far fewer weeks, so its correlations are noisier, and they lean high by construction when markets swing more. A strategy with a short history sees only the stress weeks it lived through: the tick on its bar is QQQ in those same weeks. The pale band around a stress dot is its noise: a calm dot inside it has not really moved. Worst weeks together is free of that bias: it counts weeks, not correlation.</p></div>
+      <div class="ctrl">
+        <div class="toolbar-group"><span class="toolbar-group-label">Stress means</span><span class="chips" role="group" aria-label="Stress means" id="stressdef"></span></div>
+      </div>
+      <div class="catalog-stat-band stress-band" id="stressband"></div>
+      <div class="panel pad">
+        <div class="panelhead"><span class="stresskey"><span><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="4.2" class="k-calm"/></svg>Calm</span><span><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="5" class="k-stress"/></svg>Stress</span><span><svg width="4" height="14" aria-hidden="true"><line x1="2" x2="2" y1="0" y2="14" class="k-tick"/></svg>QQQ in the same weeks</span><span><svg width="22" height="12" aria-hidden="true"><rect x="0" y="0" width="22" height="12" rx="3" class="k-noise"/></svg>Noise</span></span></div>
+        <div class="scroll" id="stressrows"></div>
+      </div>
+      <div class="stressgrid">
+        <div class="panel pad">
+          <div class="panelhead"><span class="stressh" data-tip="Of QQQ's worst 10% of weeks in the strategy's own history, the share in which the strategy also had one of its own worst 10%. Unrelated moves give 10%.">Worst weeks together</span></div>
+          <div class="scroll" id="stresstail"></div>
+        </div>
+        <div class="panel pad">
+          <div class="panelhead"><span class="stressh">Pairs that move together much more in stress</span></div>
+          <div class="tablewrap"><table class="etable jumps" id="stressjumps"></table></div>
+          <p class="corrnote" id="stressjumpnote"></p>
+        </div>
+      </div>
+    </section>
+
+    <section id="s-years">
+      <div class="shead"><h2><span id="yearstitle"></span><button class="qbtn" aria-expanded="false" aria-label="What this shows: Years">?</button><span class="stag">All history</span></h2><p id="yearsnote"></p></div>
+      <div class="panel pad">
+        <div class="panelhead"><span class="scale">&minus;40%<i></i>+40%</span></div>
+        <div class="scroll" id="yearbox"></div>
+      </div>
+    </section>
+
+    <section id="s-factors">
+      <div class="shead"><h2><span id="facttitle"></span><button class="qbtn" aria-expanded="false" aria-label="What this shows: Factors">?</button><span class="stag" id="facttag"></span></h2><p id="factnote"></p></div>
+      <div class="panel pad">
+        <div class="panelhead"><span class="scale">&minus;1<i></i>+1</span></div>
+        <div class="scroll" id="factbox"></div>
+      </div>
+    </section>
+
+    <section id="s-build">
+      <div class="shead"><h2>Build a portfolio<button class="qbtn" aria-expanded="false" aria-label="What this shows: Build">?</button><span class="stag" id="buildtag"></span></h2><p>Pick a portfolio from the menu or set your own weights; every number updates at once. Weights reset each January, as in the fund studies.</p></div>
+      <div class="panel pad">
+        <div class="presets" id="presets"></div>
+        <div class="build">
+          <div id="weights"></div>
+          <div class="stack">
+            <div class="mixstats" id="mixstats"></div>
+            <div class="dsec"><h4>Growth of $1</h4><div class="chart" id="m-growth"></div></div>
+            <div class="dsec"><h4>Drawdown</h4><div class="chart" id="m-dd"></div></div>
+            <div class="dsec"><h4 data-tip="Share of weekly variance, at the set weights. Return share is of the return over T-bills, shown when that is at least 1% a year.">Where the risk comes from</h4><div class="riskbar" id="m-risk"></div><div class="risklist" id="m-risklist"></div><div class="mlines" id="m-lines"></div></div>
+            <div class="dsec"><h4>By year <span class="stag">All history</span></h4><div class="chart" id="m-years"></div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <div class="foot" id="foot"></div>
+  </div>
+  <div id="tip" hidden></div>
+  <div id="scrim" hidden></div>
+  <aside id="drawer" hidden role="dialog" aria-modal="true" aria-label="Strategy details"></aside>
+  {% endif %}
+</div>
+{% if data_ready_bool %}<script src="{{ url_for('static', filename='engine_map.js') }}" defer></script>{% endif %}
+{% endblock %}

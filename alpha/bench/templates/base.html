@@ -7,6 +7,7 @@
   <script src="{{ url_for('static', filename='htmx.min.js') }}"></script>
   <link rel="stylesheet" href="{{ url_for('static', filename='bench.css') }}">
   <style>{{ bench_theme_css_str | safe }}</style>
+  {% block head_extra %}{% endblock %}
 </head>
 <body class="bench-body">
   <div class="bench-shell">
@@ -22,6 +23,9 @@
       <nav class="sidebar-nav" aria-label="Research navigation">
         <a href="{{ url_for('index_page_fn') }}" class="{{ 'active' if active_nav == 'strategies' }}">
           <span class="sidebar-icon">{% include "_icon_strategies.svg" %}</span><span>Strategies</span>
+        </a>
+        <a href="{{ url_for('map_page_fn') }}" class="{{ 'active' if active_nav == 'map' }}">
+          <span class="sidebar-icon">{% include "_icon_map.svg" %}</span><span>Map</span>
         </a>
         <a href="{{ url_for('compare_page_fn') }}" class="{{ 'active' if active_nav == 'compare' }}">
           <span class="sidebar-icon">{% include "_icon_compare.svg" %}</span><span>Compare</span>

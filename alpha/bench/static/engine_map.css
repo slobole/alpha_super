@@ -1,0 +1,347 @@
+/* Strategy map (/map). Ported from the Engine Map's own stylesheet and flattened to Bench: hairlines, 3px corners,
+   mono figures, uppercase small labels, no shadows, light only. Every rule sits under .emap so nothing reaches the rest
+   of Bench, and every colour is a Bench token: no palette of its own. The page's old names (--ink, --grid, ...) are kept
+   as aliases so the script, which writes them into SVG, needs no second set of names.
+   Stage colours are Bench's maturity colours; families group the tiles, they do not colour them. */
+
+.emap {
+  --plane: var(--color-page); --surface: var(--color-panel); --ink: var(--color-ink);
+  --ink-2: color-mix(in srgb, var(--color-ink) 62%, var(--color-muted)); --ink-3: var(--color-muted);
+  --grid: var(--color-grid); --axis: color-mix(in srgb, var(--color-muted) 32%, var(--color-border)); --edge: var(--color-border);
+  --band: color-mix(in srgb, var(--color-ink) 5%, transparent); --ref: color-mix(in srgb, var(--color-muted) 62%, var(--color-page));
+  --warn: var(--color-warning-dark); --warn-bg: var(--color-warning-wash); --hullc: var(--color-ink);
+  --pos: var(--color-profit); --neg: var(--color-loss); --mid: var(--color-grid);
+  --scrim: color-mix(in srgb, var(--color-ink) 24%, transparent); --fail: var(--color-loss-dark); --on-fill: var(--color-page);
+  --accent: var(--color-accent);
+  --stage-live: var(--color-profit-dark); --stage-wired: color-mix(in srgb, var(--color-profit) 72%, var(--color-page));
+  --stage-pm: var(--color-warning); --stage-cand: var(--color-muted);
+  --sans: var(--font-prose); --mono: var(--font-figure); --fs-label: .58rem;
+  --c: var(--ink);
+  --top: 47px; /* Bench's sticky topbar */
+  color: var(--ink); font-family: var(--sans); font-size: 14px; line-height: 1.5;
+}
+.emap [hidden] { display: none !important; }
+:where(.emap) :is(button, select, input) { font: inherit; color: inherit; }
+:where(.emap) button { background: none; border: 0; padding: 0; cursor: pointer; text-align: inherit; }
+.emap :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.emap .panel { background: var(--surface); border: 1px solid var(--edge); border-radius: 3px; min-width: 0; box-shadow: none; }
+.emap .pad { padding: 18px 20px; }
+.emap section { scroll-margin-top: calc(var(--top) + var(--bar-h, 52px) + 12px); min-width: 0; }
+.emap section:focus-visible { outline: none; }
+.emap:not(.ready) .emap-body { visibility: hidden; }
+.emap .neg { color: var(--color-loss); }
+
+/* head: Bench's catalog head, with the last close and the refresh button */
+.emap .map-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap; }
+.emap .map-asof { margin: 6px 0 0; color: var(--ink-3); font-family: var(--mono); font-size: .66rem; letter-spacing: .08em; text-transform: uppercase; min-height: 1.2em; }
+.emap .map-asof .ttag { margin-left: 8px; text-transform: none; letter-spacing: 0; }
+.emap .map-refresh { padding-bottom: 4px; }
+.emap .map-missing, .emap .map-warnings { margin-top: 14px; }
+.emap-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 40px; }
+.emap .map-band { grid-template-columns: repeat(5, minmax(0, 1fr)); margin: 0 0 -26px; }
+.emap .map-band > div[data-tip] { cursor: default; }
+
+/* controls: Bench's underline filter chips */
+.emap .chips { display: inline-flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.emap .filter-chip { font-family: var(--mono); padding: 2px 0; border-bottom: 1.5px solid transparent; color: var(--ink-3); white-space: nowrap; }
+.emap .filter-chip:hover { color: var(--ink); }
+.emap .filter-chip[aria-pressed="true"] { color: var(--ink); border-bottom-color: var(--ink); }
+.emap .filter-chip.soon, .emap .filter-chip[aria-disabled="true"] { opacity: .45; cursor: default; }
+.emap .filter-chip.soon:hover, .emap .filter-chip[aria-disabled="true"]:hover { color: var(--ink-3); }
+.emap .bar { position: sticky; top: var(--top); z-index: 30; background: var(--plane); display: flex; flex-wrap: wrap; align-items: center; gap: 10px 30px; padding: 10px 0 11px; margin-block: 0 -22px; border-bottom: 1px solid var(--edge); }
+.emap .bar .toolbar-group, .emap .ctrl .toolbar-group { gap: 12px; }
+.emap .jump { margin-inline-start: auto; display: flex; gap: 12px; flex-wrap: wrap; font-family: var(--mono); font-size: .62rem; letter-spacing: .1em; text-transform: uppercase; }
+.emap .jump button { color: var(--ink-3); text-transform: uppercase; letter-spacing: .1em; }
+.emap .jump button:hover { color: var(--ink); }
+
+/* section heads */
+.emap .shead { margin-bottom: 10px; }
+.emap h2 { margin: 0; font: 600 1.05rem/1.35 var(--sans); text-wrap: balance; }
+.emap .shead p { display: none; margin: 5px 0 0; color: var(--ink-2); font-size: .84rem; max-width: 125ch; text-wrap: pretty; }
+.emap .shead.open p { display: block; }
+.emap .qbtn { display: inline-grid; place-items: center; width: 17px; height: 17px; margin-inline-start: 9px; border-radius: 50%; border: 1px solid var(--edge); color: var(--ink-3); font: 500 11px/1 var(--mono); text-align: center; vertical-align: 2px; }
+.emap .qbtn:hover, .emap .qbtn[aria-expanded="true"] { color: var(--ink); border-color: var(--ink-3); }
+.emap .stag { margin-inline-start: 12px; color: var(--ink-3); font: 400 .62rem/1.3 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+.emap .panelhead { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px; margin-bottom: 10px; min-height: 20px; }
+.emap .mapkey { margin-inline-start: auto; display: flex; gap: 18px; color: var(--ink-3); font-family: var(--mono); font-size: .62rem; letter-spacing: .1em; text-transform: uppercase; align-items: center; flex-wrap: wrap; }
+.emap .mapkey > span { display: inline-flex; align-items: center; gap: 6px; }
+.emap .scale { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-3); font-family: var(--mono); font-size: .7rem; margin-inline-start: auto; }
+.emap .scale i { display: inline-block; width: 110px; height: 8px; border-radius: 2px; background: linear-gradient(90deg, var(--neg), var(--mid), var(--pos)); }
+.emap .panelhead .scale { margin-inline-end: 3px; }
+.emap .pnote { color: var(--ink-3); font-size: .84rem; }
+
+/* stage colours, on every dot that stands for a strategy */
+.emap .s-live { --c: var(--stage-live); }
+.emap .s-wired { --c: var(--stage-wired); }
+.emap .s-pm { --c: var(--stage-pm); }
+.emap .s-cand { --c: var(--stage-cand); }
+.emap .pt.s-cand .mk, .emap .corrnames .s-cand circle { stroke-dasharray: 2 2; }
+.emap .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; display: inline-block; background: var(--c); }
+.emap .dot.s { width: 8px; height: 8px; margin-inline-end: 7px; vertical-align: 0; }
+.emap .dot.s-pm, .emap .dot.s-cand { background: transparent; box-shadow: inset 0 0 0 2px var(--c); }
+.emap .dot.s-cand { box-shadow: none; border: 1.5px dashed var(--c); }
+
+/* charts */
+.emap .hero { display: grid; grid-template-columns: minmax(0, 1fr); gap: 40px; }
+.emap .chartbox { position: relative; overflow-x: auto; }
+.emap .chartbox > svg { display: block; width: 100%; min-width: 700px; }
+.emap .axis-t { font-family: var(--mono); font-size: 11px; fill: var(--ink-3); }
+.emap .axis-n { font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; fill: var(--ink-3); }
+.emap .lbl { font-size: 13px; fill: var(--ink); pointer-events: none; }
+.emap .lbl.live { font-weight: 600; }
+.emap .lbl.ref { fill: var(--ink-3); }
+.emap .lbl, .emap .glabel { paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
+.emap text.lbl[data-open] { pointer-events: auto; cursor: pointer; }
+.emap .mover { transition: transform .45s cubic-bezier(.3,.7,.2,1); }
+.emap .noanim .mover { transition: none; }
+.emap .pt { cursor: pointer; }
+.emap .pt .hit { fill: transparent; }
+.emap .pt:focus-visible .mk, .emap .pt.hot .mk { stroke-width: 4; }
+.emap .pt:focus-visible { outline: none; }
+.emap .pt:focus-visible .hit { stroke: var(--accent); stroke-width: 2; }
+.emap .dim { opacity: .18; }
+.emap .chart { position: relative; }
+.emap .chart svg { display: block; width: 100%; overflow: visible; }
+.emap .chart svg text { pointer-events: none; }
+
+/* heat tables: Bench green up, red down */
+.emap .heat { border-collapse: separate; border-spacing: 3px; width: 100%; font-family: var(--mono); font-size: 12px; }
+.emap .heat th { font: 400 .6rem/1.25 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); padding: 2px 3px 6px; text-align: center; white-space: nowrap; }
+.emap .heat th.group { color: var(--ink-2); border-bottom: 1px solid var(--axis); padding-bottom: 6px; vertical-align: bottom; }
+.emap .heat td { height: 30px; padding: 0 5px; text-align: center; border-radius: 2px; white-space: nowrap; }
+.emap .heat td.n { text-align: start; padding-inline: 0 10px; color: var(--ink-2); border-radius: 0; font-family: var(--sans); font-size: 13px; }
+.emap .heat td.plain { color: var(--ink-3); }
+.emap .heat td.dotted { text-decoration: underline dotted; text-underline-offset: 3px; }
+.emap .heat th[data-hsort] { position: relative; cursor: pointer; }
+.emap .heat th[data-hsort]:hover, .emap .heat th[aria-sort] { color: var(--ink); }
+.emap .harrow { position: absolute; margin-inline-start: 3px; }
+.emap .heat tr.clk { cursor: pointer; }
+.emap .heat tr.clk:hover td.n { color: var(--ink); font-weight: 500; }
+.emap .heat tr td.n.live, .emap .heat tr.clk:hover td.n.live { color: var(--ink); font-weight: 600; }
+.emap .heat tr.ref td.n { color: var(--ink-3); padding-inline-start: 15px; }
+.emap .heat.fixed { table-layout: fixed; }
+.emap .heat.fixed th { white-space: normal; padding-inline: 0; }
+.emap .heat.fixed td:not(.n) { white-space: normal; line-height: 1.1; padding-inline: 1px; }
+.emap .heat.fixed th:first-child { width: 124px; }
+.emap .heat td.n, .emap .heat th:first-child, .emap .etable td:first-child, .emap .etable th:first-child { position: sticky; left: 0; z-index: 1; background: var(--surface); }
+.emap .scroll, .emap .tablewrap, .emap .nowgrid { scroll-padding-inline: 136px 40px; }
+.emap .gap { width: 22px; }
+.emap .ar { display: inline-block; min-width: 3.9em; text-align: end; }
+.emap .scroll { overflow-x: auto; }
+.emap .nowgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(520px, 100%), 1fr)); gap: 26px 40px; align-items: start; overflow-x: auto; }
+.emap .nowgrid > div { min-width: 480px; }
+.emap .nowgrid .famh { position: sticky; left: 0; width: fit-content; padding-inline-start: 3px; }
+.emap .famh { margin: 0 0 8px; font: 400 .66rem/1.25 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink); display: flex; gap: 8px; align-items: baseline; }
+.emap .famh .dot { display: none; }
+.emap .famh small { color: var(--ink-3); font-size: inherit; font-weight: 400; }
+
+/* tiles: grouped by family, lines in ink */
+.emap .ctrl { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 30px; margin-bottom: 18px; }
+.emap .bands { display: grid; grid-template-columns: minmax(0, 1fr); gap: 26px; }
+.emap .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); gap: 12px; }
+.emap .tile { --c: var(--ink); display: flex; flex-direction: column; justify-content: flex-start; width: 100%; padding: 12px 14px; cursor: pointer; }
+.emap .tile:hover, .emap .tile.hot { border-color: var(--ink-3); }
+.emap .thead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.emap .tname { font: 600 .95rem/1.25 var(--sans); }
+.emap .tile .maturity, .emap .etable .maturity { min-width: 0; white-space: nowrap; }
+/* CANDIDATE: research held, nothing wired. A dashed outline, no fill, so it never reads as a stage with plumbing */
+.emap .maturity-candidate { background: transparent; color: var(--ink-3); border: 1px dashed var(--stage-cand); padding: 3px 8px; }
+.emap .tsub { color: var(--ink-3); font-size: .74rem; margin-top: 2px; min-height: 1.2em; }
+.emap .sparkwrap { position: relative; margin: auto 0 8px; padding-top: 32px; }
+.emap .spark { display: block; width: 100%; height: 130px; }
+.emap .spark * { vector-effect: non-scaling-stroke; }
+.emap .nums { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; border-top: 1px solid var(--grid); padding-top: 8px; }
+.emap .nums b { display: block; font: 500 1rem/1.25 var(--mono); }
+.emap .nums span, .emap .dstats span, .emap .mixstats span, .emap .big span { display: block; color: var(--ink-3); font: 400 var(--fs-label)/1.3 var(--mono); letter-spacing: .12em; text-transform: uppercase; margin-top: 3px; }
+.emap .nums div:nth-child(1) { text-align: left; }
+.emap .nums div:nth-child(2) { text-align: center; }
+.emap .nums div:nth-child(3) { text-align: right; }
+.emap .nums b.word { font: 500 .78rem/1.25rem var(--sans); white-space: nowrap; }
+.emap .dstats b.word { font: 500 .95rem/2.1rem var(--sans); white-space: nowrap; }
+.emap .mixstats b.word { font: 500 .95rem/1.9rem var(--sans); white-space: nowrap; }
+.emap .tile.nodata { opacity: .6; }
+.emap .tempty { margin-top: auto; padding-top: 14px; color: var(--ink-2); font-size: .84rem; }
+.emap .ttag { position: absolute; left: 0; top: 4px; max-width: 100%; padding: 2px 7px; font-size: .7rem; color: var(--warn); background: var(--warn-bg); border-radius: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* table view */
+.emap .tablewrap { overflow-x: auto; }
+.emap .etable { border-collapse: separate; border-spacing: 0; width: 100%; font-family: var(--mono); font-size: .78rem; }
+.emap .etable th { position: relative; background: var(--surface); text-align: start; font: 400 .6rem/1.25 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); padding: 11px 12px; border-bottom: 1px solid var(--ink); white-space: nowrap; cursor: pointer; }
+.emap .etable td { padding: 9px 12px; text-align: start; border-bottom: 1px solid var(--edge); white-space: nowrap; }
+.emap .etable td:first-child { font-family: var(--sans); font-size: .84rem; }
+.emap .etable tbody tr { cursor: pointer; }
+.emap .etable tbody tr:hover, .emap .etable tbody tr:hover td:first-child { background: var(--color-neutral); }
+.emap .etable th[aria-sort] { color: var(--ink); }
+.emap .etable th:focus-visible { outline-offset: -2px; }
+.emap .etable th:nth-child(n+4), .emap .etable td:nth-child(n+4) { text-align: end; }
+.emap .etable.plan th:nth-child(6), .emap .etable.plan td:nth-child(6) { text-align: start; }
+.emap .etable td small { color: var(--ink-3); font-size: .7rem; }
+.emap .etable thead tr:first-child th { padding: 12px 0 0; border-bottom: 0; cursor: default; }
+.emap .etable th.group { text-align: center; color: var(--ink-2); }
+.emap .etable th.group span { display: block; margin-inline: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--axis); }
+
+/* clusters */
+.emap .betstats { display: flex; flex-wrap: wrap; gap: 14px 56px; align-items: flex-end; margin-bottom: 14px; }
+.emap .big b { display: block; font: 500 2rem/1.05 var(--mono); }
+.emap .big small { display: block; color: var(--ink-3); font-size: .74rem; }
+.emap .slider { display: flex; flex-direction: column; gap: 6px; min-width: min(260px, 100%); flex: 1 1 280px; max-width: 460px; color: var(--ink-2); font-size: .8rem; margin-inline-start: auto; }
+.emap input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; margin: 0; height: 4px; border-radius: 2px; background: linear-gradient(90deg, var(--c, var(--ink-2)) var(--fill, 0%), var(--grid) var(--fill, 0%)); cursor: pointer; }
+.emap input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--c, var(--ink-2)); border: 2px solid var(--surface); box-shadow: 0 0 0 1px var(--edge); }
+.emap input[type=range]::-moz-range-thumb { width: 11px; height: 11px; border-radius: 50%; background: var(--c, var(--ink-2)); border: 2px solid var(--surface); box-shadow: 0 0 0 1px var(--edge); }
+.emap .corrwrap { display: flex; flex-wrap: wrap; gap: 32px 44px; align-items: flex-start; justify-content: center; }
+.emap #corrbox { flex: 0 1 auto; min-width: 0; max-width: 100%; }
+.emap .corrparts { display: flex; width: max-content; }
+.emap .corrparts svg { display: block; flex: none; overflow: visible; }
+.emap .corrparts .corrnames { position: sticky; left: 0; z-index: 1; background: var(--surface); }
+.emap .hull { fill: var(--hullc); stroke: var(--hullc); stroke-linejoin: round; stroke-linecap: round; opacity: .065; }
+.emap .hull.dim { opacity: .012; }
+.emap .corrnote { color: var(--ink-3); font-size: .78rem; }
+.emap .glabel { font: 600 12.5px/1 var(--sans); fill: var(--ink-3); pointer-events: none; }
+.emap .parked:not(.dim) { opacity: .45; }
+.emap .bandnote { margin-bottom: -12px; color: var(--ink-3); font-size: .8rem; }
+.emap .cell { cursor: default; }
+.emap .rowl { font-size: 12.5px; fill: var(--ink-2); }
+.emap .rowl.live { fill: var(--ink); font-weight: 600; }
+.emap .rowl.on { fill: var(--ink); font-weight: 600; }
+.emap .rowl[data-open], .emap .risklist > span[data-open] { cursor: pointer; }
+.emap .tree { fill: none; stroke: var(--ink-3); stroke-width: 1; }
+.emap .cut { stroke: var(--warn); stroke-width: 1.5; }
+.emap .gbox { fill: none; stroke: var(--ink); stroke-width: 1.5; pointer-events: none; }
+
+/* builder */
+.emap .presets { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 22px; }
+.emap .presets button { padding: 6px 12px; border: 1px solid var(--edge); border-radius: 3px; font-family: var(--mono); font-size: .66rem; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+.emap .presets button:hover { border-color: var(--ink-3); color: var(--ink); }
+.emap .presets button[aria-pressed="true"] { border-color: var(--color-accent); background: var(--color-accent-wash); color: var(--color-accent-dark); }
+.emap .build { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: 40px; }
+.emap .wfam { font: 400 .62rem/1.2 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink); margin: 18px 0 6px; display: flex; align-items: center; gap: 8px; }
+.emap .wfam .dot { display: none; }
+.emap .wfam:first-child { margin-top: 0; }
+.emap .wrow { display: grid; grid-template-columns: 96px minmax(0, 1fr) 54px; gap: 12px; align-items: center; font-size: .8rem; height: 31px; }
+.emap .wrow.on { font-weight: 500; }
+.emap .wrow:not(.on) label { color: var(--ink-3); }
+.emap .wrow:not(.on) input[type=range]::-webkit-slider-thumb { background: var(--axis); }
+.emap .wrow:not(.on) input[type=range]::-moz-range-thumb { background: var(--axis); }
+.emap .wrow input[type=number] { width: 54px; font-family: var(--mono); font-size: .76rem; padding: 3px 4px; text-align: center; border: 1px solid var(--edge); border-radius: 3px; background: var(--surface); -moz-appearance: textfield; }
+.emap .wrow input::-webkit-outer-spin-button, .emap .wrow input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.emap .wsum { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--grid); font-family: var(--mono); font-size: .72rem; color: var(--ink-2); }
+.emap .wsum button { color: var(--ink-3); text-decoration: underline; text-underline-offset: 3px; font-family: var(--mono); font-size: .72rem; }
+.emap .stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; align-content: start; min-width: 0; }
+.emap .mixstats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; }
+.emap .mixstats b { display: block; font: 500 1.45rem/1.15 var(--mono); }
+.emap .mixstats small { display: block; color: var(--ink-3); font-family: var(--mono); font-size: .7rem; margin-top: 2px; }
+.emap .mixbase { grid-column: 1 / -1; color: var(--ink-3); font-size: .72rem; margin-top: -10px; }
+.emap .dsec h4 { margin: 0 0 8px; font: 400 .62rem/1.3 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-2); }
+.emap .dsec h4 .stag { margin-inline-start: 8px; }
+.emap .riskbar { display: flex; gap: 2px; height: 16px; }
+.emap .riskbar i { display: block; height: 100%; background: var(--ink-2); min-width: 2px; }
+.emap .riskbar i:nth-child(even) { background: var(--ref); }
+.emap .riskbar i:first-child { border-radius: 2px 0 0 2px; }
+.emap .riskbar i:last-child { border-radius: 0 2px 2px 0; }
+.emap .risklist { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-top: 10px; font-size: .8rem; color: var(--ink-2); }
+.emap .risklist > span { display: inline-block; }
+.emap .risklist b { font-family: var(--mono); font-weight: 500; }
+.emap .mlines { display: grid; gap: 4px; margin-top: 12px; font-size: .84rem; }
+
+.emap .foot { color: var(--ink-3); font-size: .74rem; max-width: 130ch; }
+
+/* tooltip */
+.emap #tip { position: fixed; z-index: 140; pointer-events: none; background: var(--ink); color: var(--plane); font-size: .78rem; line-height: 1.4; padding: 7px 10px; border-radius: 3px; max-width: min(320px, calc(100vw - 8px)); }
+.emap #tip b { font-weight: 600; }
+.emap #tip .r { display: flex; justify-content: space-between; gap: 18px; font-family: var(--mono); }
+.emap #tip .r i { font-family: var(--sans); }
+.emap #tip i { font-style: normal; opacity: .75; }
+
+/* drawer: over Bench's topbar and sidebar */
+.emap #scrim { position: fixed; inset: 0; z-index: 110; background: var(--scrim); }
+.emap #drawer { position: fixed; z-index: 120; top: 0; right: 0; bottom: 0; width: min(960px, 100%); background: var(--surface); border-left: 1px solid var(--edge); overflow: auto; overscroll-behavior: contain; padding: 22px 30px 40px; scrollbar-gutter: stable; display: grid; grid-template-columns: minmax(0, 1fr); gap: 26px; align-content: start; }
+.emap .dhead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; position: sticky; top: -22px; z-index: 3; margin-top: -22px; padding: 22px 0 10px; background: var(--surface); border-bottom: 1px solid var(--edge); }
+.emap .dhead h2 { font: 700 1.6rem/1.1 var(--sans); letter-spacing: -.015em; }
+.emap .dhead .dot { width: 11px; height: 11px; }
+.emap .dnav { margin-inline-start: auto; display: flex; gap: 2px; }
+.emap .dstep, .emap .dclose { color: var(--ink-3); font-family: var(--mono); font-size: .64rem; letter-spacing: .1em; text-transform: uppercase; padding: 6px 10px; border-radius: 3px; }
+.emap .dstep:hover, .emap .dclose:hover { background: var(--color-neutral); color: var(--ink); }
+.emap .dwords { color: var(--ink-2); font-size: .9rem; margin-top: -14px; max-width: 75ch; }
+.emap .dstats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.emap .dstats b { display: block; font: 500 1.6rem/1.15 var(--mono); }
+.emap .dcav { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 5px 14px; font-size: .84rem; }
+.emap .dcav b { color: var(--warn); font-weight: 500; }
+.emap .drow { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); column-gap: 16px; padding: 12px 14px 4px; border: 1px solid var(--edge); border-radius: 3px; }
+.emap .dcell { display: grid; grid-row: span 2; grid-template-rows: subgrid; min-width: 0; }
+.emap .dcell span { margin-bottom: 3px; color: var(--ink-3); font-size: .74rem; line-height: 1.25; }
+.emap .dcell b { margin-bottom: 8px; font-family: var(--mono); font-weight: 500; font-size: .84rem; }
+.emap .dcell b.fail { color: var(--fail); }
+.emap .dcell b.none { color: var(--ink-3); font-weight: 400; }
+.emap .dwide { grid-column: 1 / -1; margin-bottom: 8px; color: var(--ink-2); font-size: .8rem; }
+.emap .dwide.none { color: var(--ink-3); font-size: .84rem; }
+.emap .dlink { text-decoration: underline; text-underline-offset: 3px; }
+.emap .dlink:hover { color: var(--ink); }
+.emap .dtitle { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.emap .dtitle h4 { margin: 0; }
+.emap .dtitle select { font-size: .78rem; margin-inline-start: auto; padding: 4px 8px; border: 1px solid var(--edge); border-radius: 3px; background: var(--surface); }
+.emap .bars { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px 40px; }
+.emap .brow { display: grid; grid-template-columns: 110px 1fr 44px; gap: 10px; align-items: center; font-size: .8rem; width: 100%; padding: 4px 0; }
+.emap .brow:hover { background: var(--color-neutral); }
+.emap .brow .track { height: 6px; background: var(--band); border-radius: 2px; position: relative; overflow: hidden; }
+.emap .brow .fill { position: absolute; top: 0; bottom: 0; inset-inline-start: 0; background: var(--ink-2); border-radius: 2px; }
+.emap .brow .v { text-align: end; font-family: var(--mono); color: var(--ink-2); }
+.emap .pills { display: flex; flex-wrap: wrap; gap: 8px; }
+.emap .pill { display: inline-block; padding: 4px 10px; border: 1px solid var(--edge); border-radius: 3px; background: none; font-family: var(--sans); font-size: .8rem; text-transform: none; letter-spacing: 0; }
+.emap .pill::before { content: none; }
+.emap .pill b { font-family: var(--mono); font-weight: 500; }
+.emap button.pill:hover { border-color: var(--ink-3); }
+.emap .mini { font-size: .8rem; border-collapse: collapse; width: 100%; }
+.emap .mini td, .emap .mini th { padding: 7px 0 7px 14px; text-align: start; border-bottom: 1px solid var(--edge); font-weight: 400; }
+.emap .mini td:not(:first-child) { font-family: var(--mono); }
+.emap .mini th { color: var(--ink-3); font: 400 .6rem/1.2 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+.emap .mini td:first-child, .emap .mini th:first-child { padding-inline-start: 0; }
+.emap .frow { display: grid; grid-template-columns: repeat(9, 1fr); gap: 3px; }
+.emap .frow div { text-align: center; font-size: .7rem; color: var(--ink-3); }
+.emap .frow em { display: block; font-style: normal; height: 30px; line-height: 30px; border-radius: 2px; font-family: var(--mono); font-size: .76rem; margin-bottom: 4px; }
+.emap .dfine { color: var(--ink-3); font-size: .78rem; margin-top: 8px; }
+
+@media (max-width: 1400px) {
+  .emap .jump { display: none; }
+}
+@media (min-width: 901px) and (max-width: 1180px) {
+  .emap .mixstats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .emap .build { grid-template-columns: minmax(0, 1fr); }
+  .emap .mixstats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .emap .bar { position: static; }
+  .emap .pad { padding: 14px; }
+  .emap #drawer { padding-left: 16px; padding-right: 16px; }
+  .emap .map-band { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  .emap .dstats { grid-template-columns: repeat(2, 1fr); }
+  .emap .drow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 520px) {
+  .emap h2 .stag { display: block; margin-inline-start: 0; margin-top: 2px; }
+  .emap .frow { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .emap .mixstats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) { .emap .mover { transition: none; } }
+
+/* calm and stress */
+.emap { --calm: var(--color-accent); --stress: var(--color-loss); }
+.emap .stress-band { margin-bottom: 18px; }
+.emap .stress-band > div[data-tip] { cursor: default; }
+.emap .stress-band small { color: var(--ink-3); font-size: .74rem; text-align: center; }
+.emap .k-calm { fill: var(--surface); stroke: var(--calm); stroke-width: 2; }
+.emap .k-stress { fill: var(--stress); }
+.emap .k-tick { stroke: var(--ink); stroke-width: 2; }
+.emap .stresskey { display: flex; flex-wrap: wrap; gap: 18px; color: var(--ink-3); font-family: var(--mono); font-size: .62rem; letter-spacing: .1em; text-transform: uppercase; }
+.emap .stresskey > span { display: inline-flex; align-items: center; gap: 6px; }
+.emap .stressh { color: var(--ink-2); font-family: var(--mono); font-size: .62rem; letter-spacing: .1em; text-transform: uppercase; }
+.emap #stressrows svg, .emap #stresstail svg { display: block; overflow: visible; }
+.emap .stressgrid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 18px; margin-top: 18px; align-items: start; }
+.emap .k-noise { fill: var(--stress); opacity: .1; }
+.emap .jumps th { cursor: default; }
+.emap .jumps th.r, .emap .jumps td.r { text-align: end; }
+.emap .jumps td span[data-open] { cursor: pointer; }
+.emap .jumps td span[data-open]:hover { text-decoration: underline; text-underline-offset: 3px; }
+@media (max-width: 1100px) { .emap .stressgrid { grid-template-columns: minmax(0, 1fr); } }
+.emap text.neg { fill: var(--color-loss); }
