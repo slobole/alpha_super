@@ -46,41 +46,41 @@ ul {{ padding-inline-start:1.2rem; max-width:70ch }} li {{ margin:.3rem 0 }}
 <p class="sub">מניות, אג"ח ארוך וזהב במשקל הפוך לתנודתיות, יעד תנודתיות 8%. נבדק על 1970–2022; כספת 2023–2026 נפתחה פעם אחת. כל המספרים מעל ריבית מזומן (Fed funds), עלות 5bp.</p>
 
 <div class="tiles">
-<div class="tile"><div class="k">Sharpe over cash 1970–2022</div><div class="v">0.65</div><div class="w">T1 chosen · B0 0.43 · 60/40 0.45</div></div>
-<div class="tile"><div class="k">Max drawdown</div><div class="v">−10.7%</div><div class="w">B0 −16.2% · 60/40 −36.3%</div></div>
-<div class="tile"><div class="k">CAGR</div><div class="v">9.0%</div><div class="w">3.7% over cash · vol 6.0%</div></div>
-<div class="tile"><div class="k">Vault 2023–26</div><div class="v">42nd pct</div><div class="w">inside the pre-registered band</div></div>
-<div class="tile"><div class="k">Walk-forward</div><div class="v">0.68</div><div class="w">hindsight best 0.70</div></div>
+<div class="tile"><div class="k">Sharpe over cash 1970–2022</div><div class="v">0.60–0.65</div><div class="w">T1 · 60/40 0.45 · B0 0.43</div></div>
+<div class="tile"><div class="k">Max drawdown</div><div class="v">−11%</div><div class="w">−10.7% to −11.6% · 60/40 −36.3%</div></div>
+<div class="tile"><div class="k">With cash at 0%</div><div class="v">0.30</div><div class="w">the edge needs idle cash in T-bills</div></div>
+<div class="tile"><div class="k">Strategy gate (frozen spec)</div><div class="v">Failed</div><div class="w">loses 1990s, 2010s; 0%-cash gate</div></div>
+<div class="tile"><div class="k">Vault 2023–26</div><div class="v">42nd pct</div><div class="w">inside a wide band</div></div>
 </div>
 
-<p><b>השורה התחתונה.</b> הכלל המקורי (B0) הוא מכונת ירידות טובה אבל לא מכונת Sharpe: מעל מזומן הוא שקול ל־60/40. התוספת של הכותב עצמו, מסנן טרנד לכל נכס לפי ממוצע 10 חודשים (T1: נכס מתחת לממוצע יוצא למזומן), הופכת אותו לאסטרטגיה: Sharpe 0.65 מול 0.45, ירידה מקסימלית חצי, על מישור פרמטרים שטוח, עם walk-forward שווה לבחירה בדיעבד, וכספת שנחתה באמצע הטווח הצפוי. שום שינוי אחר לא עזר.</p>
+<p><b>השורה התחתונה (אחרי ביקורת בלתי תלויה).</b> הכלל המקורי (B0) הוא מכונת ירידות, לא מכונת Sharpe: מעל מזומן הוא שקול ל־60/40. עם מסנן הטרנד של הכותב (T1: נכס מתחת לממוצע 10 חודשים יוצא למזומן) הוא מנצח את 60/40 מעל מזומן, 0.60–0.65 מול 0.45, עם ירידה מקסימלית של כ־11% מול 36%. שני סייגים מהותיים: היתרון תלוי בכך שהמזומן הפנוי (כשליש מהתיק בממוצע) מרוויח ריבית, וב־0% הוא יורד ל־0.30, מתחת ל־60/40; והוא לא עבר את השער שנקבע מראש להפוך לאסטרטגיה, כי הוא מפסיד ל־60/40 בשנות ה־90 וה־2010. בחירת המסנן נעשתה מתוך גריד שנוסף אחרי התוצאות הראשונות.</p>
 
-<figure><img src="{img('equity_drawdown.png')}" alt="Growth of one dollar and drawdowns 1970-2026"><figcaption>$1 מ־1970, סקאלה לוגריתמית. האפור מימין: הכספת 2023+. T1 (כחול) מעולם לא ירד יותר מ־11%.</figcaption></figure>
+<figure><img src="{img('equity_drawdown.png')}" alt="Growth of one dollar and drawdowns 1970-2026"><figcaption>$1 מ־1970, סקאלה לוגריתמית. האפור מימין: הכספת 2023+. T1 (כחול) לא ירד יותר מ־11% במוסכמת המחקר (11.6% בביצוע ריאלי, יום אחד מאוחר יותר).</figcaption></figure>
 <figure><img src="{img('decade_sharpe.png')}" alt="Sharpe over cash by decade"><figcaption>Sharpe מעל מזומן לפי עשור. T1 מפסיד ל־60/40 רק בשני עשורי השור הארוכים (1990s, 2010s) ומנצח בכל השאר, כולל כל עשורי האינפלציה.</figcaption></figure>
 
 <h2>למה הטרנד עובד כאן</h2>
-<figure><img src="{img('regimes.png')}" alt="Return over cash by regime"><figcaption>תשואה שנתית מעל מזומן לפי משטר. כשמניות ואג"ח נעות יחד והמניות יורדות, B0 מפסיד 3% בשנה ו־T1 בערך אפס. במשטרים הטובים ההבדל קטן.</figcaption></figure>
-<figure><img src="{img('tilt_grid.png')}" alt="Trend tilt plateau"><figcaption>המישור של הטרנד: אורך ממוצע 6–12 חודשים × עוצמה k. k=0.25 נותן חצי משקל מתחת לממוצע, k=0.5 (T1) יוצא מהנכס לגמרי, ו־k=0.75 ו־1 כבר מוסיפים שורט. שתי הגרסאות בלי שורט עוברות את כלל האימוץ; השורט מקלקל.</figcaption></figure>
-<figure><img src="{img('plateau.png')}" alt="Parameter plateau"><figcaption>חלון תנודתיות × יעד. עם הטרנד כל 60 התאים מנצחים את 60/40. יעד התנודתיות כמעט לא משנה את ה־Sharpe, רק את עומק הירידה.</figcaption></figure>
+<figure><img src="{img('regimes.png')}" alt="Return over cash by regime"><figcaption>תשואה שנתית מעל מזומן לפי משטר. כשמניות ואג"ח נעות יחד והמניות יורדות, B0 מפסיד 3% בשנה ו־T1 מרוויח כ־1%. במשטרים הטובים ההבדל קטן.</figcaption></figure>
+<figure><img src="{img('tilt_grid.png')}" alt="Trend tilt plateau"><figcaption>המישור של הטרנד: אורך ממוצע 6–12 חודשים × עוצמה k. k=0.25 נותן חצי משקל מתחת לממוצע, k=0.5 (T1) יוצא מהנכס לגמרי, ו־k=0.75 ו־1 כבר מוסיפים שורט. כל 8 התאים בלי שורט עוברים את כלל האימוץ; השורט משתווה ב־Sharpe אבל מעמיק ירידות. הגריד הזה נוסף אחרי התוצאות הראשונות.</figcaption></figure>
+<figure><img src="{img('plateau.png')}" alt="Parameter plateau"><figcaption>חלון תנודתיות × יעד. עם הטרנד כל 60 התאים מנצחים את 60/40, וגם 108 תאים בגריד רחב יותר. יעד התנודתיות כמעט לא משנה את ה־Sharpe, רק את עומק הירידה.</figcaption></figure>
 
 <h2>הכספת</h2>
-<figure><img src="{img('vault.png')}" alt="Vault 2023-2026"><figcaption>2023–2026, נפתח פעם אחת אחרי הקפאת העיצוב. שוק שור בכל שלושת הנכסים: B0 עשה 11.2% בשנה, T1 7.9%, 60/40 12.0%. זו עלות הביטוח. ה־12.4% המצטברים מעל מזומן של T1 יושבים באחוזון 42 של הטווח שנחזה מראש.</figcaption></figure>
+<figure><img src="{img('vault.png')}" alt="Vault 2023-2026"><figcaption>2023–2026, נפתח אחרי הקפאת העיצוב (ופעם נוספת אחרי תיקון באג במנוע). שוק שור בכל שלושת הנכסים: B0 עשה 11.2% בשנה, T1 7.9%, 60/40 12.0%. זו עלות הביטוח. ה־12.4% המצטברים מעל מזומן של T1 יושבים באחוזון 42; הטווח רחב, אז זו בדיקה חלשה.</figcaption></figure>
 <div class="tw"><table><tr><th>2023–2026-10</th><th>CAGR</th><th>Sharpe over cash</th><th>Max DD</th><th>2023</th><th>2024</th><th>2025</th><th>2026 YTD</th></tr>{rows}</table></div>
 
-<h2>מה לא עזר</h2>
+<h2>מה לא שינה את התמונה</h2>
 <div class="tw"><table><tr><th>Change</th><th>Sharpe vs B0</th><th>Verdict</th></tr>
 <tr><td>World stocks 50/50 (1991→)</td><td>0.64 vs 0.71</td><td class="fail">worse, not noise</td></tr>
 <tr><td>10y bond instead of 25y</td><td>0.42 vs 0.43</td><td>tie, weaker 2022</td></tr>
 <tr><td>Gold + commodities (DBC)</td><td>0.68 vs 0.79</td><td class="fail">better 2022 only</td></tr>
-<tr><td>ERC / MinVar weights</td><td>0.37 / 0.34 vs 0.43</td><td class="fail">concentrates</td></tr>
-<tr><td>EWMA / 21d / 126d vol estimator</td><td>±0.03</td><td>noise</td></tr>
+<tr><td>Equal / ERC / MinVar weights</td><td>0.52 / 0.37 / 0.34 vs 0.43</td><td>equal wins only via the 1970s; MinVar concentrates</td></tr>
+<tr><td>21 / 126 / 252-day vol, EWMA</td><td>≤ +0.02</td><td>some pass the rule; noise, not adopted</td></tr>
 <tr><td>Leverage 1.5× (financed)</td><td>0.39 vs 0.43</td><td class="fail">Sharpe falls</td></tr>
-<tr><td>Leverage 1.5× capped, on T1</td><td>0.66 vs 0.65</td><td>+0.7% CAGR, DD −13% vs −11%: a dial</td></tr>
-<tr><td>VIX hedge</td><td>—</td><td class="fail">PAKAL: removes 10% of the tail, costs 5%/yr</td></tr>
+<tr><td>Leverage 1.25–2× capped, on T1</td><td>0.65–0.67 vs 0.65</td><td>passes the rule; +0.4–1.0% CAGR, DD −13%: a dial</td></tr>
+<tr><td>VIX hedge</td><td>not tested here</td><td>PAKAL, on the author's levered trend book: removes ~11% of worst-day damage; 10% VIXY cut return 7.3% → 1.9%</td></tr>
 </table></div>
 
 <h2>משקיע בשקלים</h2>
-<p>בלי גידור, ה־Sharpe נחתך לחצי (0.71 → 0.33) והירידות הגרועות ביותר הן של השקל, לא של האסטרטגיה. גידור מלא משחזר את המסלול הדולרי; גידור 50% נותן את הירידה הרדודה ביותר. הגידור הפעיל של הכותב לא עובד על דולר-שקל.</p>
+<p>(נמדד על B0, לא על T1.) בלי גידור, ה־Sharpe נחתך לחצי (0.71 → 0.33) והירידות הגרועות ביותר הן של השקל, לא של האסטרטגיה. גידור מלא משחזר את המסלול הדולרי; גידור 50% נותן את הירידה הרדודה ביותר. הגידור הפעיל של הכותב לא עובד על דולר-שקל.</p>
 <div class="tw"><table><tr><th>1993–2022, ILS investor</th><th>CAGR</th><th>Sharpe over IL cash</th><th>Max DD</th></tr>
 <tr><td>USD investor (reference)</td><td>7.6%</td><td>0.71</td><td>−16.2%</td></tr>
 <tr><td>Unhedged</td><td>8.4%</td><td class="fail">0.33</td><td>−17.5%</td></tr>
@@ -90,16 +90,16 @@ ul {{ padding-inline-start:1.2rem; max-width:70ch }} li {{ margin:.3rem 0 }}
 </table></div>
 
 <h2>מקום בספר</h2>
-<p>T1 הוא אותו מנוע כמו CORE5: מניות, אג"ח, זהב, משקל לפי סיכון, SMA10 לכל נכס, בקרת תנודתיות. על 2008–2022 CORE5 מנצח (Sharpe 0.82 מול 0.79, ומ־2012 0.94 מול 0.57). מה ש־T1 מביא הוא 50 שנה של היסטוריה ש־CORE5 לא יכול להיבדק עליה: שנות ה־70, 1987, 1994, 2022. לפי כלל "פוד אחד לכל מנוע", CORE5 שומר על הכיסא, ו־T1 נרשם כאימות ההיסטורי של המשפחה וכיורש מוכן אם CORE5 ייכשל בביקורת.</p>
+<p>T1 <b>אינו</b> אותו מנוע כמו CORE5 (גרסה קודמת של העמוד טענה זאת). CORE5 הוא חמישה סליבים קבועים של 20% (SPY, IEF, GLD, DBC, UUP) עם מתג טרנד אדפטיבי, בלי משקל לפי תנודתיות ובלי יעד תנודתיות; הקורלציה החודשית 0.61. לכן כלל "פוד אחד לכל מנוע" לא מוציא אותו. על 2008–2022: T1 מול CORE5, Sharpe 0.79 מול 0.82 (ומ־2012 0.57 מול 0.94). הוספת 20% T1 לספר הדפנסיבי: 1.01 מול 1.00, ומ־2012 1.00 מול 1.05. המקרה לספר חלש, וההחלטה שלך.</p>
 <figure><img src="{img('weights_t1.png')}" alt="T1 allocation over time"><figcaption>ההקצאה של T1 לאורך הזמן. כשנכס מתחת לממוצע שלו, כל המשקל שלו עובר למזומן.</figcaption></figure>
 
 <h2>הכלל שנבחר</h2>
 <ul>
 <li>סוף חודש: משקל כל נכס ∝ 1/תנודתיות 63 יום. נכסים: VTI, TLT, GLD.</li>
 <li>אותו יום: נכס שמחירו מתחת לממוצע 10 חודשים יוצא כולו למזומן; מעל הממוצע הוא מקבל את מלוא משקלו.</li>
-<li>יומי: אם תנודתיות 63 יום של הסל הבסיסי מעל 8.5%, חשיפה = 8% ÷ תנודתיות. בלי מינוף, בלי שורט. היתרה ב־BIL.</li>
+<li>יומי: אם תנודתיות 63 יום של הסל הבסיסי מעל 8.5%, חשיפה = 8% ÷ תנודתיות. בלי מינוף, בלי שורט. היתרה ב־BIL, וזה תנאי ליתרון.</li>
 </ul>
-<p class="en">Record: docs/research/BEYOND_6040_20261105.md · spec, tables and scripts: scripts/research/beyond_6040_20261105 · strategy: strategies/taa_beyond_6040/strategy_taa_beyond_6040_trend_tilt.py (RESEARCH, not wired). Sharpe over Fed funds unless marked raw; the author's published Sharpe is raw.</p>
+<p class="en">Record: docs/research/BEYOND_6040_20261105.md · spec, tables and scripts: scripts/research/beyond_6040_20261105 · strategy: strategies/taa_beyond_6040/strategy_taa_beyond_6040_trend_tilt.py (PM_READY, no book slot; live route on branch t1-wiring-20261105, not merged). Audited 2026-11-05: corrections listed in the record. Sharpe over Fed funds unless marked raw; the author's published Sharpe is raw.</p>
 </main>
 """
 out = HERE / "out" / "beyond_6040_page.html"
