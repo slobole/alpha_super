@@ -80,6 +80,10 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     "strategies.momentum.strategy_mo_atr_normalized_ndx:AtrNormalizedNdxStrategy": MaturityTier.WIRED,
     "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy": MaturityTier.LIVE,
     # ── pm-ready: may join a book, not connected to live ────────────────────
+    # Beyond 60/40 trend tilt (T1), 2026-11-05 study docs/research/BEYOND_6040_20261105.md.
+    # Capital, total-return benchmark and determinism passed 2026-11-05. Owner decision:
+    # PM_READY on main; the live route is built and kept on branch t1-wiring-20261105 (not merged).
+    "strategies.taa_beyond_6040.strategy_taa_beyond_6040_trend_tilt": MaturityTier.PM_READY,
     # Frozen VRP RSI2 sleeve: PM engine plumbing only; fund adoption still requires
     # the shadow, measured-fill, exit-failsafe and tax gates in SPEC_FROZEN.md.
     "strategies.vix_stuff.strategy_vrp_svxy_vixm_rsi2": MaturityTier.PM_READY,
