@@ -9,7 +9,7 @@ The gated NDX siblings (plain ATR, NATR20, NATR20 VXN) reuse the NDX grid around
 The gated TAA engine variants (1/N, linearity, 2x) are wired through `taa_variant_family` the same way.
 Inflation Compass and its QQQ variant (PM_READY) are wired through `compass_family`.
 CORE5 adaptive macro (PM_READY, gated 2026-10-01) is `core5_family`.
-The PM_READY pod Trinity (2026-10-01) is wired through `trinity_family`; TFI was deleted on 2026-11-05.
+TFI and Trinity were deleted on 2026-11-05.
 The month-end rebalancing flow (PM_READY, MOC execution) is `eom_family` (no luck band: offset_count_int = 1).
 The PM_READY sector ETF IBS event pods (2026-10-02) are `sector_ibs_family` and `dispersion_ibs_family`.
 The WIRED DV2 mean-reversion pod on point-in-time S&P 500 members is `dv2_family`, its Nasdaq-100 variant `dv2_ndx_family`
@@ -237,18 +237,6 @@ def core5_family(inputs=None) -> FamilyRunner:
     )
 
 
-# ---------------------------------------------------------------- Trinity (PM_READY, 2026-10-01)
-# Trinity: the three numbers that define a volatility-targeted inverse-volatility book: the asset volatility window
-# (one, three and six months), the base-portfolio volatility window of the overlay (same three) and the volatility
-# target with its trigger kept 0.5 pp above it (6/6.5%, the live 8/8.5%, 10/10.5%). The 5 pp no-trade band is an
-# execution detail and stays fixed. 27 configurations.
-TRINITY_GRID_DICT = {
-    "asset_vol_lookback_int": (21, 63, 126),
-    "portfolio_vol_lookback_int": (21, 63, 126),
-    "vol_target_tuple": ((0.06, 0.065), (0.08, 0.085), (0.10, 0.105)),
-}
-
-
 def _spec_family(spec_module_str: str, name_str: str, family_id_str: str, grid_dict: dict, inputs=None) -> FamilyRunner:
     """A spec with `load_inputs`, `LIVE_CONFIG` and `simulate_config(inputs, config, cost_model, capital)`. The cost
     model is the caller's (S4 passes CostModel(); the engines' own costs are each spec's ENGINE_COST_MODEL)."""
@@ -265,11 +253,6 @@ def _spec_family(spec_module_str: str, name_str: str, family_id_str: str, grid_d
         name_str=name_str, family_id_str=family_id_str, param_grid_dict=grid_dict,
         live_config_dict={k: getattr(spec_module.LIVE_CONFIG, k) for k in grid_dict}, simulate_fn=simulate_fn,
     )
-
-
-def trinity_family(inputs=None) -> FamilyRunner:
-    # Inverse-volatility weights under a volatility target: allocation by estimated risk (decided 2026-10-02, P6b).
-    return _spec_family("trinity", "Trinity", "optimized_low_risk_allocation", TRINITY_GRID_DICT, inputs)
 
 
 # ---------------------------------------------------------------- Month-end rebalancing flow (PM_READY, 2026-10-01)

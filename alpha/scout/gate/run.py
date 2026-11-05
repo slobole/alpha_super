@@ -158,9 +158,8 @@ def _beyond_6040_gated_spec(name_str: str, spec_module_str: str, strategy_import
     )
 
 
-# PM_READY "beyond 60/40" pods (2026-10-01): alpha/scout/specs/trinity.py (TFI deleted 2026-11-05).
+# Beyond 60/40 pods (TFI and Trinity deleted 2026-11-05).
 GATED_SPEC_DICT.update({
-    "trinity": _beyond_6040_gated_spec("trinity", "trinity", "strategies.taa_beyond_6040.strategy_taa_trinity_vol_control_8_bil"),
     # Month-end rebalancing flow (PM_READY, 2026-10-01): MOC fills, close-and-reopen orders, a TLT short with borrow
     # (alpha/scout/specs/eom.py).
     "eom": _beyond_6040_gated_spec("eom", "eom", "strategies.taa_beyond_6040.strategy_taa_month_end_rebalancing_flow"),

@@ -117,7 +117,6 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     # Three-asset inverse-volatility core with a daily 8% volatility control,
     # a five-point exposure band, and BIL as the invested reserve. Portfolio
     # Manager-ready only; deliberately absent from every live release surface.
-    "strategies.taa_beyond_6040.strategy_taa_trinity_vol_control_8_bil": MaturityTier.PM_READY,
     # Five fixed macro sleeves independently gated by a drawdown-adaptive
     # moving average, with inactive sleeves in BIL and a capped DBC short.
     # Daily Close_T fixed shares, next-open MOO, dedicated USD margin account.

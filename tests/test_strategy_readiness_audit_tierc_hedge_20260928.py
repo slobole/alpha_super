@@ -1,6 +1,6 @@
 """Tier C hedge readiness audit (2026-09-28): synthetic tests that pin the audited behaviour.
 
-Strategies: Crisis Trend Core (CTC), VIXM Backwardation (VIXM), Trinity vol control (TRIN). Each test documents one
+Strategies: Crisis Trend Core (CTC) and VIXM Backwardation (VIXM); the Trinity tests went with Trinity (deleted 2026-11-05). Each test documents one
 finding of results/research/strategy_readiness_audit_20260928/tierc_hedge/TIERC_HEDGE_FINDINGS.md. No production code
 is modified; these tests read the committed modules only.
 """
@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -19,9 +18,6 @@ TEST_NORGATEDATA_ROOT = Path(__file__).resolve().parents[1] / ".tmp_norgatedata"
 TEST_NORGATEDATA_ROOT.mkdir(exist_ok=True)
 os.environ.setdefault("NORGATEDATA_ROOT", str(TEST_NORGATEDATA_ROOT))
 
-from alpha.engine.backtest import run_daily  # noqa: E402
-from strategies.taa_beyond_6040 import strategy_taa_beyond_6040 as b6040  # noqa: E402
-from strategies.taa_beyond_6040 import strategy_taa_trinity_vol_control_8_bil as trin  # noqa: E402
 from strategies.tail_hedge import strategy_crisis_trend_core as ctc  # noqa: E402
 from strategies.tail_hedge import strategy_vixm_backwardation as vixm  # noqa: E402
 
@@ -38,24 +34,6 @@ def _ctc_tr_close_df(sessions_int: int = 900, seed_int: int = 7) -> pd.DataFrame
     return pd.DataFrame(data, index=idx)
 
 
-def _trin_pricing_df(num_days_int: int = 260, seed_int: int = 3) -> pd.DataFrame:
-    rng = np.random.default_rng(seed_int)
-    idx = pd.date_range("2023-01-02", periods=num_days_int, freq="B")
-    fields = {}
-    for sym, base, vol in (("VTI", 100.0, 0.012), ("GLD", 120.0, 0.009), ("TLT", 110.0, 0.008),
-                           ("BIL", 90.0, 0.0002), ("$SPX", 4000.0, 0.01)):
-        close = base * np.cumprod(1.0 + 0.0003 + vol * rng.standard_normal(num_days_int))
-        fields[(sym, "Open")] = close * 0.999
-        fields[(sym, "High")] = close * 1.002
-        fields[(sym, "Low")] = close * 0.997
-        fields[(sym, "Close")] = close
-        fields[(sym, "Dividend")] = np.zeros(num_days_int)
-    df = pd.DataFrame(fields, index=idx)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-    return df
-
-
-# ----------------------------------------------------------------------------- CTC
 def test_ctc_reserve_starting_after_history_start_raises_as_head_does_on_real_data():
     """C-CTC-01: at HEAD the default loader starts 2002-01-01 but SHY starts 2002-07-26 (142 sessions later), so the
     first eligible row needs SHY at T-252 and the whole run raises. Trimming the frame to SHY's first bar runs."""
@@ -154,54 +132,3 @@ def test_vixm_stale_padded_vix3m_passes_silently():
     assert vixm.compute_backwardation_state_ser(v_small, v3_true).iloc[2] == 0.0
     assert vixm.compute_backwardation_state_ser(v_small, v3_stale).iloc[2] == 1.0  # silent flip
 
-
-# ----------------------------------------------------------------------------- TRINITY
-def test_trinity_vol_window_ends_at_close_t_and_includes_return_t():
-    """C-TRIN-A1: the 63-return window ends at Close_T (return T included); orders fill at Open_(T+1)."""
-    idx = pd.bdate_range("2024-01-02", periods=80)
-    rr = pd.DataFrame({"VTI": 0.001, "GLD": 0.001, "TLT": 0.001}, index=idx)
-    w = pd.Series({"VTI": 0.4, "GLD": 0.3, "TLT": 0.3})
-    base = trin.compute_base_portfolio_return_ser(rr, w, 63)
-    assert base.index[-1] == idx[-1]
-    rr_spike = rr.copy()
-    rr_spike.iloc[-1] = -0.08
-    m_calm = b6040.compute_gross_exposure_float(trin.compute_base_portfolio_return_ser(rr, w, 63), 63, 0.08, 0.085)
-    m_spike = b6040.compute_gross_exposure_float(trin.compute_base_portfolio_return_ser(rr_spike, w, 63), 63, 0.08, 0.085)
-    assert m_calm == 1.0 and m_spike < 1.0
-
-
-def test_trinity_truncated_prefix_at_month_end_has_no_monthly_flag_or_new_weights():
-    """C-TRIN-05: new base weights and the monthly override are attached to the session before next month's first
-    session, which a frame ending at the month-end close cannot contain. A live route must supply the calendar."""
-    df = _trin_pricing_df()
-    s = trin.TrinityVolControlStrategy(name="t", benchmarks=["$SPX"])
-    full = s.compute_signals(df)
-    month_end = pd.Timestamp("2023-09-29")
-    assert bool(full.loc[month_end, trin.MONTHLY_REBALANCE_FIELD_TUPLE])
-    pref = s.compute_signals(df.loc[:month_end])
-    assert not bool(pref.loc[month_end, trin.MONTHLY_REBALANCE_FIELD_TUPLE])
-    assert not np.isclose(float(pref.loc[month_end, ("VTI", "base_weight_ser")]),
-                          float(full.loc[month_end, ("VTI", "base_weight_ser")]))
-    # the return / volatility features themselves are row-T invariant
-    for a in trin.RISK_ASSET_TUPLE:
-        assert pref.loc[month_end, (a, "return_ser")] == full.loc[month_end, (a, "return_ser")]
-        assert pref.loc[month_end, (a, "volatility_ser")] == full.loc[month_end, (a, "volatility_ser")]
-
-
-def test_trinity_decisions_never_read_the_realized_return_history_used_by_the_timing_adapter():
-    """C-TRIN-04: the timing adapter's realized-return bookkeeping (the share-units handoff's 'double-subtract')
-    cannot move Trinity decisions, because Trinity's overlay reads base-portfolio returns only."""
-    df = _trin_pricing_df()
-    df.attrs["norgate_adjustment_by_symbol_dict"] = {"VTI": "CAPITALSPECIAL", "GLD": "CAPITALSPECIAL",
-                                                     "TLT": "CAPITALSPECIAL", "BIL": "CAPITALSPECIAL",
-                                                     "$SPX": "TOTALRETURN"}
-    cfg = trin.DEFAULT_CONFIG
-    cal = trin._execution_calendar_index(df, cfg, None)
-
-    def boom(self):
-        raise AssertionError("realized strategy returns must not drive Trinity decisions")
-
-    s = trin._build_trinity_strategy(cfg, 100_000.0)
-    with patch.object(b6040.Beyond6040Strategy, "_realized_strategy_return_ser", boom):
-        run_daily(s, df, calendar=cal, show_progress=False, show_signal_progress_bool=False, audit_override_bool=False)
-    assert len(s.get_transactions()) > 0

@@ -67,7 +67,6 @@ RUNS: dict[str, tuple[str, dict]] = {
     "disp_xlc": ("strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_xlc", {}),
     "disp_xlc_sma": ("strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_xlc_asset_sma200", {}),
     "core5": ("strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5", {}),
-    "trinity": ("strategies.taa_beyond_6040.strategy_taa_trinity_vol_control_8_bil", {}),
     "compass": ("strategies.taa_df.strategy_taa_inflation_compass", {}),
     "compass_qqq": ("strategies.taa_df.strategy_taa_inflation_compass_qqq", {}),
     "eom_flow": ("strategies.taa_beyond_6040.strategy_taa_month_end_rebalancing_flow", {}),

@@ -38,8 +38,6 @@ ENGINE_DEVIATION_TUPLE = (
             "so the XLE / XLK / XLU 2:1 splits change whole-share rounding only. "
             "CORE5 -0.013 pp/yr (optimistic): BIL's 1-for-2 consolidation (UnadjClose / Close = 0.5 before 2017-11-30) halves its earlier ledger share counts "
             "(Scout truth-mode run, 2026-10-01: CAGR 7.061% adjusted vs 7.048% historical units, 2007-09 to 2026-09). "
-            "Trinity (VTI 2:1 split, BIL 1:2): fees $1,465 adjusted vs $1,492 historical on $100K over 2007-2026, CAGR "
-            "7.049% both (2026-10-01). TFI pays no commission, so only whole-share rounding moves (not listed). "
             "HPI (both S&P 500 pods, 2004-2026): besides the fees, a candidate whose reverse-split-adjusted Close_T exceeds "
             "V / 10 rounds to 0 shares, is cancelled, and still uses its slot (the engine decrements the slot before the "
             "zero-share cancellation): 4 of 6,225 vote entries and 3 of 6,458 single-rule entries, all WFRD (the old "
@@ -56,9 +54,9 @@ ENGINE_DEVIATION_TUPLE = (
             "strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash", "strategy_taa_df_btal_1n_fallback_qld_vix_cash",
             "strategy_taa_df_1n_fallback_qld_vix_cash", "strategy_taa_df_1n_fallback_sso_vix_cash",
             "strategy_taa_inflation_compass", "strategy_taa_inflation_compass_qqq", "strategy_taa_adaptive_macro_core5",
-            "strategy_taa_trinity_vol_control_8_bil", "strategy_mr_hpi_sp500_2_3_5_vote", "strategy_mr_hpi_sp500_ibs_rsi_exit",
+            "strategy_mr_hpi_sp500_2_3_5_vote", "strategy_mr_hpi_sp500_ibs_rsi_exit",
             "strategy_mr_dv2_industry_etf",
-        ),  # every gated TAA variant (fee impact measured for TAA 3x), both Compass modules, CORE5, Trinity, HPI, DV2 ETF
+        ),  # every gated TAA variant (fee impact measured for TAA 3x), both Compass modules, CORE5, HPI, DV2 ETF
     ),
 )
 

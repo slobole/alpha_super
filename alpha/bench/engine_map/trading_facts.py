@@ -15,7 +15,7 @@ not measured, so nothing here can stop a build.
     shortDays   percent of sessions holding a short
     end         last date of the saved run
 
-A run with no weight frame (Trinity) answers names, hold and shorts from its cumulative fills. The MR capsule has no entry: it is half DV2-G and half
+A run with no weight frame answers names, hold and shorts from its cumulative fills. The MR capsule has no entry: it is half DV2-G and half
 HPI-G, each with its own.
 """
 from __future__ import annotations
@@ -36,7 +36,7 @@ ENGINE_STEMS = {
     "ndx_cap_atr": "strategy_mo_atr_normalized_ndx_vxn_scaled_sector_cap", "ndx_cap_natr": "strategy_mo_natr20_ndx_vxn_scaled_sector_cap", "dv2": "strategy_mr_dv2", "dv2_g": "strategy_mr_dv2_vix_gated_bil",
     "hpi": "strategy_mr_hpi_sp500_2_3_5_vote", "hpi_g": "strategy_mr_hpi_vote_vix_gated_bil", "hpi_rsi": "strategy_mr_hpi_sp500_ibs_rsi_exit", "dv2_ind": "strategy_mr_dv2_industry_etf",
     "downshock": "strategy_mr_us_sector_etf_ibs_downshock_vox_iyr", "dispersion": "strategy_mr_sector_dispersion_ibs_kie_ihi_asset_sma200", "core5": "strategy_taa_adaptive_macro_core5",
-    "trinity": "strategy_taa_trinity_vol_control_8_bil", "compass": "strategy_taa_inflation_compass", "eom": "strategy_taa_month_end_rebalancing_flow",
+    "compass": "strategy_taa_inflation_compass", "eom": "strategy_taa_month_end_rebalancing_flow",
     "eom_vote": "strategy_taa_month_end_flow_vote", "dv2_g_liq": "strategy_mr_dv2_vix_gated_liq_bil", "hpi_g_liq": "strategy_mr_hpi_vote_vix_gated_liq_bil",
     "mo_leg1": "strategy_mo_capsule_leg1_natr_ndx", "mo_leg2": "strategy_mo_capsule_leg2_residual_ndx", "mo_leg3": "strategy_mo_capsule_leg3_residual_r1000", "vrp": "strategy_vrp_svxy_vixm_rsi2",
     "t1": "strategy_taa_beyond_6040_trend_tilt",

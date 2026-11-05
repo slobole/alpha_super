@@ -92,7 +92,6 @@ FROZEN_SINCE: dict[str, tuple[str, str]] = {
     "downshock": ("2026-07-27", "Unchanged since it entered this repository; later commits add timing hooks only."),
     "dispersion": ("2026-07-12", "Created in that commit, which also moved sizing to 1/N."),
     "core5": ("2026-09-27", "Last logic change: month ends on exchange sessions; parameters unchanged since Sep 1. Wiring note: rules unchanged."),
-    "trinity": ("2026-09-01", "Last logic change: volatility control on the base portfolio's 63-day returns, exposure capped at 1.0."),
     "compass": ("2026-09-28", "Last logic change: the inflation-expectation series read as published (lag fix). Study spec frozen the same day."),
     "eom": ("2026-09-16", "Unchanged since it was created."),
     "eom_vote": ("2026-11-01", "Study spec frozen Nov 1; the module landed Nov 4 unchanged from it."),
@@ -141,7 +140,6 @@ ENGINES = [
     ("dispersion", "disp", "Dispersion", "Volatile industry ETF dips", "dips", [("disp_xlc", "With XLC"), ("disp_xlc_sma", "With XLC, 200-day filter")], "dispersion_ibs_kie_ihi_sma200_reaudition_20261002"),
     ("core5", "core5", "CORE5", "Five assets, each on its own trend", "macro", [], "core5_reaudition_20261002"),
     ("t1", "t1", "Beyond 60/40 T1", "Stocks, long bonds, gold, each out below its trend", "macro", [], None),
-    ("trinity", "trinity", "Trinity", "Stocks, bonds, gold at 8% volatility", "macro", [], "trinity_reaudition_20261002"),
     ("compass", "compass", "Compass", "Sectors by growth and inflation", "macro", [("compass_qqq", "QQQ in the growth cell")], "compass_reaudition_20261002"),
     ("eom", "eom_flow", "EOM", "Month-end stock and bond flow", "macro", [], "eom_reaudition_20261002"),
     ("eom_vote", "eom_vote", "Flow Vote", "Month-end stocks and bonds, by three votes", "macro", [], "eom_tradable_retro_20261101"),
@@ -378,10 +376,6 @@ CAVEATS = {
         ("Optimistic", "About 441 trials. The commodity short was kept against its gates."),
         ("Requirement", "Shorts DBC: needs margin and a borrow, modelled at 1% a year."),
         ("Conservative", "Withholding: up to 0.2 points a year."),
-    ],
-    "trinity": [
-        ("No alpha", "{alpha}% a year (t {t}) over the five funds."),
-        ("Failed", "Loses to T-bills in TAA 3x + NDX VXN: better on only {c_slot}% of paths."),
     ],
     "compass": [
         ("Optimistic", "Settings sit at a lucky peak: 826 trials, failed the pre-2003 holdout. In sample about 0.85, holdout 0.74."),
