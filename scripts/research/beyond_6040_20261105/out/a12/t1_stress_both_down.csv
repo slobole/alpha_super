@@ -1,0 +1,13 @@
+regime,strategy,months,mean_month_%,ann_excess_sharpe,hit_rate_%,worst_month_%,total_%
+stocks and bond both down,T1 trend-tilted,26,-1.292,-4.06,19.231,-3.489,-28.812
+stocks and bond both down,B0 Beyond 60/40,26,-2.268,-4.905,7.692,-6.493,-45.124
+stocks and bond both down,CORE5,26,-0.375,-1.16,30.769,-2.093,-9.503
+stocks and bond both down,60/40,26,-4.143,-5.102,0.0,-10.658,-67.086
+other months,T1 trend-tilted,152,0.778,1.479,70.395,-3.391,217.88
+other months,B0 Beyond 60/40,152,1.019,1.651,63.816,-3.887,353.084
+other months,CORE5,152,0.592,1.287,65.132,-3.431,141.36
+other months,60/40,152,1.485,2.329,78.947,-5.06,808.818
+all,T1 trend-tilted,178,0.475,0.816,62.921,-3.489,126.291
+all,B0 Beyond 60/40,178,0.539,0.732,55.618,-6.493,148.636
+all,CORE5,178,0.45,0.933,60.112,-3.431,118.424
+all,60/40,178,0.663,0.701,67.416,-10.658,199.132

@@ -1,0 +1,20 @@
+# A5-A7 legs: equity, bond, inflation (dev sample to 2022-12; each arm vs B0 on the same window; engine with the daily-overlay fix)
+
+Sharpe = excess over Fed funds. Adoption rule = SPEC (a) worst block up, (b) full Sharpe not down > 0.05, (c) bootstrap p05 > -0.05, (d) turnover <= 2x. Tables: a5_a7_summary.csv, a5_a7_adoption.csv, a5_a7_avg_weights.csv, a5_a7_stress_years.csv. B0 reference: full 1970-2022 Sharpe 0.43, ETF era 0.80, max DD -16.2%, turnover 1.8/yr.
+
+**A5 equity leg: every change hurts; none adopted.**
+- 50/50 US/world 1991-07..2022: Sharpe 0.64 vs B0 0.71, CAGR 7.0% vs 7.6%, max DD -17.0% vs -16.2%; bootstrap diff p05/p95 = -0.14/-0.01, so the loss is not noise. Worst block 2020-22: -0.07 vs +0.05.
+- 100% world ex-US (stress): 0.51 vs 0.71. VT 2009-07..2022: 0.73 vs 0.90 (US-dominance decade). 50/50 US/EFA on the EFA-only era 2002-09..2022: 0.80 vs 0.88, p05/p95 = -0.13/-0.01.
+- Weights barely move (equity share 0.30-0.32 either way); the equity leg's vol is similar, so IVOL does not re-weight. The whole effect is the return gap. Matches the pre-registered expectation ("USD investor sees no gain in-sample").
+- Caveat: before 2001-08 r_world is Ken French's developed ex-US series (local closes, US calendar), so its correlation with US stocks is understated (corr with EFA 0.76, vol 15.7% vs 20.7% over the overlap). The 1990s block (0.42 vs 0.43) is flattered; the ETF-era rows (A5c, A5d) are the clean ones and they are worse.
+
+**A6 bond leg: a lower-vol tie, not an improvement.**
+- 10y instead of 25y, 1970..2022: Sharpe 0.424 vs 0.428, vol 6.0% vs 7.1%, CAGR 7.6% vs 8.0%, max DD -15.2% vs -16.2% (6% cut, below the 25% insurance bar). IVOL gives 10y 53% of the sleeve (25y gets 41%). Fails (a) and (c): 2020-22 block -0.06 vs +0.05 because the heavier bond weight meets 2022; p05 -0.06. ETF era 2005..: 0.755 vs 0.796.
+- 50/50 25y/10y, 1970..2022: 0.435 vs 0.428, worst block (1980s) -0.001 vs -0.010, p05 -0.019, turnover 1.51 vs 1.78 -> technically passes all four tests, but by 0.009 on (a) and the rule needs an economic reason written before the run; SPEC pre-registered "similar Sharpe", not an improvement. Treat as a tie. ETF era: 0.782 vs 0.796, fails (a) (0.026 vs 0.054).
+- Four assets (stocks, 25y, 10y, gold): bonds take 64% of the sleeve (25y 24%, 10y 40%), Sharpe 0.403 vs 0.428 full, 0.707 vs 0.796 ETF era, worst block -0.18. 2008 was +7.4% vs +0.6% for B0, 2022 -13.3% vs -12.1%. Not adopted.
+
+**A7 inflation leg (2007-02..2022): commodities cost Sharpe, TIPS is a bond in disguise.**
+- 50/50 gold/DBC: 0.68 vs 0.79; DBC as a 4th asset: 0.63 vs 0.79 (p05 -0.39). Both improve the 2020-22 block (0.26 / 0.41 vs 0.05) and 2022 (-8.6% / -5.5% vs -12.1%) and lose everything else (2010s 0.92 / 0.70 vs 1.14). Exactly the pre-registered "commodities worse Sharpe, slightly better 2022". Not adopted, not insurance (max DD -14.5% / -17.0% vs -16.2%: an 11% cut at best, premium 1.0%/yr).
+- 50/50 gold/TIP: 0.781 vs 0.790, vol 6.9% vs 7.6%, CAGR 6.3% vs 6.9%; passes (b)(d), fails (a) (2020-22: -0.00 vs 0.05, 2022 -13.5%) and (c) (p05 -0.07). The composite takes 44% of the sleeve because TIP's low vol pulls it in, so the book becomes bond-heavier, which is what hurt in 2022. TIP as a 4th asset: 48% of the sleeve to TIP, Sharpe 0.71 vs 0.79. Not adopted.
+
+**Bottom line.** No leg change passes the adoption rule with a margin. Equity diversification (world, VT) and commodities change the picture only for the worse in-sample; 10y bonds and TIPS lower vol and drawdown slightly at the cost of CAGR and a weaker 2022. The one formal pass (50/50 25y/10y, full history) is a 0.009 tie with no pre-written economic reason; keep B0 legs (US stocks, 25y Treasury, gold). Engine fix changed numbers by a few hundredths of Sharpe and raised turnover to 1.1-2.1/yr; no verdict changed. Method note: adoption_check from common.py was applied to results trimmed to each window, with decade blocks outside the window excluded (nan-safe worst-block min); otherwise the rule is unchanged.

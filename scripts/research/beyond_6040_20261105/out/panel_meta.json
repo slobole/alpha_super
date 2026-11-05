@@ -1,0 +1,32 @@
+{
+  "rows": 14800,
+  "start": "1968-01-03",
+  "end": "2026-10-23",
+  "nan_fill": {
+    "r_bond10": {
+      "first_valid": "1968-01-04",
+      "nan_after_first_filled_zero": 0
+    },
+    "r_world": {
+      "first_valid": "1990-07-02",
+      "nan_after_first_filled_zero": 0
+    }
+  },
+  "bond10_vs_ief": {
+    "corr": 0.9610358174333553,
+    "vol_syn": 0.07711419700865987,
+    "vol_ief": 0.0678369551897049,
+    "ann_ret_syn": 0.03156029830789645,
+    "ann_ret_ief": 0.0346197672188282
+  },
+  "world_french_vs_efa": {
+    "corr": 0.7629377329223691,
+    "vol_fr": 0.1566748111395756,
+    "vol_efa": 0.20741495490074158,
+    "n": 6305
+  },
+  "norgate_update": {
+    "US Equities": "2026-11-05 10:53:24+02:00",
+    "Forex Spot": "2026-11-05 08:52:16+02:00"
+  }
+}

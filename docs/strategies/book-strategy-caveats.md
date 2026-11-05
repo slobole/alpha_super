@@ -240,3 +240,18 @@ Closed 2026-10-31 ([record](../research/RESIDUAL_MOMENTUM_20261031.md)). `strate
 | A name on its last bar stops a swap | Live risk | A target name with no quote blocks the whole plan: 2, 2 and 9 of 627 decisions per leg | Wiring record |
 | A fill at the next close | Small | Bench Timing: 0.2 to 0.35 points a year and 0.01 to 0.03 of Sharpe against the next open, so completing a cancelled order by MOC is cheap | Bench Timing 2026-11-03 |
 | Wired, not enabled | Status | Real modules, disabled templates and tests; no paper days and no fills. Record in `docs/live/MOMENTUM_LEGS_WIRING_20261103.md` | Build 2026-11-03 |
+
+## Beyond 60/40 trend tilt — `strategy_taa_beyond_6040_trend_tilt` (RESEARCH candidate, 2026-11-05)
+
+Record: [BEYOND_6040_20261105.md](../research/BEYOND_6040_20261105.md). Inverse-vol stocks / 20+y Treasury / gold, 8% vol target, per-asset 10-month SMA tilt (×1 above, ×0.5 below), monthly. Not in any book or template.
+
+| Caveat | Kind | Size | Source |
+| --- | --- | --- | --- |
+| The author's published Sharpe (1.0–1.2) ignores the risk-free rate; over Fed funds the plain rule ties 60/40 (0.43 vs 0.45, 1970–2022) and the tilted rule earns 0.65 | Measurement | 3.7 pp/yr over cash on 6% vol | A0, A4 |
+| The tilt is insurance: trails the untilted rule in months when stocks and bonds do not fall together | Premium | about −0.7 pp/yr 2008–2022; vault 2023–26 7.9% vs 11.2% | A12, vault |
+| Pays in positive stock-bond correlation and inflation-above-trend regimes; loses to 60/40 in the 1990s and 2010s bull decades (gates G1b/G1c failed) | Regime | Sharpe 0.44 vs 0.87 (1990s), 0.97 vs 1.38 (2010s) | A11, gates |
+| History before 2004-11 is synthetic (French market, FRED-priced 25y par bond, Frankfurt/XAU gold); 1970s block leans on one gold bull market | Data | ETF-era numbers stand on real prices | PAKAL PMT panel |
+| Same engine as CORE5 (stocks / bond / gold, risk-weighted, SMA10 on/off, vol control); CORE5 wins 2012→ by 0.37 Sharpe on its own era, T1 has the 1970–2006 record CORE5 cannot be tested on | Book | one pod per engine: CORE5 keeps the seat | A12 |
+| Turnover 2.5×/yr; 5% exposure band cuts it 20% at no cost | Cost | 5 bp → 10 bp costs 0.02 Sharpe | A1, A4 |
+| ILS reporting: unhedged halves the Sharpe (0.71 → 0.33); hedge the NAV (full or 50%); the trend-timed hedge has no edge on USD/ILS | FX | worst unhedged drawdowns are FX, not strategy | A10 |
+| Leverage (1.25–2×, financed at Fed funds + 1.5%) does not raise Sharpe; capped 1.5× on the tilted rule is +0.7 pp CAGR for −2.5 pp deeper max DD | Dial | Sharpe unchanged | A8 |

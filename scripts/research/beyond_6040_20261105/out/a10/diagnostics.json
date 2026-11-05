@@ -1,0 +1,41 @@
+{
+  "monthly_corr_rusd_fx": -0.23661136259687066,
+  "worst_decile_strategy_months": {
+    "avg_r_usd": -0.03094215412930723,
+    "avg_fx": 0.012180346995592117,
+    "share_usd_up": 0.6388888888888888
+  },
+  "band_abs_ev_over_resid_sd_quantiles": {
+    "0.5": 0.078,
+    "0.9": 0.165,
+    "0.99": 0.316,
+    "1.0": 0.409
+  },
+  "bootstrap_hedged_minus_unhedged_1993": {
+    "diff_median": 0.3633574147844342,
+    "diff_p05": 0.11462780531042091,
+    "diff_p95": 0.6108685600601411,
+    "prob_a_better": 0.987,
+    "sharpe_a_p05": 0.4263100136072304,
+    "sharpe_a_p95": 1.0112040286375878,
+    "n_days": 7535
+  },
+  "bootstrap_hedged_minus_unhedged_2005": {
+    "diff_median": 0.24787631378683217,
+    "diff_p05": -0.09597323543176059,
+    "diff_p95": 0.602054334517536,
+    "prob_a_better": 0.869,
+    "sharpe_a_p05": 0.3685721382457575,
+    "sharpe_a_p95": 1.159949446774839,
+    "n_days": 4531
+  },
+  "bootstrap_half_minus_unhedged_1993": {
+    "diff_median": 0.21095661107340782,
+    "diff_p05": 0.10151638956223943,
+    "diff_p95": 0.323146161431057,
+    "prob_a_better": 0.998,
+    "sharpe_a_p05": 0.2749354118846119,
+    "sharpe_a_p95": 0.8372795204593632,
+    "n_days": 7535
+  }
+}
