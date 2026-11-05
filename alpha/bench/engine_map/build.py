@@ -145,6 +145,7 @@ ENGINES = [
     ("eom_vote", "eom_vote", "Flow Vote", "Month-end stocks and bonds, by three votes", "macro", [], "eom_tradable_retro_20261101"),
     ("vrp", "vrp", "VRP", "Short volatility through SVXY, VIXM hedge", "vol", [], "vrp_rsi2_locked_retro_20261103"),
 ]
+KEY_OF = {engine_id: key for engine_id, key, *_ in ENGINES if key}
 # Fixed mixes of cards above: parts, weights, reset ("month" or "year"), stage, words. The MR capsule's figures on the frozen window are checked below.
 BLENDS = {
     "capsule": (["dv2_g", "hpi_g"], [0.5, 0.5], "month", "WIRED", "Two S&P 500 dip rules at half each, buying only in stressed markets, idle money in T-bills."),
@@ -417,6 +418,59 @@ PRESETS = [
 ETF_COLS = ["QQQ", "IEF", "GLD", "DBC", "UUP"]
 FF_COLS = ["Mkt-RF", "SMB", "HML", "MOM"]
 TRADE_FIELDS = ("days", "turnover", "names", "namesMax", "hold", "shortPct", "shortDays", "end")
+HOLD_ROWS = 10  # the drawer lists the biggest ten; the rest is one "others" row
+
+
+def raw_holdings(engine_id: str) -> dict | None:
+    """What refresh.py saved from the engine's last run; a fixed mix is its parts at their fixed weights."""
+    if engine_id in BLENDS:
+        parts, weights = BLENDS[engine_id][:2]
+        raws = [raw_holdings(part) for part in parts]
+        if any(raw is None for raw in raws):
+            return None
+        now: dict[str, float] = {}
+        avg: dict[str, list] = {}
+        for raw, weight in zip(raws, weights):
+            for asset, w in raw["now"].items():
+                now[asset] = now.get(asset, 0.0) + weight * w
+            for asset, (w, _days) in raw["avg"].items():
+                avg[asset] = [avg.get(asset, [0.0])[0] + weight * w, None]  # days held has no meaning across parts
+        return {"date": min(raw["date"] for raw in raws), "start": max(raw["start"] for raw in raws), "now": now, "avg": avg, "mix": True}
+    key = KEY_OF.get(engine_id)
+    path = DAILY / f"{key}.holdings.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8")) if key else None
+    except (OSError, ValueError):
+        return None
+
+
+def asset_word(asset: str) -> str:
+    """Norgate marks a delisted stock with its delisting month (DISH-202312); the page shows the ticker."""
+    return re.sub(r"-\d{6}$", "", asset)
+
+
+def top_rows(rows: list[list]) -> tuple[list[list], dict | None]:
+    """Biggest first by size; the tail folds into one row with its count and summed weight. Idle cash is never folded: it comes last, on its own."""
+    cash = [row for row in rows if row[0] == "Cash" and abs(row[1]) >= 1e-3]
+    rows = sorted([row for row in rows if row[0] != "Cash"], key=lambda row: -abs(row[1]))
+    head, tail = rows[:HOLD_ROWS], rows[HOLD_ROWS:]
+    return head + cash, ({"n": len(tail), "w": round(sum(row[1] for row in tail), 4)} if tail else None)
+
+
+def holdings_view(engine_id: str) -> dict | None:
+    raw = raw_holdings(engine_id)
+    if not raw:
+        return None
+    now_by: dict[str, float] = {}
+    avg_by: dict[str, list] = {}
+    for asset, w in raw["now"].items():
+        now_by[asset_word(asset)] = now_by.get(asset_word(asset), 0.0) + w
+    for asset, (w, days) in raw["avg"].items():  # two listings of one ticker (an old delisting and today's) are one row
+        prior = avg_by.get(asset_word(asset))
+        avg_by[asset_word(asset)] = [w + (prior[0] if prior else 0.0), None if days is None else max(days, prior[1] or 0.0) if prior else days]
+    now, now_rest = top_rows([[a, round(w, 4)] for a, w in now_by.items() if abs(w) > 1e-4])
+    avg, avg_rest = top_rows([[a, round(w, 4), d] for a, (w, d) in avg_by.items() if abs(w) > 1e-5])
+    return {"date": raw["date"], "start": raw["start"], "mix": bool(raw.get("mix")), "now": now, "nowRest": now_rest, "avg": avg, "avgRest": avg_rest}
 
 
 # ----------------------------------------------------------------- the return frame: frozen history plus refreshed sessions
@@ -897,7 +951,7 @@ for engine_id, key, name, sub, family, versions, registration in ENGINES:
         "card": card, "gradeOnly": None if card else grade_without_card(registration), "cardNote": CARD_NOTE.get(engine_id), "forward": FORWARD.get(registration),
         "plus5": round(plus5, 2) if plus5 is not None else None, "fade": FADE.get(engine_id),
         "candidate": engine_id not in NOT_CANDIDATE, "candidateWhy": NOT_CANDIDATE.get(engine_id), "idea": SAME_IDEA.get(engine_id),
-        "trades": {k: trades.get(k) for k in TRADE_FIELDS} if trades else None, "tradesNote": TRADES_NOTE.get(engine_id), "tradesOpens": TRADES_OPENS.get(engine_id),
+        "trades": {k: trades.get(k) for k in TRADE_FIELDS} if trades else None, "tradesNote": TRADES_NOTE.get(engine_id), "tradesOpens": TRADES_OPENS.get(engine_id), "holdings": holdings_view(engine_id),
         "fillWord": "Fills in the closing auction" if engine_id in CLOSE_AUCTION else "Fills at the next open",
     })
 

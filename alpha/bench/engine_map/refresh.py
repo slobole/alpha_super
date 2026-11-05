@@ -102,9 +102,31 @@ def run_one(alias: str, run_start: str) -> dict:
     results = path_of(strategy.results)
     results.to_parquet(DAILY / f"{alias}.parquet")
     last = str(results.index[-1].date())
+    try:  # what it holds is a drawer extra: a run without a weight frame just has none
+        (DAILY / f"{alias}.holdings.json").write_text(json.dumps(holdings_of(strategy)), encoding="utf-8")
+    except Exception:
+        (DAILY / f"{alias}.holdings.json").unlink(missing_ok=True)
     del strategy
     gc.collect()
     return {"alias": alias, "last": last, "rows": int(len(results)), "seconds": round(time.time() - started, 1)}
+
+
+def holdings_of(strategy) -> dict:
+    """Weights at the last close and on average over the run, from the run's realized weight frame (or its daily
+    target weights when it keeps no realized frame). Weights are shares of NAV; Cash is the idle part, negative when borrowed."""
+    weights = getattr(strategy, "realized_weight_df", None)
+    if weights is None or not len(weights):
+        weights = getattr(strategy, "daily_target_weights", None)
+    weights = weights.astype(float).fillna(0.0)
+    weights.index = pd.to_datetime(weights.index).normalize()
+    held = weights.abs() > 1e-4
+    last = weights.iloc[-1]
+    return {
+        "date": str(weights.index[-1].date()), "start": str(weights.index[0].date()),
+        "now": {asset: round(float(w), 4) for asset, w in last[last.abs() > 1e-4].items()},
+        # name: [average weight, percent of sessions held]
+        "avg": {asset: [round(float(weights[asset].mean()), 5), round(float(held[asset].mean() * 100), 1)] for asset in weights.columns[held.any()]},
+    }
 
 
 def path_of(results: pd.DataFrame) -> pd.DataFrame:

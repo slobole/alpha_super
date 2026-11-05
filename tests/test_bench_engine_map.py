@@ -230,3 +230,21 @@ def test_overlap_gate_names_the_run_outside_the_limits():
     assert [line_str.split(":")[0] for line_str in failure_list] == ["drift", "short"]
     assert "corr 0.98" in failure_list[0] and "max gap 40.0 bp" in failure_list[0]
     assert "days overlap" in failure_list[1]
+
+
+def test_holdings_read_the_last_close_and_the_run_average():
+    import types
+
+    import pandas as pd
+
+    from alpha.bench.engine_map.refresh import holdings_of
+
+    index = pd.bdate_range("2024-01-02", periods=4)
+    weights = pd.DataFrame({"SPY": [0.5, 0.5, 0.0, 0.0], "TLT": [0.0, 0.25, 0.75, 1.02], "Cash": [0.5, 0.25, 0.25, -0.02]}, index=index)
+    strategy = types.SimpleNamespace(realized_weight_df=weights)
+    holdings = holdings_of(strategy)
+    assert holdings["date"] == "2024-01-05" and holdings["start"] == "2024-01-02"
+    assert holdings["now"] == {"TLT": 1.02, "Cash": -0.02}  # SPY sold: not held now
+    assert holdings["avg"]["SPY"] == [0.25, 50.0] and holdings["avg"]["TLT"][1] == 75.0
+    # a run that keeps only daily target weights reads those
+    assert holdings_of(types.SimpleNamespace(realized_weight_df=pd.DataFrame(), daily_target_weights=weights))["now"] == holdings["now"]

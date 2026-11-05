@@ -1283,6 +1283,22 @@ function tradesHTML(e) {
   if (!cells.length) return `<div class="dsec">${head}<div class="drow"><div class="dwide">${note}</div></div></div>`;
   return `<div class="dsec">${head}<div class="drow"${tipAttr(`Last 3 years of its saved run${t.end ? `, to ${shortLabel(t.end)}` : ''}. T-bill parking left out. Holds counts trading sessions. Turnover counts buys plus sells.`)}>${cells.join('')}</div></div>`;
 }
+function holdingsHTML(e) {
+  const h = e.holdings; if (!h) return '';
+  // one scale for both lists, so a weight reads the same on either side; the folded rest is a number only, it would dwarf the names
+  const top = Math.max(...h.now.concat(h.avg).map((r) => Math.abs(r[1])), 1e-9);
+  const share = (w) => pct(w * 100, Math.abs(w) >= 0.1 ? 0 : 1);
+  const row = (name, w, tip, bar = true) => `<div class="hrow"${tipAttr(tip)}><span>${esc(name)}</span><span class="track${bar ? '' : ' none'}">${bar ? `<span class="fill${w < 0 ? ' neg' : ''}" style="width:${(Math.abs(w) / top * 100).toFixed(1)}%"></span>` : ''}</span><span class="v">${share(w)}</span></div>`;
+  const what = (name, w) => name === 'Cash' ? (w < 0 ? 'Borrowed cash' : 'Idle cash') : w < 0 ? `${name}, short` : name;
+  const rest = (r, when) => r ? row(`${plural(r.n, 'other')}`, r.w, `${plural(r.n, 'smaller holding')} ${when}, together ${share(r.w)} of capital.`, false) : '';
+  const since = (() => { const [y, m] = h.start.split('-'); return `${MONTHS[+m - 1]} ${y}`; })();
+  // the biggest holdings, then the folded rest, then idle cash
+  const list = (rows, r, when, tip) => rows.filter(([n]) => n !== 'Cash').map((x) => row(x[0], x[1], tip(...x))).join('') + rest(r, when) + rows.filter(([n]) => n === 'Cash').map((x) => row(x[0], x[1], tip(...x))).join('');
+  const now = list(h.now, h.nowRest, 'at that close', (n, w) => `${what(n, w)}: ${share(w)} of capital at the ${monthDay(h.date)} close.`);
+  const avg = list(h.avg, h.avgRest, `on average since ${since}`, (n, w, d) => `${what(n, w)}: ${share(w)} of capital on average since ${since}${d == null ? '' : `, held on ${Math.round(d)}% of sessions`}.`);
+  return `<div class="dsec"><h4>What it holds</h4><div class="hgrid"><div><div class="hcap">At the ${esc(monthDay(h.date))} close</div>${now || '<div class="dfine">Nothing held</div>'}</div><div><div class="hcap">Average since ${esc(since)}</div>${avg}</div></div>` +
+    `<div class="dfine">Share of capital in each asset, from the last Refresh map run.${h.mix ? ' Its parts at their fixed weights.' : ''} Cash is the part not invested; negative means borrowed.</div></div>`;
+}
 function frozenHTML(e) {
   if (!e.frozen) return '';
   const i = idxOf(e.frozen), s = i < LAST ? statsOf(R[e.id], i, LAST) : null;
@@ -1342,7 +1358,7 @@ function openDrawer(id) {
     `<div class="dwords">${esc(e.words)}</div>` +
     (s ? `<div><div class="dstats"><div><b>${pct(s.ret)}</b><span>${wordOf(s)}</span></div><div><b${sharpeTip(e, s)}>${sharpeText(s, e)}</b><span>Sharpe</span></div><div><b>${pct(s.dd)}</b><span>Max DD</span></div><div><b>${pct(s.vol)}</b><span>Vol</span></div></div><div class="dfine">${esc(`Backtest, ${periodWords()} to ${shortLabel(e.end)}`)}</div></div>` : `<div class="dfine">No data in this period</div>`) +
     (e.used.length ? `<div class="dsec"><h4>In portfolios</h4><div class="pills"${tipAttr(D.portfolioTip)}>${e.used.map((u) => (presetNamed(u.p) ? `<button class="pill" data-pill="${esc(u.p)}">${esc(u.p)} <b>${u.w}%</b></button>` : `<span class="pill">${esc(u.p)} <b>${u.w}%</b></span>`)).join('')}</div></div>` : '') +
-    tradesHTML(e) + caveatsHTML(e) + checksHTML(e) +
+    tradesHTML(e) + holdingsHTML(e) + caveatsHTML(e) + checksHTML(e) +
     `<div class="dsec"><div class="dtitle"><h4>Growth of $1</h4><select id="cmp" aria-label="Compare with another engine">${options}</select></div><div class="chart" id="d-growth"></div><div class="dfine" id="d-cmp" hidden></div></div>` +
     `<div class="dsec"><h4>Drawdown</h4><div class="chart" id="d-dd"></div></div>` +
     `<div class="dsec"><h4>By year <span class="stag">All history</span></h4><div class="chart" id="d-years"></div></div>` +
