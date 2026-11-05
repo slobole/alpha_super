@@ -241,7 +241,7 @@ Closed 2026-10-31 ([record](../research/RESIDUAL_MOMENTUM_20261031.md)). `strate
 | A fill at the next close | Small | Bench Timing: 0.2 to 0.35 points a year and 0.01 to 0.03 of Sharpe against the next open, so completing a cancelled order by MOC is cheap | Bench Timing 2026-11-03 |
 | Wired, not enabled | Status | Real modules, disabled templates and tests; no paper days and no fills. Record in `docs/live/MOMENTUM_LEGS_WIRING_20261103.md` | Build 2026-11-03 |
 
-## Beyond 60/40 trend tilt — `strategy_taa_beyond_6040_trend_tilt` (PM_READY 2026-11-05, no book slot; audited)
+## Beyond 60/40 trend tilt — `strategy_taa_beyond_6040_trend_tilt` (WIRED 2026-11-05, disabled template, no book slot; audited)
 
 Record: [BEYOND_6040_20261105.md](../research/BEYOND_6040_20261105.md). Inverse-vol stocks / 20+y Treasury / gold, 8% vol target, per-asset 10-month SMA filter (full weight above, out to cash below), monthly. Not in any book or template.
 

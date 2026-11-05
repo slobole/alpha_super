@@ -1,6 +1,6 @@
 ,candidate,gate,value,threshold,pass
 0,B0 (author rule),G1a full excess Sharpe >= 60/40 + 0.15,0.4280585758479239,0.595726272839066,False
-1,B0 (author rule),G1b >= 60/40 in >= 5 of 6 blocks,2.0,5.0,False
+1,B0 (author rule),G1b >= 60/40 in >= 5 of 6 blocks,3.0,5.0,False
 2,B0 (author rule),G1c never below 60/40 by > 0.10 in a block,-0.5889007331747376,-0.1,False
 3,B0 (author rule),G2 max DD <= 2/3 of 60/40 (full),-0.16181926221037068,-0.24194466833837502,True
 4,B0 (author rule),G2 max DD <= 2/3 of 60/40 (ETF era),-0.16181926221037068,-0.20948924181106698,True
@@ -8,16 +8,16 @@
 6,B0 (author rule),G3b >= 80% of grid beats 60/40 Sharpe,0.19555555555555557,0.8,False
 7,B0 (author rule),G3 grid Sharpe range,0.3815353395697266,0.488460377346043,
 8,B0 (author rule),G4 walk-forward Sharpe >= fixed - 0.10 (1980-2022),0.6762853383463526,0.3873286278841047,True
-9,B0 (author rule),G5 with 0% cash: Sharpe >= 60/40 raw + 0.15,1.0591956211430609,1.052510693782969,True
+9,B0 (author rule),G5 with 0% cash: Sharpe over Fed funds >= 60/40 + 0.15,0.3704449398246055,0.595726272839066,False
 10,B0 (author rule),G5 with 0% cash: max DD <= 2/3 of 60/40,-0.1647213972447552,-0.24194466833837502,True
 11,"T1 (B0 + SMA10 tilt k=0.5, monthly)",G1a full excess Sharpe >= 60/40 + 0.15,0.6454582731527795,0.595726272839066,True
 12,"T1 (B0 + SMA10 tilt k=0.5, monthly)",G1b >= 60/40 in >= 5 of 6 blocks,4.0,5.0,False
 13,"T1 (B0 + SMA10 tilt k=0.5, monthly)",G1c never below 60/40 by > 0.10 in a block,-0.42410581872557057,-0.1,False
 14,"T1 (B0 + SMA10 tilt k=0.5, monthly)",G2 max DD <= 2/3 of 60/40 (full),-0.106907109855096,-0.24194466833837502,True
 15,"T1 (B0 + SMA10 tilt k=0.5, monthly)",G2 max DD <= 2/3 of 60/40 (ETF era),-0.07801874168718781,-0.20948924181106698,True
-16,"T1 (B0 + SMA10 tilt k=0.5, monthly)",G3a chosen cell within 0.05 of neighbourhood median Sharpe,0.6454582731527795,0.6461310223100332,True
+16,"T1 (B0 + SMA10 tilt k=0.5, monthly)",G3a chosen cell within 0.05 of neighbourhood median Sharpe,0.6454582731527795,0.5999900932724194,True
 17,"T1 (B0 + SMA10 tilt k=0.5, monthly)",G3b >= 80% of grid beats 60/40 Sharpe,1.0,0.8,True
 18,"T1 (B0 + SMA10 tilt k=0.5, monthly)",G3 grid Sharpe range,0.5368739660618301,0.6981485754580572,
 19,"T1 (B0 + SMA10 tilt k=0.5, monthly)",G4 walk-forward Sharpe >= fixed - 0.10 (1980-2022),0.6762853383463526,0.5821252467863453,True
-20,"T1 (B0 + SMA10 tilt k=0.5, monthly)",G5 with 0% cash: Sharpe >= 60/40 raw + 0.15,1.1236299681149955,1.052510693782969,True
+20,"T1 (B0 + SMA10 tilt k=0.5, monthly)",G5 with 0% cash: Sharpe over Fed funds >= 60/40 + 0.15,0.30042608802130044,0.595726272839066,False
 21,"T1 (B0 + SMA10 tilt k=0.5, monthly)",G5 with 0% cash: max DD <= 2/3 of 60/40,-0.13337922448864703,-0.24194466833837502,True

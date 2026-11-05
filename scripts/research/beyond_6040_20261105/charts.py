@@ -56,7 +56,7 @@ for a, m, t, cm, vmin, vmax in [(ax[0], tt, "Sharpe over cash", "Blues", 0.4, 0.
     a.imshow(m.values, cmap=cm, vmin=vmin, vmax=vmax, aspect="auto"); a.set_xticks(range(m.shape[1])); a.set_xticklabels(m.columns); a.set_yticks(range(m.shape[0])); a.set_yticklabels(m.index)
     for i in range(m.shape[0]):
         for j in range(m.shape[1]): a.text(j, i, f"{m.values[i, j]:.2f}", ha="center", va="center", fontsize=8)
-    a.set_title(f"Trend tilt: {t} by SMA length x tilt strength k", loc="left", fontsize=9); a.set_xlabel("k (0 = no tilt, 1 = fully out when below SMA)")
+    a.set_title(f"Trend tilt: {t} by SMA length x tilt strength k", loc="left", fontsize=9); a.set_xlabel("k: 0.25 = half weight below SMA, 0.5 = out below SMA, 0.75/1.0 = short below SMA")
 fig.tight_layout(); fig.savefig(C / "tilt_grid.png"); plt.close(fig)
 # 6. vault panel 2023-2026
 fig, ax = plt.subplots(1, 2, figsize=(11, 3.6))

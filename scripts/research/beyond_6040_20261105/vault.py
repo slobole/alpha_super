@@ -27,7 +27,7 @@ for k in ["T1 (chosen)", "B0 (author rule)"]:
         nav = np.cumprod(1 + r.loc["1970":DEV_END].values[idx]); dds[i] = (nav / np.maximum.accumulate(nav) - 1).min()
     realised = (1 + ex_v).prod() - 1
     nav_v = (1 + r.loc[VAULT_START:]).cumprod(); dd_v = (nav_v / nav_v.cummax() - 1).min()
-    dev_blocks = [metrics(r.loc[s:e], cash.loc[s:e])["max_dd"] for s, e in DECADES.values() if not s.startswith("2005") and e <= "2022-12-31"]
+    dev_blocks = [metrics(r.loc[s:e], cash.loc[s:e])["max_dd"] for k, (s, e) in DECADES.items() if not k.startswith(("ETF", "Full"))]  # decades only (audit: Full block was included)
     out[k] = {"realised_excess_return": realised, "band_p05": float(np.percentile(sims, 5)), "band_p50": float(np.percentile(sims, 50)), "band_p95": float(np.percentile(sims, 95)),
               "percentile_of_realised": float((sims < realised).mean()), "realised_max_dd": dd_v, "worst_dev_decade_dd": min(dev_blocks), "dd_limit_1.25x": 1.25 * min(dev_blocks),
               "G6a_inside_band": bool(np.percentile(sims, 5) <= realised <= np.percentile(sims, 95)), "G6b_dd_ok": bool(dd_v >= 1.25 * min(dev_blocks)),
