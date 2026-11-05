@@ -53,14 +53,14 @@ ul {{ padding-inline-start:1.2rem; max-width:70ch }} li {{ margin:.3rem 0 }}
 <div class="tile"><div class="k">Walk-forward</div><div class="v">0.68</div><div class="w">hindsight best 0.70</div></div>
 </div>
 
-<p><b>השורה התחתונה.</b> הכלל המקורי (B0) הוא מכונת ירידות טובה אבל לא מכונת Sharpe: מעל מזומן הוא שקול ל־60/40. התוספת של הכותב עצמו, הטיית טרנד לכל נכס לפי ממוצע 10 חודשים (T1), הופכת אותו לאסטרטגיה: Sharpe 0.65 מול 0.45, ירידה מקסימלית חצי, על מישור פרמטרים שטוח, עם walk-forward שווה לבחירה בדיעבד, וכספת שנחתה באמצע הטווח הצפוי. שום שינוי אחר לא עזר.</p>
+<p><b>השורה התחתונה.</b> הכלל המקורי (B0) הוא מכונת ירידות טובה אבל לא מכונת Sharpe: מעל מזומן הוא שקול ל־60/40. התוספת של הכותב עצמו, מסנן טרנד לכל נכס לפי ממוצע 10 חודשים (T1: נכס מתחת לממוצע יוצא למזומן), הופכת אותו לאסטרטגיה: Sharpe 0.65 מול 0.45, ירידה מקסימלית חצי, על מישור פרמטרים שטוח, עם walk-forward שווה לבחירה בדיעבד, וכספת שנחתה באמצע הטווח הצפוי. שום שינוי אחר לא עזר.</p>
 
 <figure><img src="{img('equity_drawdown.png')}" alt="Growth of one dollar and drawdowns 1970-2026"><figcaption>$1 מ־1970, סקאלה לוגריתמית. האפור מימין: הכספת 2023+. T1 (כחול) מעולם לא ירד יותר מ־11%.</figcaption></figure>
 <figure><img src="{img('decade_sharpe.png')}" alt="Sharpe over cash by decade"><figcaption>Sharpe מעל מזומן לפי עשור. T1 מפסיד ל־60/40 רק בשני עשורי השור הארוכים (1990s, 2010s) ומנצח בכל השאר, כולל כל עשורי האינפלציה.</figcaption></figure>
 
 <h2>למה הטרנד עובד כאן</h2>
 <figure><img src="{img('regimes.png')}" alt="Return over cash by regime"><figcaption>תשואה שנתית מעל מזומן לפי משטר. כשמניות ואג"ח נעות יחד והמניות יורדות, B0 מפסיד 3% בשנה ו־T1 בערך אפס. במשטרים הטובים ההבדל קטן.</figcaption></figure>
-<figure><img src="{img('tilt_grid.png')}" alt="Trend tilt plateau"><figcaption>המישור של הטרנד: אורך ממוצע 6–12 חודשים × עוצמה k. כל התאים עם k ≤ 0.5 עוברים את כלל האימוץ שנרשם מראש. k=1 (יציאה מלאה) כבר גרוע יותר.</figcaption></figure>
+<figure><img src="{img('tilt_grid.png')}" alt="Trend tilt plateau"><figcaption>המישור של הטרנד: אורך ממוצע 6–12 חודשים × עוצמה k. k=0.25 נותן חצי משקל מתחת לממוצע, k=0.5 (T1) יוצא מהנכס לגמרי, ו־k=0.75 ו־1 כבר מוסיפים שורט. שתי הגרסאות בלי שורט עוברות את כלל האימוץ; השורט מקלקל.</figcaption></figure>
 <figure><img src="{img('plateau.png')}" alt="Parameter plateau"><figcaption>חלון תנודתיות × יעד. עם הטרנד כל 60 התאים מנצחים את 60/40. יעד התנודתיות כמעט לא משנה את ה־Sharpe, רק את עומק הירידה.</figcaption></figure>
 
 <h2>הכספת</h2>
@@ -91,12 +91,12 @@ ul {{ padding-inline-start:1.2rem; max-width:70ch }} li {{ margin:.3rem 0 }}
 
 <h2>מקום בספר</h2>
 <p>T1 הוא אותו מנוע כמו CORE5: מניות, אג"ח, זהב, משקל לפי סיכון, SMA10 לכל נכס, בקרת תנודתיות. על 2008–2022 CORE5 מנצח (Sharpe 0.82 מול 0.79, ומ־2012 0.94 מול 0.57). מה ש־T1 מביא הוא 50 שנה של היסטוריה ש־CORE5 לא יכול להיבדק עליה: שנות ה־70, 1987, 1994, 2022. לפי כלל "פוד אחד לכל מנוע", CORE5 שומר על הכיסא, ו־T1 נרשם כאימות ההיסטורי של המשפחה וכיורש מוכן אם CORE5 ייכשל בביקורת.</p>
-<figure><img src="{img('weights_t1.png')}" alt="T1 allocation over time"><figcaption>ההקצאה של T1 לאורך הזמן. כשנכס מתחת לממוצע שלו, חצי ממשקלו עובר למזומן.</figcaption></figure>
+<figure><img src="{img('weights_t1.png')}" alt="T1 allocation over time"><figcaption>ההקצאה של T1 לאורך הזמן. כשנכס מתחת לממוצע שלו, כל המשקל שלו עובר למזומן.</figcaption></figure>
 
 <h2>הכלל שנבחר</h2>
 <ul>
 <li>סוף חודש: משקל כל נכס ∝ 1/תנודתיות 63 יום. נכסים: VTI, TLT, GLD.</li>
-<li>אותו יום: מכפיל 1.0 אם המחיר מעל ממוצע 10 חודשים, 0.5 אם מתחת.</li>
+<li>אותו יום: נכס שמחירו מתחת לממוצע 10 חודשים יוצא כולו למזומן; מעל הממוצע הוא מקבל את מלוא משקלו.</li>
 <li>יומי: אם תנודתיות 63 יום של הסל הבסיסי מעל 8.5%, חשיפה = 8% ÷ תנודתיות. בלי מינוף, בלי שורט. היתרה ב־BIL.</li>
 </ul>
 <p class="en">Record: docs/research/BEYOND_6040_20261105.md · spec, tables and scripts: scripts/research/beyond_6040_20261105 · strategy: strategies/taa_beyond_6040/strategy_taa_beyond_6040_trend_tilt.py (RESEARCH, not wired). Sharpe over Fed funds unless marked raw; the author's published Sharpe is raw.</p>

@@ -243,7 +243,7 @@ Closed 2026-10-31 ([record](../research/RESIDUAL_MOMENTUM_20261031.md)). `strate
 
 ## Beyond 60/40 trend tilt — `strategy_taa_beyond_6040_trend_tilt` (RESEARCH candidate, 2026-11-05)
 
-Record: [BEYOND_6040_20261105.md](../research/BEYOND_6040_20261105.md). Inverse-vol stocks / 20+y Treasury / gold, 8% vol target, per-asset 10-month SMA tilt (×1 above, ×0.5 below), monthly. Not in any book or template.
+Record: [BEYOND_6040_20261105.md](../research/BEYOND_6040_20261105.md). Inverse-vol stocks / 20+y Treasury / gold, 8% vol target, per-asset 10-month SMA filter (full weight above, out to cash below), monthly. Not in any book or template.
 
 | Caveat | Kind | Size | Source |
 | --- | --- | --- | --- |
