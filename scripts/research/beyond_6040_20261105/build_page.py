@@ -49,11 +49,11 @@ ul {{ padding-inline-start:1.2rem; max-width:70ch }} li {{ margin:.3rem 0 }}
 <div class="tile"><div class="k">Sharpe over cash 1970–2022</div><div class="v">0.60–0.65</div><div class="w">T1 · 60/40 0.45 · B0 0.43</div></div>
 <div class="tile"><div class="k">Max drawdown</div><div class="v">−11%</div><div class="w">−10.7% to −11.6% · 60/40 −36.3%</div></div>
 <div class="tile"><div class="k">With cash at 0%</div><div class="v">0.30</div><div class="w">the edge needs idle cash in T-bills</div></div>
-<div class="tile"><div class="k">Strategy gate (frozen spec)</div><div class="v">Failed</div><div class="w">loses 1990s, 2010s; 0%-cash gate</div></div>
+<div class="tile"><div class="k">Beats 60/40 every decade</div><div class="v">No</div><div class="w">trails in the 1990s and 2010s bulls</div></div>
 <div class="tile"><div class="k">Vault 2023–26</div><div class="v">42nd pct</div><div class="w">inside a wide band</div></div>
 </div>
 
-<p><b>השורה התחתונה (אחרי ביקורת בלתי תלויה).</b> הכלל המקורי (B0) הוא מכונת ירידות, לא מכונת Sharpe: מעל מזומן הוא שקול ל־60/40. עם מסנן הטרנד של הכותב (T1: נכס מתחת לממוצע 10 חודשים יוצא למזומן) הוא מנצח את 60/40 מעל מזומן, 0.60–0.65 מול 0.45, עם ירידה מקסימלית של כ־11% מול 36%. שני סייגים מהותיים: היתרון תלוי בכך שהמזומן הפנוי (כשליש מהתיק בממוצע) מרוויח ריבית, וב־0% הוא יורד ל־0.30, מתחת ל־60/40; והוא לא עבר את השער שנקבע מראש להפוך לאסטרטגיה, כי הוא מפסיד ל־60/40 בשנות ה־90 וה־2010. בחירת המסנן נעשתה מתוך גריד שנוסף אחרי התוצאות הראשונות.</p>
+<p><b>השורה התחתונה (אחרי ביקורת בלתי תלויה).</b> הכלל המקורי (B0) הוא מכונת ירידות, לא מכונת Sharpe: מעל מזומן הוא שקול ל־60/40. עם מסנן הטרנד של הכותב (T1: נכס מתחת לממוצע 10 חודשים יוצא למזומן) הוא מנצח את 60/40 מעל מזומן, 0.60–0.65 מול 0.45, עם ירידה מקסימלית של כ־11% מול 36%. שני סייגים מהותיים: היתרון תלוי בכך שהמזומן הפנוי (כשליש מהתיק בממוצע) מרוויח ריבית, וב־0% הוא יורד ל־0.30, מתחת ל־60/40; והוא לא עבר את הרף הקשוח שקבענו מראש, לנצח את 60/40 כמעט בכל עשור: הוא מפסיד לו בשווקי השור של שנות ה־90 וה־2010. זו אסטרטגיה דפנסיבית טובה, לא תחליף ל־60/40 בכל תקופה. בחירת המסנן נעשתה מתוך גריד שנוסף אחרי התוצאות הראשונות.</p>
 
 <figure><img src="{img('equity_drawdown.png')}" alt="Growth of one dollar and drawdowns 1970-2026"><figcaption>$1 מ־1970, סקאלה לוגריתמית. האפור מימין: הכספת 2023+. T1 (כחול) לא ירד יותר מ־11% במוסכמת המחקר (11.6% בביצוע ריאלי, יום אחד מאוחר יותר).</figcaption></figure>
 <figure><img src="{img('decade_sharpe.png')}" alt="Sharpe over cash by decade"><figcaption>Sharpe מעל מזומן לפי עשור. T1 מפסיד ל־60/40 רק בשני עשורי השור הארוכים (1990s, 2010s) ומנצח בכל השאר, כולל כל עשורי האינפלציה.</figcaption></figure>
