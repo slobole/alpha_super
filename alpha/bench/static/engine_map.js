@@ -1104,20 +1104,30 @@ function wrapEnd(text, strong, room) {
 const endSpans = (lines, x) => lines.map((t, k) => `<tspan x="${x}"${k ? ' dy="15"' : ''}>${esc(t)}</tspan>`).join('');
 // a main line's label takes its colour, deep enough to read as text in both themes
 const strongInk = (color) => `color-mix(in oklab, ${color} 70%, var(--ink))`;
-function growthChart(el, list, a, b, right = 116) {
+// nice steps for a narrow zoom, where the fixed dollar levels leave fewer than three lines
+function fineTicks(lo, hi) {
+  const raw = (hi - lo) / 4, mag = 10 ** Math.floor(Math.log10(raw)), step = [1, 2, 5, 10].map((x) => x * mag).find((x) => x >= raw), out = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) out.push(+v.toFixed(6));
+  return out;
+}
+function growthChart(el, list, fa, fb, right = 116) {
   // list: [{name, r, base, color, width, strong, opacity, label, dashTo, dashLabel, marks: [{i, label, dashed}]}]
+  // a drag across the plot zooms in, and every line starts again at $1 on the zoom's first day
+  const z = el._zoom && el._zoom.a === fa && el._zoom.b === fb ? el._zoom : null, a = z ? z.za : fa, b = z ? z.zb : fb;
+  const zoomTo = (za, zb) => { el._zoom = za == null ? null : { a: fa, b: fb, za, zb }; hideTip(); growthChart(el, list, fa, fb, right); };
   const marks = list.flatMap((c) => (c.marks || []).filter((k) => k.i >= a && k.i <= b)), marked = marks.length > 0;
   const W = el.clientWidth, H = 340, m = { l: 42, r: right, t: marked ? 26 : 10, b: 26 }; if (W <= m.l + m.r) return; // no room yet, as in a hidden frame: it draws on the resize when it shows
   let lo = 1, hi = 1;
   list.forEach((s) => sampled(s.r, a, b, 400, s.base || 0).forEach((p) => { if (p.eq < lo) lo = p.eq; if (p.eq > hi) hi = p.eq; }));
-  const L0 = Math.log(lo * 0.94), L1 = Math.log(hi * 1.06);
+  // a narrow zoom keeps a margin in step with its own range, so a few weeks still fill the plot
+  const pad = z ? Math.min(0.06, 0.08 * Math.log(hi / lo) + 0.004) : 0, L0 = z ? Math.log(lo) - pad : Math.log(lo * 0.94), L1 = z ? Math.log(hi) + pad : Math.log(hi * 1.06);
   const X = (i) => m.l + ((i - a) / Math.max(1, b - a)) * (W - m.l - m.r);
   const Y = (v) => H - m.b - ((Math.log(v) - L0) / (L1 - L0)) * (H - m.t - m.b);
   let s = '';
-  D.shaded.forEach((c) => { const i0 = idxOf(c.from), i1 = idxOf(c.to); if (i1 >= a) { const x0 = X(Math.max(i0, a)); s += `<rect x="${x0}" width="${Math.max(2, X(i1) - x0)}" y="${m.t}" height="${H - m.t - m.b}" fill="var(--band)"/>`; } });
+  D.shaded.forEach((c) => { const i0 = idxOf(c.from), i1 = idxOf(c.to); if (i1 >= a && i0 <= b) { const x0 = X(Math.max(i0, a)); s += `<rect x="${x0}" width="${Math.max(2, X(Math.min(i1, b)) - x0)}" y="${m.t}" height="${H - m.t - m.b}" fill="var(--band)"/>`; } });
   const candidates = [0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.5, 2, 3, 5, 10, 20, 50, 100, 200];
   const useful = candidates.filter((v) => Math.log(v) >= L0 && Math.log(v) <= L1);
-  const ticks = useful.length > 6 ? useful.filter((v) => [0.5, 1, 2, 5, 10, 20, 50, 100, 200].includes(v)) : useful;
+  const ticks = useful.length > 6 ? useful.filter((v) => [0.5, 1, 2, 5, 10, 20, 50, 100, 200].includes(v)) : useful.length < 3 ? fineTicks(Math.exp(L0), Math.exp(L1)) : useful;
   ticks.forEach((v) => { s += `<line x1="${m.l}" x2="${W - m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--grid)"/><text class="axis-t" x="${m.l - 8}" y="${Y(v) + 4}" text-anchor="end">$${v}</text>`; });
   const span = YEAR[b] - YEAR[a];
   if (span < 2) {
@@ -1160,9 +1170,26 @@ function growthChart(el, list, a, b, right = 116) {
     prev = yy + (lines.length - 1) * 15;
     s += `<text class="axis-t" y="${yy}" style="fill:${c.strong ? strongInk(c.color) : 'var(--ink-3)'};font-weight:${c.strong ? 600 : 400}">${endSpans(lines, W - m.r + 8)}</text>`;
   });
-  s += `<line class="xl" x1="0" x2="0" y1="${m.t}" y2="${H - m.b}" stroke="var(--ink-3)" visibility="hidden"/><rect x="${m.l}" y="${m.t}" width="${W - m.l - m.r}" height="${H - m.t - m.b}" fill="transparent"/>`;
-  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="Growth of $1">${s}</svg>`;
-  bindCross(el, X, W - m.l - m.r, a, b, (i) => `<b>${dayLabel(i)}</b>` + list.filter((c) => c.label !== false).map((c) => `<div class="r"><i>${esc(c.name)}</i>${c.strong ? '<b>' : ''}$${eqAt(c.r, a, i, c.base || 0).toFixed(2)}${c.strong ? '</b>' : ''}</div>`).join(''), m);
+  s += `<line class="xl" x1="0" x2="0" y1="${m.t}" y2="${H - m.b}" stroke="var(--ink-3)" visibility="hidden"/><rect x="${m.l}" y="${m.t}" width="${W - m.l - m.r}" height="${H - m.t - m.b}" fill="transparent"/><rect class="zsel" x="0" width="0" y="${m.t}" height="${H - m.t - m.b}" visibility="hidden"/>`;
+  el.innerHTML = `<svg class="zoomable" viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="Growth of $1, drag across it to zoom in">${s}</svg>` +
+    (z ? `<button class="zreset" style="left:${m.l + 6}px;top:${m.t + 6}px">Reset zoom</button>` : '');
+  const inner = W - m.l - m.r;
+  bindCross(el, X, inner, a, b, (i) => `<b>${dayLabel(i)}</b>` + list.filter((c) => c.label !== false).map((c) => `<div class="r"><i>${esc(c.name)}</i>${c.strong ? '<b>' : ''}$${eqAt(c.r, a, i, c.base || 0).toFixed(2)}${c.strong ? '</b>' : ''}</div>`).join(''), m);
+  // mouse or pen only: on a phone a drag scrolls the page
+  const svg = el.querySelector('svg'), sel = svg.querySelector('.zsel');
+  const at = (ev) => { const p = new DOMPoint(ev.clientX, ev.clientY).matrixTransform(svg.getScreenCTM().inverse()); return Math.max(a, Math.min(b, Math.round(a + ((p.x - m.l) / inner) * (b - a)))); };
+  let from = null;
+  svg.addEventListener('pointerdown', (ev) => { if (ev.button !== 0 || ev.pointerType === 'touch') return; from = at(ev); svg.setPointerCapture(ev.pointerId); ev.preventDefault(); });
+  svg.addEventListener('pointermove', (ev) => {
+    if (from == null) return;
+    const to = at(ev), x0 = X(Math.min(from, to));
+    sel.setAttribute('x', x0); sel.setAttribute('width', Math.max(0, X(Math.max(from, to)) - x0)); sel.setAttribute('visibility', 'visible');
+  });
+  const done = (ev, keep) => { if (from == null) return; const to = at(ev), lo = Math.min(from, to), hi = Math.max(from, to); from = null; sel.setAttribute('visibility', 'hidden'); if (keep && hi - lo >= 5) zoomTo(lo, hi); };
+  svg.addEventListener('pointerup', (ev) => done(ev, true));
+  svg.addEventListener('pointercancel', (ev) => done(ev, false));
+  svg.addEventListener('dblclick', () => { if (z) zoomTo(null); });
+  if (z) el.querySelector('.zreset').addEventListener('click', () => zoomTo(null));
 }
 function ddChart(el, r, a, b, base, name, ref = null, right = 116) {
   // ref: {name, r, base}, a dashed line to compare with
