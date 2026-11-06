@@ -1001,8 +1001,6 @@ class IBKRSocketClient:
                 # immediately before EACH dispatch. Preserve MKT/OPG semantics.
                 if submission_deadline_ts is not None and datetime.now(UTC) >= submission_deadline_ts:
                     raise ValueError("MOO submission deadline passed before broker dispatch; reconcile any earlier legs.")
-                from alpha.live.dashboard_authorization import assert_manual_dispatch_allowed
-                assert_manual_dispatch_allowed(broker_order_request_obj, datetime.now(UTC))
                 if progress_dict is not None:
                     progress_dict["attempted_key_list"].append(broker_order_request_obj.order_request_key_str)
                 submitted_order_dict = {"request_obj": broker_order_request_obj, "order_obj": broker_order_obj}

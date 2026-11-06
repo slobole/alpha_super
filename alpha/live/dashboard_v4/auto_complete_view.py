@@ -44,8 +44,8 @@ def _fill_text_str(fill_list, side_str):
     return price_text_str + f" · {cost_float:+.1f} bps {direction_str} the open"
 
 
-def load_recovery_view_dict(target_obj, vplan_obj, snapshot_obj, *, as_of_ts):
-    """Saved rows only. A working mark remains blocked until a verified backend end."""
+def load_recovery_view_dict(target_obj, vplan_obj, snapshot_obj, *, as_of_ts, newer_plan_bool=False):
+    """Saved facts only: one re-send, then the normal missing-position calculation."""
     release_obj = target_obj.release_obj
     uri_str = Path(target_obj.db_path_str).resolve().as_uri() + "?mode=ro"
     with closing(sqlite3.connect(uri_str, uri=True)) as connection_obj:
@@ -63,26 +63,25 @@ def load_recovery_view_dict(target_obj, vplan_obj, snapshot_obj, *, as_of_ts):
         ack_list = scoped_rows_list("vplan_broker_ack")
         attempt_list = auto_complete.load_attempt_row_list(connection_obj, vplan_obj.vplan_id_int)
     attempt_map_dict = {row_dict["asset_str"]: dict(row_dict) for row_dict in attempt_list
-                   if row_dict["pod_id_str"] == release_obj.pod_id_str
-                   and row_dict["account_route_str"] == release_obj.account_route_str}
+                       if row_dict["pod_id_str"] == release_obj.pod_id_str
+                       and row_dict["account_route_str"] == release_obj.account_route_str}
     cross_map_dict = auto_complete.cross_cancel_leg_dict(vplan_obj, order_list, event_list)
     cancelled_map_dict = {}
     for order_dict in order_list:
         if str(order_dict.get("status_str", "")).lower() not in TERMINAL_STATUS_SET:
             continue
-        asset_str = order_dict["asset_str"]
         matching_list = [row_dict for row_dict in event_list
                          if row_dict["broker_order_id_str"] == order_dict["broker_order_id_str"]]
         message_str = next((str(row_dict["message_str"]) for row_dict in reversed(matching_list)
                             if row_dict.get("message_str")), "broker cancelled")
-        cancelled_map_dict[asset_str] = message_str[:240]
-    if not cancelled_map_dict and not attempt_map_dict:
+        cancelled_map_dict[order_dict["asset_str"]] = message_str[:240]
+    if not cancelled_map_dict and not attempt_map_dict and not cross_map_dict:
         return {"row_list": []}
     timing_dict = auto_complete.timing_dict(vplan_obj, release_obj.session_calendar_id_str)
     position_map_dict = (snapshot_obj.position_amount_map if snapshot_obj is not None
-                    else vplan_obj.current_broker_position_map)
+                         else vplan_obj.current_broker_position_map)
     row_list = []
-    for asset_str in sorted(set(cancelled_map_dict) | set(attempt_map_dict)):
+    for asset_str in sorted(set(cancelled_map_dict) | set(attempt_map_dict) | set(cross_map_dict)):
         target_float = float(vplan_obj.target_share_map.get(asset_str, 0.0))
         actual_float = float(position_map_dict.get(asset_str, 0.0))
         gap_float = target_float - actual_float
@@ -91,64 +90,84 @@ def load_recovery_view_dict(target_obj, vplan_obj, snapshot_obj, *, as_of_ts):
         quantity_int = _quantity_int(gap_float)
         attempt_dict = attempt_map_dict.get(asset_str)
         cross_dict = cross_map_dict.get(asset_str)
-        short_bool = target_float < min(actual_float, 0.0)
-        blocked_bool = False
         state_str = "not_automatic"
-        text_str = "Rejected by IBKR · " + cancelled_map_dict.get(asset_str, "not automatic")
+        text_str = "Rejected by IBKR · " + cancelled_map_dict.get(asset_str, "broker cancelled")
         if attempt_dict:
             state_str = {"working": "sent", "completed": "completed"}.get(attempt_dict["status_str"], "not_completed")
-            remaining_obj = attempt_dict.get("remaining_quantity_float")
-            if remaining_obj is not None:
-                quantity_int = _quantity_int(remaining_obj)
+            if state_str in {"sent", "completed"}:
+                quantity_int = _quantity_int(attempt_dict.get("quantity_float")) or _quantity_int(original_float)
+                side_str = "BUY" if original_float > 0 else "SELL"
+            linked_order_list = [row_dict for row_dict in order_list
+                if row_dict.get("order_request_key_str") == attempt_dict["order_request_key_str"]]
+            linked_id_set = {row_dict["broker_order_id_str"] for row_dict in linked_order_list}
+            order_id_str = attempt_dict.get("broker_order_id_str")
+            if order_id_str:
+                linked_id_set.add(order_id_str)
+            elif len(linked_id_set) == 1:
+                order_id_str = next(iter(linked_id_set))
             if state_str == "sent":
-                blocked_bool = True
-                quantity_int = quantity_int or _quantity_int(attempt_dict.get("quantity_float"))
-                order_id_str = attempt_dict.get("broker_order_id_str")
                 acknowledged_bool = any(row_dict.get("broker_order_id_str") == order_id_str
                     and row_dict.get("order_request_key_str") == attempt_dict["order_request_key_str"]
                     and row_dict.get("broker_response_ack_bool") in (True, 1)
                     and row_dict.get("ack_status_str") == "broker_acked" for row_dict in ack_list)
-                text_str = (f"Sent {_time_str(attempt_dict['attempted_timestamp_str'], '%H:%M:%S')} · market · order {order_id_str}"
-                            f" · until {_time_str(timing_dict['expiry_ts'])}" if order_id_str and acknowledged_bool else
-                            "Attempt started · awaiting broker check")
-                if as_of_ts >= timing_dict["final_check_ts"]:
-                    text_str = "Awaiting broker check · no new order"
+                acknowledged_bool = acknowledged_bool or any(row_dict.get("status_str") in
+                    {"Submitted", "PreSubmitted", "PartiallyFilled", "PendingCancel", "Filled"} for row_dict in linked_order_list)
+                submitted_str = next((row_dict["submitted_timestamp_str"] for row_dict in linked_order_list
+                    if row_dict.get("broker_order_id_str") == order_id_str and row_dict.get("submitted_timestamp_str")),
+                    attempt_dict["attempted_timestamp_str"])
+                text_str = (f"Re-sent {_time_str(submitted_str, '%H:%M:%S')} · market · order {order_id_str}"
+                            " · waiting for fill" if order_id_str and acknowledged_bool else
+                            "Re-send started · awaiting broker check")
             elif state_str == "completed":
-                ended_ts = datetime.fromisoformat(attempt_dict["ended_timestamp_str"] or attempt_dict["updated_timestamp_str"])
-                if ended_ts.astimezone(MARKET_TIMEZONE_OBJ).date() != as_of_ts.astimezone(MARKET_TIMEZONE_OBJ).date():
+                if as_of_ts >= timing_dict["close_ts"] + timedelta(minutes=10):
                     continue
-                quantity_int = _quantity_int(attempt_dict.get("quantity_float"))
-                order_id_str = attempt_dict.get("broker_order_id_str")
-                matching_fills = [row_dict for row_dict in fill_list if order_id_str
-                                  and row_dict["broker_order_id_str"] == order_id_str]
-                text_str = "Completed · " + _fill_text_str(matching_fills, "BUY" if original_float > 0 else "SELL")
+                original_filled_bool = attempt_dict.get("reason_str") == "Original order already filled"
+                if original_filled_bool:
+                    linked_id_set = {attempt_dict["original_broker_order_id_str"]}
+                matching_fill_dict = {(row_dict["fill_timestamp_str"], row_dict["fill_amount_float"], row_dict["fill_price_float"]): row_dict
+                    for row_dict in fill_list if row_dict["broker_order_id_str"] in linked_id_set}
+                text_str = ("Original order filled · " if original_filled_bool else "Re-sent and filled · ") + _fill_text_str(list(matching_fill_dict.values()), side_str)
+                ended_ts = datetime.fromisoformat(attempt_dict["ended_timestamp_str"] or attempt_dict["updated_timestamp_str"])
+                if snapshot_obj is not None and snapshot_obj.snapshot_timestamp_ts >= ended_ts and _quantity_int(gap_float):
+                    state_str, quantity_int = "not_completed", _quantity_int(gap_float)
+                    side_str = "BUY" if gap_float > 0 else "SELL"
+                    text_str = f"Re-sent and filled · {quantity_int} missing from plan"
             else:
-                text_str = "Not completed · " + str(attempt_dict.get("reason_str") or "needs operator review")
-        elif short_bool:
-            text_str = "Cancelled by IBKR · opens or increases a short · not automatic"
+                reason_str = str(attempt_dict.get("reason_str") or "needs operator review")
+                sent_bool = (bool(attempt_dict.get("request_json_str") or order_id_str or attempt_dict.get("quantity_float"))
+                    and "newer decision" not in reason_str.casefold() and not reason_str.casefold().startswith("not sent"))
+                text_str = (f"Re-sent, not filled · {quantity_int} missing" if sent_bool else
+                            "Not re-sent · " + reason_str)
+                if reason_str.startswith("No broker answer"):
+                    text_str = f"No broker answer · {quantity_int} missing"
         elif cross_dict:
-            if as_of_ts < timing_dict["send_cutoff_ts"]:
-                state_str = "planned"
-                text_str = "Cancelled by IBKR · crosses a related order · auto at " + _time_str(timing_dict["start_ts"])
-                blocked_bool = as_of_ts >= timing_dict["manual_block_ts"]
-            else:
+            if newer_plan_bool or as_of_ts >= timing_dict["send_cutoff_ts"]:
                 state_str = "not_completed"
-                text_str = "Auto did not run by " + _time_str(timing_dict["send_cutoff_ts"])
-        # An ordinary cancelled row need not linger after later broker positions prove its gap is zero.
-        if not quantity_int and not attempt_dict:
+                text_str = "Not re-sent · " + ("a newer plan exists" if newer_plan_bool else
+                    "the pod did not re-send before " + _time_str(timing_dict["send_cutoff_ts"]))
+            else:
+                state_str = "planned"
+                side_str = "BUY" if cross_dict["direction_float"] > 0 else "SELL"
+                filled_float = max(cross_dict["filled_quantity_float"], auto_complete._filled_quantity_float(
+                    order_list, event_list, fill_list, cross_dict["original_order_request_key_str"],
+                    cross_dict["original_broker_order_id_str"]))
+                quantity_int = _quantity_int(max(0.0, cross_dict["cancelled_qty_float"] - filled_float))
+                when_str = "at " + _time_str(timing_dict["start_ts"]) if as_of_ts < timing_dict["start_ts"] else "at the next check"
+                text_str = "Cancelled by IBKR · crosses a related order · re-sends " + when_str
+        can_complete_bool = state_str in {"not_completed", "not_automatic"} and quantity_int > 0
+        if not quantity_int and state_str not in {"sent", "completed"}:
             continue
-        can_complete_bool = state_str in {"not_completed", "not_automatic"} and not short_bool and quantity_int > 0
-        if can_complete_bool and as_of_ts < timing_dict["close_ts"]:
-            cutoff_ts = timing_dict["close_ts"] - timedelta(minutes=15)
-            if as_of_ts < cutoff_ts:
-                text_str += " · MOC until " + _time_str(cutoff_ts)
+        if can_complete_bool and as_of_ts < timing_dict["close_ts"] - timedelta(minutes=15):
+            text_str += " · MOC until " + _time_str(timing_dict["close_ts"] - timedelta(minutes=15))
         row_list.append({"asset_str": asset_str, "target_share_float": target_float, "saved_position_float": actual_float,
             "side_str": side_str, "quantity_int": quantity_int, "state_str": state_str, "text_str": text_str,
-            "can_complete_bool": can_complete_bool, "manual_blocked_bool": blocked_bool,
-            "auto_complete_bool": bool(cross_dict or attempt_dict), "short_bool": short_bool})
+            "can_complete_bool": can_complete_bool, "auto_complete_bool": bool(cross_dict or attempt_dict)})
     unrelated_ack_bool = any(row_dict.get("ack_status_str") == "missing_critical"
                              and row_dict.get("asset_str") not in cross_map_dict for row_dict in ack_list)
     return {"row_list": row_list, "timing_dict": timing_dict, "attempt_list": list(attempt_map_dict.values()),
+        "lagging_bool": as_of_ts >= timing_dict["start_ts"],
+        "moc_open_bool": as_of_ts < timing_dict["close_ts"] - timedelta(minutes=15),
+        "total_order_count_int": sum(abs(float(value_obj)) > 1e-9 for value_obj in vplan_obj.order_delta_map.values()),
         "unrelated_issue_bool": unrelated_ack_bool}
 
 
@@ -157,21 +176,41 @@ def recovery_summary_dict(missing_dict):
     recovery_list = [row_dict for row_dict in row_list if row_dict.get("auto_complete_bool")]
     if not recovery_list:
         return {}
+    planned_list = [row_dict for row_dict in recovery_list if row_dict["state_str"] == "planned"]
     unresolved_list = [row_dict for row_dict in row_list if row_dict["state_str"] in {"missing", "off", "not_completed", "not_automatic"}]
-    timing_dict = (missing_dict.get("recovery_dict") or {}).get("timing_dict") or {}
+    recovery_dict = missing_dict.get("recovery_dict") or {}
+    timing_dict = recovery_dict.get("timing_dict") or {}
     start_str = _time_str(timing_dict["start_ts"]) if timing_dict else "scheduled time"
+    recheck_str = _time_str(timing_dict["close_ts"] + timedelta(minutes=10)) if timing_dict else "after close"
+    cutoff_str = _time_str(timing_dict["close_ts"] - timedelta(minutes=15)) if timing_dict else "the close"
+    detail_str = " · ".join(f"{row_dict['asset_str']} {row_dict['side_str']} {row_dict['quantity_int']}" for row_dict in recovery_list)
+    when_str = "at the next check" if recovery_dict.get("lagging_bool") else "at " + start_str
     if unresolved_list:
-        state_str, pill_str, title_str = "fail", "Action needed", "Completion needs your attention"
+        complete_str = ", ".join(f"{row_dict['asset_str']} {row_dict['side_str']} {row_dict['quantity_int']}" for row_dict in unresolved_list)
+        state_str, pill_str, title_str = "fail", "Action needed", "Complete " + complete_str
+        if recovery_dict.get("moc_open_bool"):
+            title_str += " by " + cutoff_str
+        cause_str = ("Some planned shares are still missing. " if any(row_dict["state_str"] in {"not_automatic", "missing", "off"} for row_dict in unresolved_list)
+            else "The re-sent order filled; holdings still differ from the plan. " if any(row_dict["text_str"].startswith("Re-sent and filled") for row_dict in unresolved_list)
+            else "The order was not re-sent. " if any(row_dict["text_str"].startswith("Not re-sent") for row_dict in unresolved_list)
+            else "The broker reply could not be confirmed. " if any(row_dict["text_str"].startswith("No broker answer") for row_dict in unresolved_list)
+            else "The re-sent order was not filled. ")
+        detail_str = (cause_str + "Use Complete… below. The pod continues by itself after the "
+                      + recheck_str + " re-check. Waiting for you · re-checks at " + recheck_str + ".")
     elif any(row_dict["state_str"] == "sent" for row_dict in recovery_list):
         state_str, pill_str, title_str = "now", "Completing", "Completing cancelled orders"
     elif any(row_dict["state_str"] == "planned" for row_dict in recovery_list):
-        state_str, pill_str, title_str = "late", "Auto-complete " + start_str, "Automatic completion at " + start_str
+        state_str, pill_str, title_str = "late", ("Re-send next check" if recovery_dict.get("lagging_bool") else "Re-send " + start_str), "Re-send " + when_str
     else:
-        state_str, pill_str, title_str = "done", "On track", "Completion finished"
+        state_str, pill_str, title_str = "done", "On track", ("Order filled" if all(
+            row_dict["text_str"].startswith("Original order filled") for row_dict in recovery_list) else "Re-sent and filled")
     return {"state_str": state_str, "pill_str": pill_str, "title_str": title_str,
-        "detail_str": " · ".join(f"{row_dict['asset_str']} {row_dict['side_str']} {row_dict['quantity_int']}" for row_dict in recovery_list),
-        "planned_bool": any(row_dict["state_str"] == "planned" for row_dict in recovery_list),
-        "attention_bool": bool(unresolved_list), "count_int": len(recovery_list),
+        "detail_str": detail_str,
+        "banner_detail_str": " and ".join(f"{row_dict['asset_str']} {row_dict['side_str']} {row_dict['quantity_int']}" for row_dict in planned_list)
+            + " cross an order in a related account. The pod re-sends them " + when_str + " as market orders.",
+        "planned_bool": bool(planned_list),
+        "attention_bool": bool(unresolved_list), "count_int": len(planned_list or recovery_list),
+        "total_order_count_int": recovery_dict.get("total_order_count_int", len(recovery_list)),
         "unrelated_issue_bool": bool((missing_dict.get("recovery_dict") or {}).get("unrelated_issue_bool")),
         "row_list": recovery_list}
 

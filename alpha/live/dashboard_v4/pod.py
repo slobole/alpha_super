@@ -199,7 +199,7 @@ def build_evidence_tables_dict(source_dict, *, as_of_ts, fresh_bool):
         timestamp_str = order_dict.get("submitted_timestamp_str")
         order_rows.append(_row_dict([_text_str(order_dict.get("asset_str")),
             f"{'BUY' if amount_float > 0 else 'SELL'} {_number_str(abs(amount_float))} · MKT",
-            status_str, "auto-complete", _time_str(timestamp_str, as_of_ts) if timestamp_str else "—",
+            status_str, "re-send", _time_str(timestamp_str, as_of_ts) if timestamp_str else "—",
             _number_str(order_dict.get("filled_amount_float")),
             _number_str(order_dict.get("avg_fill_price_float"), price_bool=True), order_id_str or "—"],
             state_str="fail" if status_str.lower() in {"cancelled", "rejected", "inactive"} else ""))

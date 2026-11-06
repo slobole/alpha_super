@@ -1,5 +1,8 @@
 # Opening cross-cancel completion: implementation and verification
 
+Historical v4 report. The owner-approved v5 supersedes the behavior below; see
+[the v5 change report](AUTO_COMPLETE_CROSS_CANCEL_V5_IMPLEMENTATION.md) for the current branch.
+
 Status: implemented and verified on `codex/auto-complete-cross-cancel`; no unresolved feature findings.
 Functional implementation commit: `3478d62`. The verification follow-up contains one template whitespace fix,
 an intentionally changed deadline test, and this report. No deployment has occurred.

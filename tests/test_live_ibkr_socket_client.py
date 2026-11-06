@@ -792,8 +792,9 @@ def test_raw_cross_cancel_is_retained_in_partial_result(monkeypatch, guarded_boo
 
 
 @pytest.mark.parametrize("dispatch_ts,expected_count_int", [
-    (datetime(2026, 11, 2, 14, 35, 59, tzinfo=UTC), 1),
-    (datetime(2026, 11, 2, 14, 36, tzinfo=UTC), 0),
+    (datetime(2026, 11, 2, 20, 49, 59, tzinfo=UTC), 1),
+    (datetime(2026, 11, 2, 20, 50, tzinfo=UTC), 0),
+    (datetime(2026, 11, 2, 20, 50, 1, tzinfo=UTC), 0),
 ])
 def test_auto_complete_deadline_checked_after_contract_qualification(monkeypatch, dispatch_ts, expected_count_int):
     from dataclasses import replace
@@ -803,10 +804,11 @@ def test_auto_complete_deadline_checked_after_contract_qualification(monkeypatch
     ib_obj.after_qualification_ts = dispatch_ts
     client_obj = _expiry_client_obj(monkeypatch, ib_obj)
     request_obj = replace(_funding_request_obj(), broker_order_type_str="MKT",
-        submission_deadline_timestamp_str="2026-11-02T14:36:00+00:00",
-        execution_deadline_timestamp_str="2026-11-02T15:00:00+00:00")
+        submission_deadline_timestamp_str="2026-11-02T20:50:00+00:00")
     if expected_count_int:
         client_obj.submit_order_request_list("SIM_pod", [request_obj], clock_list[0])
+        assert ib_obj.placed_order_list[0].tif == "DAY"
+        assert not ib_obj.placed_order_list[0].goodTillDate
     else:
         with pytest.raises(DispatchFailure, match="deadline passed"):
             client_obj.submit_order_request_list("SIM_pod", [request_obj], clock_list[0])
@@ -861,31 +863,3 @@ def test_moo_observes_immediate_cancel_after_first_ack(monkeypatch, cancel_bool,
     assert len(ib_obj.errorEvent) == 0
     if cancel_bool:
         assert result_obj.broker_order_record_list[-1].status_str == "Cancelled"
-
-
-def test_manual_blackout_rechecked_after_delayed_qualification(monkeypatch):
-    from alpha.live import dashboard_authorization
-    from dataclasses import replace
-    clock_list = [datetime(2026, 11, 2, 14, 33, 59, tzinfo=UTC)]
-    ib_obj = _ExpirySubmitIB(clock_list)
-    ib_obj.after_qualification_ts = datetime(2026, 11, 2, 14, 35, tzinfo=UTC)
-    client_obj = _expiry_client_obj(monkeypatch, ib_obj)
-    request_obj = replace(_funding_request_obj(), broker_order_type_str="MKT")
-    target_obj = SimpleNamespace(release_obj=SimpleNamespace(
-        pod_id_str=request_obj.pod_id_str, account_route_str=request_obj.account_route_str))
-    checked_timestamp_list = []
-
-    def block_reason_str(actual_target_obj, asset_str, as_of_ts):
-        assert actual_target_obj is target_obj and asset_str == request_obj.asset_str
-        checked_timestamp_list.append(as_of_ts)
-        return "Auto-complete in progress" if as_of_ts.hour == 14 and as_of_ts.minute >= 34 else ""
-
-    monkeypatch.setattr("alpha.live.dashboard_v4.missing_trades.manual_auto_completion_block_reason_str", block_reason_str)
-    context_token_obj = dashboard_authorization._manual_dispatch_target_obj.set(target_obj)
-    try:
-        with pytest.raises(dashboard_authorization.ManualDispatchRefused, match="Auto-complete in progress"):
-            client_obj.submit_order_request_list("SIM_pod", [request_obj], clock_list[0])
-    finally:
-        dashboard_authorization._manual_dispatch_target_obj.reset(context_token_obj)
-    assert checked_timestamp_list == [ib_obj.after_qualification_ts]
-    assert ib_obj.placed_order_list == []

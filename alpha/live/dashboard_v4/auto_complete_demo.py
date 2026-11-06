@@ -23,7 +23,7 @@ def create_auto_completion_demo_app(case_str="planned"):
     target_obj = provider_obj.get_target_for_pod(pod_id_str)
     open_ts = DEMO_NOW_TS.replace(hour=13, minute=30, second=0)
     now_ts = open_ts + (timedelta(minutes=4, seconds=30) if case_str in {"planned", "not_automatic"}
-                       else timedelta(minutes=31) if case_str in {"partial", "not_completed"}
+                       else timedelta(minutes=6) if case_str in {"partial", "not_completed"}
                        else timedelta(minutes=5, seconds=10))
     with closing(_DemoStateStore(target_obj.db_path_str)) as store_obj:
         vplan_obj = store_obj.get_latest_vplan_for_pod(pod_id_str)
@@ -64,8 +64,7 @@ def create_auto_completion_demo_app(case_str="planned"):
                 target_obj.release_obj.account_route_str, submission_key_str, reference_str, asset_str,
                 "MKT", "MarketOrder", "shares", original_dict["amount_float"], False, None, 220.0, 20000.0,
                 decision_plan_id_int=vplan_obj.decision_plan_id_int, vplan_id_int=vplan_obj.vplan_id_int,
-                execution_deadline_timestamp_str=(open_ts + timedelta(minutes=30)).isoformat(),
-                submission_deadline_timestamp_str=(open_ts + timedelta(minutes=6)).isoformat())
+                submission_deadline_timestamp_str=auto_complete.timing_dict(vplan_obj, "XNYS")["send_cutoff_ts"].isoformat())
             with closing(sqlite3.connect(target_obj.db_path_str)) as connection_obj, connection_obj:
                 auto_complete._ensure_schema(connection_obj)
                 connection_obj.execute("""INSERT INTO auto_completion_attempt
@@ -109,12 +108,17 @@ def create_auto_completion_demo_app(case_str="planned"):
             event_type_list.append("auto_complete_sent")
         if case_str in {"completed", "partial", "not_completed"}:
             event_type_list.append("auto_complete_done" if case_str == "completed" else "auto_complete_not_completed")
-        for index_int, event_type_str in enumerate(event_type_list):
-            recovery_event_list.append({"timestamp_str": (now_ts - timedelta(seconds=4-index_int)).isoformat(),
+        for event_type_str in event_type_list:
+            event_ts = (open_ts - timedelta(minutes=6) if event_type_str == "auto_complete_planned" else
+                open_ts + timedelta(minutes=5, seconds=2) if event_type_str == "auto_complete_sent" else now_ts - timedelta(seconds=2))
+            recovery_event_list.append({"timestamp_str": event_ts.isoformat(),
                 "event_type_str": event_type_str, "level_str": "warning" if event_type_str.endswith("not_completed") else "info",
                 "mode_str": "live", "pod_id_str": pod_id_str, "decision_plan_id_int": vplan_obj.decision_plan_id_int,
                 "vplan_id_int": vplan_obj.vplan_id_int, "source_str": "Demo event log", "payload_dict": {
-                    "release_id_str": target_obj.release_obj.release_id_str, "asset_str": asset_str, "quantity_float": quantity_float}})
+                    "release_id_str": target_obj.release_obj.release_id_str, "asset_str": asset_str,
+                    "side_str": "BUY", "quantity_float": quantity_float, "broker_acknowledged_bool": True,
+                    "remaining_quantity_float": quantity_float - filled_float,
+                    "fill_price_float": 220.2 if filled_float else None}})
 
     def recovery_activity_source_dict(*, as_of_ts, days_int):
         source_dict = original_activity_fn(as_of_ts=as_of_ts, days_int=days_int)

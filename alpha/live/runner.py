@@ -1724,7 +1724,7 @@ def is_vplan_execution_exception_parked_with_auto(state_store_obj, vplan_obj, *,
     if attempt_list:
         snapshot_obj = state_store_obj.get_latest_broker_snapshot_for_account(vplan_obj.account_route_str)
         position_dict = vplan_obj.current_broker_position_map if snapshot_obj is None else snapshot_obj.position_amount_map
-        if any(row_dict["ended_timestamp_str"] and row_dict["status_str"] == "not_completed"
+        if any(row_dict["ended_timestamp_str"]
                 and abs(float(vplan_obj.target_share_map.get(row_dict["asset_str"], 0))
                     - float(position_dict.get(row_dict["asset_str"], 0))) > 1e-9 for row_dict in attempt_list):
             return True
@@ -4420,17 +4420,19 @@ def post_execution_reconcile(
                     allowed_broker_order_id_set=known_broker_order_id_set,
                 )
             )
-            # Only the affected branch needs early event persistence and strict all-client reads.
-            # Run before optional opening-price reporting can consume the 09:35 submission minute.
-            cross_event_list = [replace(event_obj, decision_plan_id_int=vplan_obj.decision_plan_id_int,
-                vplan_id_int=vplan_obj.vplan_id_int) for event_obj in broker_order_event_list
-                if auto_complete.CROSS_MESSAGE_STR in str(event_obj.message_str or "").casefold()]
-            if cross_event_list:
-                state_store_obj.insert_vplan_broker_order_event_list(cross_event_list)
+            # Cross recovery uses this observation for original partial fills and re-send terminal state.
             auto_result_dict = auto_complete.reconcile_auto_completion(
                 state_store_obj, broker_adapter_obj, release_obj, vplan_obj, as_of_ts, log_path_str=log_path_str,
-                releases_root_path_str=releases_root_path_str)
-            if auto_result_dict["snapshot_obj"] is not None:
+                releases_root_path_str=releases_root_path_str, observed_result_obj=SubmitBatchResult(
+                    broker_order_record_list=broker_order_record_list, broker_order_event_list=broker_order_event_list,
+                    broker_order_fill_list=broker_fill_list))
+            if auto_result_dict["observed_result_obj"] is not None:
+                # Preserve known original quantities again in the ordinary persistence below.
+                broker_order_record_list = auto_result_dict["observed_result_obj"].broker_order_record_list
+            if auto_result_dict["sent_bool"]:
+                broker_snapshot_obj = broker_adapter_obj.get_account_snapshot(vplan_obj.account_route_str)
+                state_store_obj.upsert_broker_snapshot_cache(broker_snapshot_obj)
+            elif auto_result_dict["snapshot_obj"] is not None:
                 broker_snapshot_obj = auto_result_dict["snapshot_obj"]
                 state_store_obj.upsert_broker_snapshot_cache(broker_snapshot_obj)
             session_open_context_dict = _session_open_context_dict(

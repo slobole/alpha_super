@@ -3,6 +3,7 @@
 from datetime import timedelta
 from hashlib import sha256
 import json
+import math
 import re
 from urllib.parse import quote, urlencode
 
@@ -12,10 +13,11 @@ from alpha.live.ops_report import parse_timestamp_ts
 
 # Wording describes the saved observation, never the current health of a Pod.
 EVENT_DICT = {
-    "auto_complete_planned": ("cycles", "late", "Automatic completion planned for five minutes after the open.", "orders"),
-    "auto_complete_sent": ("cycles", "now", "Automatic market completion sent.", "orders"),
-    "auto_complete_done": ("cycles", "done", "Automatic completion finished.", "orders"),
-    "auto_complete_not_completed": ("alerts", "fail", "Automatic completion needs operator attention.", "orders"),
+    "auto_complete_planned": ("cycles", "late", "IBKR cancelled an opening order (cross).", "orders"),
+    "auto_complete_sent": ("cycles", "now", "Market order re-sent.", "orders"),
+    "auto_complete_send_unanswered": ("cycles", "now", "Re-send started · broker reply pending.", "orders"),
+    "auto_complete_done": ("cycles", "done", "Re-sent order filled.", "orders"),
+    "auto_complete_not_completed": ("alerts", "fail", "Not filled. Use Complete…", "orders"),
     "parked_pod_rechecked": ("cycles", "done", "Parked pod positions checked after close.", "reconcile"),
     "build_decision_plan_created": ("cycles", "done", "Decision saved.", "decision"),
     "build_vplan_created": ("cycles", "done", "Order plan saved.", "plan"),
@@ -141,7 +143,23 @@ def _event_row_dict(event_dict, pod_map_dict, verified_cycle_list):
             title_str = (f"Manual {order_type_str} order {verb_str}: {order_str}"
                 + (f" (completion of VPlan #{vplan_obj})" if type(vplan_obj) is int else "") + ".")
     if code_str.startswith("auto_complete_") and payload_dict.get("asset_str"):
-        title_str = title_str.rstrip(".") + " · " + str(payload_dict["asset_str"]) + "."
+        quantity_obj = payload_dict.get("quantity_float")
+        quantity_str = f"{abs(quantity_obj):g}" if type(quantity_obj) in (int, float) and math.isfinite(quantity_obj) else ""
+        order_str = " ".join(str(value_obj) for value_obj in
+            (payload_dict["asset_str"], payload_dict.get("side_str"), quantity_str) if value_obj)
+        if code_str == "auto_complete_planned":
+            title_str = "IBKR cancelled " + order_str + " (cross)"
+        elif code_str == "auto_complete_sent":
+            title_str = ("Re-send started · awaiting broker check" if payload_dict.get("broker_acknowledged_bool") is False else
+                "Re-sent " + order_str + (" at " + timestamp_ts.astimezone(MARKET_TIMEZONE_OBJ).strftime("%H:%M:%S") if timestamp_ts else ""))
+        elif code_str == "auto_complete_done":
+            price_obj = payload_dict.get("fill_price_float")
+            title_str = "Filled " + quantity_str + (f" @ {price_obj:.2f}" if type(price_obj) in (int, float)
+                and math.isfinite(price_obj) and price_obj > 0 else " · fill price not available")
+        elif code_str == "auto_complete_not_completed":
+            remaining_obj = payload_dict.get("remaining_quantity_float")
+            title_str = ("Not re-sent" if payload_dict.get("sent_bool") is False else "Not filled") + (f" · {abs(remaining_obj):g} missing" if type(remaining_obj) in (int, float)
+                and math.isfinite(remaining_obj) else " · check missing quantity")
     keep_bool = False
     if code_str == "daily_cycle_reconciled":
         daily_status_str = payload_dict.get("status_str")

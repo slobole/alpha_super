@@ -269,13 +269,15 @@ def reconcile_daily_cycle(state_store_obj, broker_adapter_obj, release_obj, deci
         if vplan_obj is not None and vplan_sent_bool:
             auto_complete.reconcile_auto_completion(state_store_obj, broker_adapter_obj, release_obj,
                 vplan_obj, as_of_ts, log_path_str=log_path_str, releases_root_path_str=releases_root_path_str)
+            auto_complete.finish_daily_closed_attempts(state_store_obj, vplan_obj, snapshot_obj,
+                as_of_ts, log_path_str=log_path_str)
         return DailyReconcileResult("completed_with_exceptions" if exception_list else "completed", snapshot_obj, exception_list)
     if vplan_obj is not None and vplan_sent_bool and target_ts < as_of_ts:
         auto_result_dict = auto_complete.reconcile_auto_completion(
             state_store_obj, broker_adapter_obj, release_obj, vplan_obj, as_of_ts, log_path_str=log_path_str,
             releases_root_path_str=releases_root_path_str)
         reporting_result_list.extend(auto_result_dict["reporting_result_list"])
-        if auto_result_dict["snapshot_obj"] is not None:
+        if auto_result_dict["sent_bool"] or auto_result_dict["snapshot_obj"] is not None:
             # The ordinary completion candidates must observe any preceding recovery fills.
             daily_snapshot_obj = _refresh(broker_adapter_obj, release_obj, as_of_ts)
         # Freeze the candidate set from this poll's first observation. Later
