@@ -452,6 +452,9 @@ def test_new_order_preview_is_not_blocked_by_recovery(case_str):
     ("auto_complete_not_completed", {"remaining_quantity_float": 40}, "Not filled · 40 missing"),
     ("auto_complete_not_completed", {"remaining_quantity_float": 40, "fill_price_float": 22.42}, "Partly filled · 40 missing"),
     ("auto_complete_not_completed", {"remaining_quantity_float": 40, "fill_price_float": 0.0}, "Not filled · 40 missing"),
+    ("auto_complete_not_completed", {"remaining_quantity_float": 7, "filled_quantity_float": 3, "fill_price_float": None},
+        "Partly filled · 7 missing"),
+    ("auto_complete_not_completed", {"remaining_quantity_float": 10, "filled_quantity_float": 0.0}, "Not filled · 10 missing"),
     ("auto_complete_not_completed", {"remaining_quantity_float": 90, "sent_bool": False}, "Not re-sent · 90 missing"),
 ])
 def test_recovery_activity_plain_lines(event_type_str, payload_dict, title_str):

@@ -81,7 +81,8 @@ Four operator-text fixes from the v5 review. They change no order, timing, quant
 
 - A re-send that has fills but ended short reads "Re-sent, partly filled · N missing" in the row, "The re-sent order
   was partly filled" in the banner, and "Partly filled · N missing" in Activity. Only the re-send's own execution
-  evidence counts: its fills or cumulative filled count in the row, and a saved fill price in Activity.
+  evidence counts: its fills or cumulative filled count in the row, and in Activity the executed shares now carried
+  on the event (`filled_quantity_float`), or a fill price on older events. IBKR can report shares without a price.
 - The red banner names the 16:10 re-check once.
 - Any red row with Complete… makes the pill red ("Action needed"). A saved broker rejection for another reason
   now owns the header like a failed re-send, instead of the earlier "Working" pill before the post-open check.

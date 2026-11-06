@@ -383,6 +383,8 @@ def reconcile_auto_completion(state_store_obj, broker_adapter_obj, release_obj, 
             last_checked_timestamp_str=checked_ts.isoformat())
         _emit(log_path_str, "auto_complete_done" if complete_bool else "auto_complete_not_completed", vplan_obj,
             asset_str, checked_ts, remaining_quantity_float=remainder_float, quantity_float=attempt_dict["quantity_float"],
+            # Report only: the re-send's own executed shares, so Activity can say "Partly filled" without a price.
+            filled_quantity_float=filled_float if terminal_bool else None,
             side_str=("BUY" if json.loads(attempt_dict["request_json_str"])["amount_float"] > 0 else "SELL")
                 if attempt_dict["request_json_str"] else None,
             fill_price_float=next((row_dict["avg_fill_price_float"] for row_dict in linked_list

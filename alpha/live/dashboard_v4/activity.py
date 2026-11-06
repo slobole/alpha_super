@@ -158,9 +158,9 @@ def _event_row_dict(event_dict, pod_map_dict, verified_cycle_list):
                 and math.isfinite(price_obj) and price_obj > 0 else " · fill price not available")
         elif code_str == "auto_complete_not_completed":
             remaining_obj = payload_dict.get("remaining_quantity_float")
-            price_obj = payload_dict.get("fill_price_float")
-            # A saved fill price is execution evidence; holdings alone never say "partly filled".
-            partly_bool = type(price_obj) in (int, float) and math.isfinite(price_obj) and price_obj > 0
+            # Execution evidence only (executed shares, or a fill price on older events); never holdings.
+            partly_bool = any(type(value_obj) in (int, float) and math.isfinite(value_obj) and value_obj > 0
+                for value_obj in (payload_dict.get("filled_quantity_float"), payload_dict.get("fill_price_float")))
             title_str = ("Not re-sent" if payload_dict.get("sent_bool") is False else "Partly filled" if partly_bool
                 else "Not filled") + (f" · {abs(remaining_obj):g} missing" if type(remaining_obj) in (int, float)
                 and math.isfinite(remaining_obj) else " · check missing quantity")

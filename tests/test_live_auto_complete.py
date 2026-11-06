@@ -170,6 +170,24 @@ def test_unanswered_cannot_end_without_complete_read_and_no_open_order_even_if_t
     assert attempt_rows(daily_case)[0]["status_str"] == "not_completed"
 
 
+def test_partial_end_reports_executed_shares_without_a_price(daily_case, monkeypatch):
+    event_list = []
+    monkeypatch.setattr(auto_complete, "_emit", lambda *args, **field_dict: event_list.append((args[1], field_dict)))
+    seed_cancel(daily_case)
+    store_obj, release_obj, decision_obj, plan_obj, broker_obj = daily_case
+    run_auto(daily_case)
+    request_obj = broker_obj.sent_request_list[0]
+    broker_obj.as_of_ts = OPEN_TS + timedelta(minutes=5, seconds=3)
+    store_obj.upsert_vplan_broker_order_record_list([BrokerOrderRecord(
+        "recovery-AAPL", decision_obj.decision_plan_id_int, plan_obj.vplan_id_int,
+        release_obj.account_route_str, "AAPL", request_obj.order_request_key_str, "MKT", "shares",
+        10, 3.0, "Cancelled", broker_obj.as_of_ts, submission_key_str=plan_obj.submission_key_str)])
+    run_auto(daily_case)
+    field_dict = next(field_dict for name_str, field_dict in event_list if name_str == "auto_complete_not_completed")
+    assert (field_dict["filled_quantity_float"], field_dict["remaining_quantity_float"]) == (3.0, 7.0)
+    assert field_dict["fill_price_float"] is None
+
+
 @pytest.mark.parametrize("status_str,filled_float", [
     ("Filled", 10.0), ("Cancelled", 0.0), ("Rejected", 4.0), ("Inactive", 0.0), ("ApiCancelled", 0.0)])
 def test_terminal_recovery_ends_without_extra_snapshot(daily_case, status_str, filled_float):
