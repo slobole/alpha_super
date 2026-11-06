@@ -68,6 +68,28 @@ def test_material_event_is_normalized_redacted_and_keeps_exact_cycle_evidence(tm
         assert private_str not in text_str
 
 
+@pytest.mark.parametrize("filled_quantity_obj,remaining_float,fill_price_obj,title_str", [
+    (3.0, 7.0, None, "Partly filled · 7 missing"),
+    (0.0, 10.0, None, "Not filled · 10 missing"),
+    (None, 7.0, None, "Not filled · 7 missing"),
+    (None, 7.0, 22.42, "Partly filled · 7 missing"),
+])
+def test_recovery_execution_evidence_survives_saved_log_to_activity(
+        tmp_path, filled_quantity_obj, remaining_float, fill_price_obj, title_str):
+    from alpha.live.dashboard_v4.activity import _event_row_dict
+
+    provider_obj = _provider_obj(tmp_path)
+    log_path_obj = Path(provider_obj.event_log_path_str)
+    _write_records(log_path_obj, _record_dict("auto_complete_not_completed", asset_str="DBC", side_str="BUY",
+        quantity_float=10.0, remaining_quantity_float=remaining_float,
+        filled_quantity_float=filled_quantity_obj, fill_price_float=fill_price_obj))
+    before_bytes = log_path_obj.read_bytes()
+    event_dict, = _load_dict(provider_obj)["event_list"]
+    assert event_dict["payload_dict"].get("filled_quantity_float") == filled_quantity_obj
+    assert _event_row_dict(event_dict, {}, [])["title_str"] == title_str
+    assert log_path_obj.read_bytes() == before_bytes
+
+
 @pytest.mark.parametrize("field_str,value_obj", [
     ("mode_str", "paper"), ("env_mode_str", "incubation"), ("session_mode_str", "sim"),
     ("pod_id_str", "other_pod"), ("pod_str", "other_pod"), ("account_route_str", "U999"),

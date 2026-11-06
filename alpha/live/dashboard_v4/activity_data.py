@@ -37,7 +37,7 @@ COUNT_FIELD_SET = {"broker_order_count_int", "broker_order_event_count_int", "br
     "fill_count_int", "missing_ack_count_int", "terminal_unresolved_count_int", "order_count_int",
     "filled_order_count_int", "diff_count_int", "target_count_int", "eod_snapshot_count_int"}
 NUMBER_FIELD_SET = {"ack_coverage_ratio_float", "target_share_float", "broker_share_float", "residual_share_float",
-    "quantity_float", "remaining_quantity_float", "fill_price_float"}
+    "quantity_float", "filled_quantity_float", "remaining_quantity_float", "fill_price_float"}
 CODE_FIELD_SET = {"status_str", "reason_code_str", "decision_plan_status_str", "vplan_status_str",
     "submit_ack_status_str", "reconciliation_status_str", "snapshot_stage_str", "next_phase_str",
     "execution_policy_str", "action_name_str", "initial_status_str", "latest_broker_order_status_str"}
