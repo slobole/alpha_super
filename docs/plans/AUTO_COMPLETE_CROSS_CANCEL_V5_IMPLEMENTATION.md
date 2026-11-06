@@ -85,6 +85,9 @@ Four operator-text fixes from the v5 review. They change no order, timing, quant
   on the event (`filled_quantity_float`), or a fill price on older events. IBKR can report shares without a price.
   The Activity log reader preserves `filled_quantity_float` through its existing finite-number filter. A saved
   JSONL-to-Activity regression covers missing prices, zero fills, unknown fills and legacy price-only events.
+  Recovery events now carry the release's mode, release id and owner, as other pod events do. Without them the
+  Activity reader dropped every real recovery event; the demo injected them, which hid it. A test drives the real
+  writer into Activity, and a paper event stays out of LIVE Activity.
 - The red banner names the 16:10 re-check once.
 - Any red row with Complete… makes the pill red ("Action needed"). A saved broker rejection for another reason
   now owns the header like a failed re-send, instead of the earlier "Working" pill before the post-open check.

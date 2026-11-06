@@ -171,10 +171,13 @@ def _update(state_store_obj, vplan_obj, asset_str, as_of_ts, **field_dict):
             + " WHERE vplan_id_int=? AND asset_str=?", (*field_dict.values(), vplan_obj.vplan_id_int, asset_str))
 
 
-def _emit(log_path_str, event_str, vplan_obj, asset_str, as_of_ts, **field_dict):
+def _emit(log_path_str, event_str, release_obj, vplan_obj, asset_str, as_of_ts, **field_dict):
     if log_path_str is not None:
         from alpha.live.logging_utils import log_event
-        log_event(event_str, {"pod_id_str": vplan_obj.pod_id_str, "account_route_str": vplan_obj.account_route_str,
+        # Mode, release and owner scope the event like every other pod event; V4 Activity drops pod events without them.
+        log_event(event_str, {"mode_str": release_obj.mode_str, "release_id_str": release_obj.release_id_str,
+            "user_id_str": release_obj.user_id_str,
+            "pod_id_str": vplan_obj.pod_id_str, "account_route_str": vplan_obj.account_route_str,
             "vplan_id_int": vplan_obj.vplan_id_int, "decision_plan_id_int": vplan_obj.decision_plan_id_int,
             "asset_str": asset_str, "as_of_timestamp_str": as_of_ts.isoformat(), **field_dict}, log_path_str=log_path_str)
 
@@ -191,7 +194,7 @@ def _persist_result(state_store_obj, vplan_obj, result_obj):
         for fill_obj in result_obj.broker_order_fill_list])
 
 
-def finish_daily_closed_attempts(state_store_obj, vplan_obj, snapshot_obj, as_of_ts, *, log_path_str=None):
+def finish_daily_closed_attempts(state_store_obj, release_obj, vplan_obj, snapshot_obj, as_of_ts, *, log_path_str=None):
     """Called only after daily settlement has confirmed all owned orders absent."""
     with state_store_obj._connect() as connection_obj:
         attempt_list = load_attempt_row_list(connection_obj, vplan_obj.vplan_id_int)
@@ -206,7 +209,7 @@ def finish_daily_closed_attempts(state_store_obj, vplan_obj, snapshot_obj, as_of
         _update(state_store_obj, vplan_obj, asset_str, as_of_ts, status_str="not_completed", reason_str=reason_str,
             ended_timestamp_str=as_of_ts.isoformat(), remaining_quantity_float=remainder_float,
             last_checked_timestamp_str=snapshot_obj.snapshot_timestamp_ts.isoformat())
-        _emit(log_path_str, "auto_complete_not_completed", vplan_obj, asset_str, as_of_ts,
+        _emit(log_path_str, "auto_complete_not_completed", release_obj, vplan_obj, asset_str, as_of_ts,
             quantity_float=attempt_dict["quantity_float"], remaining_quantity_float=remainder_float, reason_str=reason_str,
             side_str=("BUY" if json.loads(attempt_dict["request_json_str"])["amount_float"] > 0 else "SELL")
                 if attempt_dict["request_json_str"] else None)
@@ -257,7 +260,7 @@ def reconcile_auto_completion(state_store_obj, broker_adapter_obj, release_obj, 
             observed_result_obj = SubmitBatchResult(broker_order_record_list=record_list,
                 broker_order_event_list=event_list, broker_order_fill_list=fill_list)
         except Exception as exception_obj:
-            _emit(log_path_str, "auto_complete_observation_unavailable", vplan_obj, None, as_of_ts,
+            _emit(log_path_str, "auto_complete_observation_unavailable", release_obj, vplan_obj, None, as_of_ts,
                 error_str=str(exception_obj))
     if observed_result_obj is not None:
         normalized_record_list = []
@@ -293,7 +296,7 @@ def reconcile_auto_completion(state_store_obj, broker_adapter_obj, release_obj, 
             event_row_list, fill_row_list, leg_dict["original_order_request_key_str"], leg_dict["original_broker_order_id_str"]))
         quantity_float = max(0.0, leg_dict["cancelled_qty_float"] - filled_float)
         side_str = "BUY" if leg_dict["direction_float"] > 0 else "SELL"
-        _emit(log_path_str, "auto_complete_planned", vplan_obj, asset_str, send_ts,
+        _emit(log_path_str, "auto_complete_planned", release_obj, vplan_obj, asset_str, send_ts,
             side_str=side_str, quantity_float=quantity_float)
         if quantity_float <= 1e-9:
             _update(state_store_obj, vplan_obj, asset_str, send_ts, status_str="completed",
@@ -312,7 +315,7 @@ def reconcile_auto_completion(state_store_obj, broker_adapter_obj, release_obj, 
         if latest_plan_obj is None or latest_plan_obj.decision_plan_id_int != vplan_obj.decision_plan_id_int:
             _update(state_store_obj, vplan_obj, asset_str, send_ts, status_str="not_completed",
                 reason_str="A newer decision supersedes this plan", ended_timestamp_str=send_ts.isoformat())
-            _emit(log_path_str, "auto_complete_not_completed", vplan_obj, asset_str, send_ts,
+            _emit(log_path_str, "auto_complete_not_completed", release_obj, vplan_obj, asset_str, send_ts,
                 side_str=side_str, quantity_float=quantity_float, remaining_quantity_float=quantity_float,
                 reason_str="A newer decision supersedes this plan", sent_bool=False)
             continue
@@ -330,14 +333,14 @@ def reconcile_auto_completion(state_store_obj, broker_adapter_obj, release_obj, 
                 attempted_timestamp_str=(send_ts if acknowledged_bool else returned_ts).isoformat(),
                 broker_order_id_str=order_id_str if acknowledged_bool else None,
                 reason_str="Sent; awaiting broker check" if acknowledged_bool else "Attempt started; awaiting broker check")
-            _emit(log_path_str, "auto_complete_sent", vplan_obj, asset_str, returned_ts, broker_order_id_str=order_id_str,
+            _emit(log_path_str, "auto_complete_sent", release_obj, vplan_obj, asset_str, returned_ts, broker_order_id_str=order_id_str,
                 side_str=side_str, quantity_float=quantity_float, broker_acknowledged_bool=acknowledged_bool)
         except Exception as exception_obj:
             # May have reached IBKR. The durable mark forbids replay, including after restart.
             returned_ts = clock_fn()
             _update(state_store_obj, vplan_obj, asset_str, returned_ts, attempted_timestamp_str=returned_ts.isoformat(),
                 reason_str="Awaiting broker check after send interruption")
-            _emit(log_path_str, "auto_complete_send_unanswered", vplan_obj, asset_str, returned_ts,
+            _emit(log_path_str, "auto_complete_send_unanswered", release_obj, vplan_obj, asset_str, returned_ts,
                 side_str=side_str, quantity_float=quantity_float, error_str=str(exception_obj))
     with state_store_obj._connect() as connection_obj:
         attempt_list = load_attempt_row_list(connection_obj, vplan_obj.vplan_id_int)
@@ -381,7 +384,7 @@ def reconcile_auto_completion(state_store_obj, broker_adapter_obj, release_obj, 
         _update(state_store_obj, vplan_obj, asset_str, checked_ts, status_str="completed" if complete_bool else "not_completed",
             reason_str=reason_str, ended_timestamp_str=checked_ts.isoformat(), remaining_quantity_float=remainder_float,
             last_checked_timestamp_str=checked_ts.isoformat())
-        _emit(log_path_str, "auto_complete_done" if complete_bool else "auto_complete_not_completed", vplan_obj,
+        _emit(log_path_str, "auto_complete_done" if complete_bool else "auto_complete_not_completed", release_obj, vplan_obj,
             asset_str, checked_ts, remaining_quantity_float=remainder_float, quantity_float=attempt_dict["quantity_float"],
             # Report only: the re-send's own executed shares, so Activity can say "Partly filled" without a price.
             filled_quantity_float=filled_float if terminal_bool else None,

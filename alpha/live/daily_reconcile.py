@@ -269,7 +269,7 @@ def reconcile_daily_cycle(state_store_obj, broker_adapter_obj, release_obj, deci
         if vplan_obj is not None and vplan_sent_bool:
             auto_complete.reconcile_auto_completion(state_store_obj, broker_adapter_obj, release_obj,
                 vplan_obj, as_of_ts, log_path_str=log_path_str, releases_root_path_str=releases_root_path_str)
-            auto_complete.finish_daily_closed_attempts(state_store_obj, vplan_obj, snapshot_obj,
+            auto_complete.finish_daily_closed_attempts(state_store_obj, release_obj, vplan_obj, snapshot_obj,
                 as_of_ts, log_path_str=log_path_str)
         return DailyReconcileResult("completed_with_exceptions" if exception_list else "completed", snapshot_obj, exception_list)
     if vplan_obj is not None and vplan_sent_bool and target_ts < as_of_ts:
