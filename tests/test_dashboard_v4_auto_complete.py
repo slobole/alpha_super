@@ -302,7 +302,7 @@ def test_orders_table_appends_recovery_separately():
 @pytest.mark.parametrize("case_str,text_str", [
     ("planned", "Re-send 09:35"), ("sent", "order DEMO-AUTO-1"),
     ("unconfirmed", "Re-send started"), ("completed", "+9.1 bps above the open"),
-    ("partial", "Re-sent, not filled · 10 missing"), ("not_completed", "Re-sent, not filled · 17 missing"),
+    ("partial", "Re-sent, partly filled · 10 missing"), ("not_completed", "Re-sent, not filled · 17 missing"),
     ("not_automatic", "Not enough buying power"),
 ])
 def test_synthetic_recovery_pages_render_real_readers(case_str, text_str):
@@ -337,6 +337,47 @@ def test_synthetic_recovery_pages_render_real_readers(case_str, text_str):
             assert "IBKR cancelled MSFT BUY 17 (cross)" in activity_str
     finally:
         app_obj.config["auto_complete_demo_provider_obj"].close()
+
+
+@pytest.mark.parametrize("case_str,pill_str", [
+    ("planned", "Re-send 09:35"), ("sent", "Completing"), ("unconfirmed", "Completing"), ("completed", "On track"),
+    ("partial", "Action needed"), ("not_completed", "Action needed"), ("not_automatic", "Action needed"),
+])
+def test_pill_follows_the_row_colour_and_red_banner_names_one_recheck(case_str, pill_str):
+    from alpha.live.dashboard_v4.auto_complete_demo import create_auto_completion_demo_app
+    app_obj = create_auto_completion_demo_app(case_str)
+    try:
+        client_obj = app_obj.test_client()
+        html_str = client_obj.get("/pods/demo_1_1?tab=orders").get_data(as_text=True)
+        assert set(re.findall(r"data-pill-label>([^<]+)<", html_str)) == {pill_str}
+        if case_str == "planned":
+            assert ("MSFT BUY 17 crosses an order in a related account. "
+                    "The pod re-sends it at 09:35 as a market order. Nothing to do.") in html_str
+        if pill_str == "Action needed":
+            detail_str = re.search(r"data-verdict-detail>([^<]*)<", html_str).group(1)
+            assert detail_str.count("16:10") == 1 and "Use Complete… below." in detail_str
+            assert ("The re-sent order was partly filled." in detail_str) == (case_str == "partial")
+            overview_str = client_obj.get("/").get_data(as_text=True)
+            assert "Complete MSFT BUY" in overview_str and "trade missing" not in overview_str
+    finally:
+        app_obj.config["auto_complete_demo_provider_obj"].close()
+
+
+def test_waiting_banner_grammar_follows_the_order_count():
+    row_dict = {"asset_str": "MSFT", "side_str": "BUY", "quantity_int": 17, "state_str": "planned",
+        "auto_complete_bool": True, "text_str": "Cancelled by IBKR"}
+    one_str = recovery_summary_dict({"row_list": [row_dict]})["banner_detail_str"]
+    two_str = recovery_summary_dict({"row_list": [row_dict, {**row_dict, "asset_str": "UUP", "quantity_int": 100}]})["banner_detail_str"]
+    assert one_str.startswith("MSFT BUY 17 crosses an order") and "re-sends it" in one_str and one_str.endswith("as a market order.")
+    assert two_str.startswith("MSFT BUY 17 and UUP BUY 100 cross an order") and "re-sends them" in two_str
+    assert two_str.endswith("as market orders.")
+
+
+def test_rejection_without_complete_button_keeps_the_existing_header():
+    row_dict = {"asset_str": "MSFT", "side_str": "BUY", "quantity_int": 17, "state_str": "not_automatic",
+        "auto_complete_bool": False, "can_complete_bool": False, "text_str": "Rejected by IBKR · plan older than 1 session"}
+    assert recovery_summary_dict({"row_list": [row_dict]}) == {}
+    assert recovery_summary_dict({"row_list": [{**row_dict, "can_complete_bool": True}]})["pill_str"] == "Action needed"
 
 
 @pytest.mark.parametrize("sql_str", [
@@ -409,6 +450,8 @@ def test_new_order_preview_is_not_blocked_by_recovery(case_str):
     ("auto_complete_sent", {"broker_acknowledged_bool": True}, "Re-sent DBC BUY 90 at 09:35:02"),
     ("auto_complete_done", {"fill_price_float": 22.42}, "Filled 90 @ 22.42"),
     ("auto_complete_not_completed", {"remaining_quantity_float": 40}, "Not filled · 40 missing"),
+    ("auto_complete_not_completed", {"remaining_quantity_float": 40, "fill_price_float": 22.42}, "Partly filled · 40 missing"),
+    ("auto_complete_not_completed", {"remaining_quantity_float": 40, "fill_price_float": 0.0}, "Not filled · 40 missing"),
     ("auto_complete_not_completed", {"remaining_quantity_float": 90, "sent_bool": False}, "Not re-sent · 90 missing"),
 ])
 def test_recovery_activity_plain_lines(event_type_str, payload_dict, title_str):

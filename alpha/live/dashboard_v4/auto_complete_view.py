@@ -136,7 +136,10 @@ def load_recovery_view_dict(target_obj, vplan_obj, snapshot_obj, *, as_of_ts, ne
                 reason_str = str(attempt_dict.get("reason_str") or "needs operator review")
                 sent_bool = (bool(attempt_dict.get("request_json_str") or order_id_str or attempt_dict.get("quantity_float"))
                     and "newer decision" not in reason_str.casefold() and not reason_str.casefold().startswith("not sent"))
-                text_str = (f"Re-sent, not filled · {quantity_int} missing" if sent_bool else
+                # Execution evidence of the re-send itself, never holdings, decides "partly filled".
+                partly_bool = sent_bool and auto_complete._filled_quantity_float(order_list, event_list, fill_list,
+                    attempt_dict["order_request_key_str"], order_id_str) > 1e-9
+                text_str = (f"Re-sent, {'partly' if partly_bool else 'not'} filled · {quantity_int} missing" if sent_bool else
                             "Not re-sent · " + reason_str)
                 if reason_str.startswith("No broker answer"):
                     text_str = f"No broker answer · {quantity_int} missing"
@@ -173,7 +176,9 @@ def load_recovery_view_dict(target_obj, vplan_obj, snapshot_obj, *, as_of_ts, ne
 
 def recovery_summary_dict(missing_dict):
     row_list = missing_dict.get("row_list") or []
-    recovery_list = [row_dict for row_dict in row_list if row_dict.get("auto_complete_bool")]
+    # A saved broker rejection is red with Complete…, so it owns the header like a failed re-send.
+    recovery_list = [row_dict for row_dict in row_list if row_dict.get("auto_complete_bool")
+                     or (row_dict["state_str"] == "not_automatic" and row_dict.get("can_complete_bool"))]
     if not recovery_list:
         return {}
     planned_list = [row_dict for row_dict in recovery_list if row_dict["state_str"] == "planned"]
@@ -194,9 +199,9 @@ def recovery_summary_dict(missing_dict):
             else "The re-sent order filled; holdings still differ from the plan. " if any(row_dict["text_str"].startswith("Re-sent and filled") for row_dict in unresolved_list)
             else "The order was not re-sent. " if any(row_dict["text_str"].startswith("Not re-sent") for row_dict in unresolved_list)
             else "The broker reply could not be confirmed. " if any(row_dict["text_str"].startswith("No broker answer") for row_dict in unresolved_list)
+            else "The re-sent order was partly filled. " if any(row_dict["text_str"].startswith("Re-sent, partly filled") for row_dict in unresolved_list)
             else "The re-sent order was not filled. ")
-        detail_str = (cause_str + "Use Complete… below. The pod continues by itself after the "
-                      + recheck_str + " re-check. Waiting for you · re-checks at " + recheck_str + ".")
+        detail_str = cause_str + "Use Complete… below. The pod continues by itself after the " + recheck_str + " re-check."
     elif any(row_dict["state_str"] == "sent" for row_dict in recovery_list):
         state_str, pill_str, title_str = "now", "Completing", "Completing cancelled orders"
     elif any(row_dict["state_str"] == "planned" for row_dict in recovery_list):
@@ -207,7 +212,9 @@ def recovery_summary_dict(missing_dict):
     return {"state_str": state_str, "pill_str": pill_str, "title_str": title_str,
         "detail_str": detail_str,
         "banner_detail_str": " and ".join(f"{row_dict['asset_str']} {row_dict['side_str']} {row_dict['quantity_int']}" for row_dict in planned_list)
-            + " cross an order in a related account. The pod re-sends them " + when_str + " as market orders.",
+            + (" crosses an order in a related account. The pod re-sends it " + when_str + " as a market order."
+               if len(planned_list) == 1 else
+               " cross an order in a related account. The pod re-sends them " + when_str + " as market orders."),
         "planned_bool": bool(planned_list),
         "attention_bool": bool(unresolved_list), "count_int": len(planned_list or recovery_list),
         "total_order_count_int": recovery_dict.get("total_order_count_int", len(recovery_list)),

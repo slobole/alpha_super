@@ -77,6 +77,8 @@ does not do that, so there is no manual blackout.
 - **Pod lagging:** after 09:35, while the pod has not sent yet, the amber row says "re-sends at the next check".
 - **Not re-sent at all:** for example, the pod did not run until 15:50, or a newer plan exists. The row is red with
   "Not re-sent · {reason}" and Complete….
+- **Partly filled:** the re-send has fills but ended short. The row reads "Re-sent, partly filled · 10 missing" and
+  Activity "Partly filled · 10 missing". Only fills of the re-send itself count, never holdings.
 - **bps from the open:** side × (fill / official open − 1) × 10,000, with side +1 for a buy and −1 for a sell.
   Positive is always worse. If the official open is missing, write "open price not available".
 
@@ -84,11 +86,15 @@ does not do that, so there is no manual blackout.
 
 - **Waiting to re-send:** amber pill "Re-send 09:35". The banner reads "IBKR cancelled 2 of 5 orders · DBC BUY 90 and
   UUP BUY 100 cross an order in a related account · The pod re-sends them at 09:35 as market orders. Nothing to do."
+  With one order: "MSFT BUY 17 crosses an order in a related account · The pod re-sends it at 09:35 as a market order."
 - **Re-sent:** blue pill "Completing", no banner.
 - **Filled:** green "On track".
 - **Not filled:** red "Action needed". The banner reads "Complete UUP BUY 100 by 15:45 · The re-sent order was not
-  filled · Use Complete… below. The pod continues by itself after the 16:10 re-check."
-- **Parked pod:** the banner says when the pod re-checks: "Waiting for you · re-checks at 16:10".
+  filled · Use Complete… below. The pod continues by itself after the 16:10 re-check." A partial fill says "was
+  partly filled".
+- **Other reason:** red "Action needed" from the moment the reject is saved, with the same banner ("Some planned
+  shares are still missing"). Any red row makes the pill red.
+- **Parked pod:** the same banner. Its last sentence already names the 16:10 re-check, so say it once.
 
 **Overview.** Amber and blue are not action items and do not add to the LIVE count. The green "re-sent and filled"
 line stays until EOD. Red is a normal action item.

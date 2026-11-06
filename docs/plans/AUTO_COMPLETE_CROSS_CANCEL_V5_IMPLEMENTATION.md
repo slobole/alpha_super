@@ -75,6 +75,19 @@ side +1 and SELL side -1. Positive is adverse. A missing official open is explic
 unavailable. This measures the move from the open as well as execution friction;
 it is not a pure transaction-cost estimate.
 
+### Review fixes (display only)
+
+Four operator-text fixes from the v5 review. They change no order, timing, quantity or database write:
+
+- A re-send that has fills but ended short reads "Re-sent, partly filled · N missing" in the row, "The re-sent order
+  was partly filled" in the banner, and "Partly filled · N missing" in Activity. Only the re-send's own execution
+  evidence counts: its fills or cumulative filled count in the row, and a saved fill price in Activity.
+- The red banner names the 16:10 re-check once.
+- Any red row with Complete… makes the pill red ("Action needed"). A saved broker rejection for another reason
+  now owns the header like a failed re-send, instead of the earlier "Working" pill before the post-open check.
+  A row without Complete… (a plan older than one session) keeps the existing header.
+- One waiting order reads "… crosses an order in a related account. The pod re-sends it … as a market order."
+
 ## Verification
 
 Classification: **Tier 3**, including order quantity/timing and operator reporting.
