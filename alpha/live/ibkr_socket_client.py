@@ -51,6 +51,7 @@ from alpha.live.models import (
 DEFAULT_AUCTION_REFERENCE_WAIT_SECONDS_FLOAT = 2.0
 DEFAULT_SUBMIT_ACK_TIMEOUT_SECONDS_FLOAT = 10.0
 DEFAULT_SUBMIT_ACK_POLL_SECONDS_FLOAT = 0.25
+DEFAULT_MOO_CANCEL_OBSERVATION_SECONDS_FLOAT = 1.0
 AUCTION_REFERENCE_SOURCE_STR = "ib_async.reqMktData.225.auctionPrice"
 REQ_MKTDATA_MARKET_PRICE_FALLBACK_SOURCE_STR = "ib_async.reqMktData.marketPrice.fallback"
 REQ_TICKERS_MARKET_PRICE_FALLBACK_SOURCE_STR = "ib_async.reqTickers.marketPrice.fallback"
@@ -68,6 +69,14 @@ CANONICAL_STOCK_SYMBOL_MAP_DICT = {
 def _canonical_stock_symbol_str(symbol_obj) -> str:
     symbol_str = str(symbol_obj).strip()
     return CANONICAL_STOCK_SYMBOL_MAP_DICT.get(symbol_str, symbol_str)
+
+
+class CrossCancelSubmitError(RuntimeError):
+    """Preserve a received CROSS reason when a later standard-route read fails."""
+
+    def __init__(self, exception_obj, result_obj):
+        super().__init__(str(exception_obj))
+        self.cross_cancel_result_obj = result_obj
 
 
 class IBKRSocketClient:
@@ -827,6 +836,62 @@ class IBKRSocketClient:
         if dispatch_exception_obj is not None:
             raise dispatch_exception_obj
 
+    @contextmanager
+    def _capture_cross_cancel_errors(self, ib_obj, account_route_str, submitted_order_list,
+            event_list, record_list, fill_list):
+        """Keep the raw reason even when ib_async has already marked the trade done."""
+        error_event_obj = getattr(ib_obj, "errorEvent", None)
+        captured_error_list = []
+        dispatch_exception_obj = None
+
+        def capture_fn(request_id_int, error_code_int, message_str, *detail_tuple):
+            if "would cross related resting order" in str(message_str).lower():
+                captured_error_list.append((int(request_id_int), int(error_code_int),
+                    str(message_str), datetime.now(UTC)))
+
+        if error_event_obj is not None:
+            error_event_obj += capture_fn
+        try:
+            yield
+        except Exception as exception_obj:
+            dispatch_exception_obj = exception_obj
+            raise
+        finally:
+            if error_event_obj is not None:
+                error_event_obj -= capture_fn
+            captured_event_count_int = 0
+            for request_id_int, error_code_int, message_str, event_ts in captured_error_list:
+                # Error reqId is the API orderId, not the permanent broker ID. Only
+                # this submission's exact account/order pairs may receive the reason.
+                matched_list = [item_dict for item_dict in submitted_order_list
+                    if int(item_dict["order_obj"].orderId) == request_id_int
+                    and str(item_dict["order_obj"].account) == account_route_str]
+                if len(matched_list) != 1:
+                    continue
+                matched_dict = matched_list[0]
+                request_obj, order_obj = matched_dict["request_obj"], matched_dict["order_obj"]
+                trade_obj = matched_dict.get("trade_obj")
+                status_obj = getattr(trade_obj, "orderStatus", None)
+                event_list.append(BrokerOrderEvent(
+                    broker_order_id_str=str(order_obj.permId or order_obj.orderId),
+                    decision_plan_id_int=request_obj.decision_plan_id_int,
+                    vplan_id_int=request_obj.vplan_id_int,
+                    account_route_str=account_route_str, asset_str=request_obj.asset_str,
+                    status_str="Cancelled" if error_code_int == 202 else str(getattr(status_obj, "status", "")),
+                    filled_amount_float=float(getattr(status_obj, "filled", 0)),
+                    remaining_amount_float=getattr(status_obj, "remaining", None),
+                    avg_fill_price_float=getattr(status_obj, "avgFillPrice", None),
+                    event_timestamp_ts=event_ts, event_source_str="ibkr.error",
+                    message_str=message_str, submission_key_str=request_obj.submission_key_str,
+                    order_request_key_str=request_obj.order_request_key_str,
+                    raw_payload_dict={"error_code_int": error_code_int, "request_id_int": request_id_int,
+                        "order_ref_str": request_obj.order_request_key_str}))
+                captured_event_count_int += 1
+            if dispatch_exception_obj is not None and captured_event_count_int:
+                raise CrossCancelSubmitError(dispatch_exception_obj, SubmitBatchResult(
+                    broker_order_record_list=list(record_list), broker_order_event_list=list(event_list),
+                    broker_order_fill_list=list(fill_list), submit_ack_status_str="missing_critical")) from dispatch_exception_obj
+
     def _submit_order_request_list(
         self, account_route_str: str, broker_order_request_list: list[BrokerOrderRequest],
         submitted_timestamp_ts: datetime, *, progress_dict=None,
@@ -842,8 +907,8 @@ class IBKRSocketClient:
                     submission_deadline_ts = datetime.fromisoformat(submission_deadline_str)
                 except (TypeError, ValueError) as exception_obj:
                     raise ValueError("Submission deadline requires an aware ISO timestamp.") from exception_obj
-                if submission_deadline_ts.tzinfo is None or request_obj.broker_order_type_str not in ("MOO", "MOC"):
-                    raise ValueError("Submission deadline requires an aware timestamp and an MOO or MOC order.")
+                if submission_deadline_ts.tzinfo is None or request_obj.broker_order_type_str not in ("MOO", "MOC", "MKT"):
+                    raise ValueError("Submission deadline requires an aware timestamp and an MOO, MOC or MKT order.")
                 submission_deadline_by_request_key_dict[request_obj.order_request_key_str] = submission_deadline_ts
             deadline_str = request_obj.execution_deadline_timestamp_str
             if deadline_str is None:
@@ -861,14 +926,17 @@ class IBKRSocketClient:
                 "goodTillDate": deadline_ts.astimezone(UTC).strftime("%Y%m%d-%H:%M:%S"),
                 "outsideRth": False,
             }
-        with (self.connect() if progress_dict is None else self._guarded_dispatch_connection()) as ib_obj:
+        submitted_order_list = []
+        local_broker_order_record_list: list[BrokerOrderRecord] = []
+        local_broker_order_event_list: list[BrokerOrderEvent] = []
+        local_broker_order_fill_list: list[BrokerOrderFill] = []
+        with (self.connect() if progress_dict is None else self._guarded_dispatch_connection()) as ib_obj, \
+                self._capture_cross_cancel_errors(ib_obj, account_route_str, submitted_order_list,
+                    local_broker_order_event_list, local_broker_order_record_list, local_broker_order_fill_list):
             contract_map = self._build_stock_contract_map(
                 ib_obj,
                 [broker_order_request_obj.asset_str for broker_order_request_obj in broker_order_request_list],
             )
-            local_broker_order_record_list: list[BrokerOrderRecord] = []
-            local_broker_order_event_list: list[BrokerOrderEvent] = []
-            local_broker_order_fill_list: list[BrokerOrderFill] = []
             if progress_dict is not None:
                 progress_dict.update(record_list=local_broker_order_record_list,
                     event_list=local_broker_order_event_list, fill_list=local_broker_order_fill_list)
@@ -933,12 +1001,17 @@ class IBKRSocketClient:
                 # immediately before EACH dispatch. Preserve MKT/OPG semantics.
                 if submission_deadline_ts is not None and datetime.now(UTC) >= submission_deadline_ts:
                     raise ValueError("MOO submission deadline passed before broker dispatch; reconcile any earlier legs.")
+                from alpha.live.dashboard_authorization import assert_manual_dispatch_allowed
+                assert_manual_dispatch_allowed(broker_order_request_obj, datetime.now(UTC))
                 if progress_dict is not None:
                     progress_dict["attempted_key_list"].append(broker_order_request_obj.order_request_key_str)
+                submitted_order_dict = {"request_obj": broker_order_request_obj, "order_obj": broker_order_obj}
+                submitted_order_list.append(submitted_order_dict)
                 trade_obj = ib_obj.placeOrder(
                     contract_map[broker_order_request_obj.asset_str],
                     broker_order_obj,
                 )
+                submitted_order_dict["trade_obj"] = trade_obj
                 local_broker_order_id_alias_set_by_request_key_map_dict[
                     broker_order_request_obj.order_request_key_str
                 ] = self._build_broker_order_id_alias_set(
@@ -1032,6 +1105,9 @@ class IBKRSocketClient:
                 for broker_order_id_str in broker_order_id_alias_set
             }
             submit_ack_deadline_float = monotonic() + DEFAULT_SUBMIT_ACK_TIMEOUT_SECONDS_FLOAT
+            first_ack_timestamp_float = None
+            observe_moo_bool = getattr(ib_obj, "errorEvent", None) is not None and any(
+                request_obj.broker_order_type_str == "MOO" for request_obj in broker_order_request_list)
             while True:
                 (
                     broker_snapshot_order_record_list,
@@ -1057,7 +1133,17 @@ class IBKRSocketClient:
                     broker_order_ack_obj.broker_response_ack_bool
                     for broker_order_ack_obj in broker_order_ack_list
                 ):
-                    break
+                    if not observe_moo_bool:
+                        break
+                    if first_ack_timestamp_float is None:
+                        first_ack_timestamp_float = monotonic()
+                    # An ACK can precede the immediate exchange cancellation. Keep
+                    # the error callback alive briefly; the existing 10s cap still applies.
+                    if monotonic() - first_ack_timestamp_float >= DEFAULT_MOO_CANCEL_OBSERVATION_SECONDS_FLOAT:
+                        break
+                    if all(record_obj.status_str == "Filled"
+                            for record_obj in broker_snapshot_order_record_list):
+                        break
                 if monotonic() >= submit_ack_deadline_float:
                     break
                 ib_obj.sleep(DEFAULT_SUBMIT_ACK_POLL_SECONDS_FLOAT)

@@ -25,6 +25,7 @@ from flask import jsonify, request
 
 from alpha.live.dashboard import DashboardActionInFlightError, DashboardPodJobGate
 from alpha.live.dashboard_authorization import (
+    ManualDispatchRefused,
     operator_execution_context,
     read_confirmation_context_dict,
     validate_current_confirmation,
@@ -39,6 +40,7 @@ from alpha.live.manual_order import (
     submit_manual_order_ticket_dict,
 )
 from alpha.live.order_clerk import IBKRGatewayBrokerAdapter
+from alpha.live.dashboard_v4.missing_trades import manual_auto_completion_block_reason_str
 
 
 ACTION_NAME_STR = "manual_order"
@@ -80,7 +82,7 @@ def order_line_str(side_str, quantity_int, asset_str, type_str, limit_price_floa
 class OrderTicketService:
     def __init__(self, *, target_fn, missing_fn, log_path_fn, target_loader_fn, enabled_bool=False,
                  broker_factory_fn=None, sender_fn=None, now_fn=None, operator_id_str=None,
-                 confirmation_fn=None):
+                 confirmation_fn=None, recovery_guard_fn=None):
         self.target_fn = target_fn                  # pod_id -> verified LIVE target (raises ValueError)
         self.missing_fn = missing_fn                # target -> load_missing_trades_dict(...) result
         self.log_path_fn = log_path_fn              # () -> event log path
@@ -91,6 +93,7 @@ class OrderTicketService:
         self.now_fn = now_fn or (lambda: datetime.now(UTC))
         self.operator_id_str = operator_id_str or default_operator_id_str()
         self.confirmation_fn = confirmation_fn or read_confirmation_context_dict
+        self.recovery_guard_fn = recovery_guard_fn or manual_auto_completion_block_reason_str
         self.confirmation_store_obj = ConfirmationStore(ttl_seconds_float=120)
         self.pod_gate_obj = DashboardPodJobGate()
         self._action_token_str = secrets.token_urlsafe(32) if self.enabled_bool else ""
@@ -100,6 +103,11 @@ class OrderTicketService:
         return self._action_token_str
 
     # ------------------------------------------------------------------ helpers
+    def _check_recovery(self, target_obj, asset_str):
+        reason_str = self.recovery_guard_fn(target_obj, asset_str, self.now_fn())
+        if reason_str:
+            raise OrderStop(reason_str)
+
     def _window_dict(self, release_obj, now_ts):
         window_dict = manual_order_session_window_dict(release_obj.session_calendar_id_str, now_ts)
         if not window_dict["session_bool"] or now_ts >= window_dict["close_ts"]:
@@ -132,7 +140,7 @@ class OrderTicketService:
             raise OrderStop("Nothing to complete · broker holds the plan")
         if row_dict["state_str"] == "sent":
             raise OrderStop("Already sent · " + row_dict["text_str"].removeprefix("Sent · "))
-        if row_dict["state_str"] != "missing":
+        if row_dict["state_str"] != "missing" and not row_dict.get("can_complete_bool"):
             raise OrderStop("No pre-fill · use New order")
         return missing_dict, row_dict
 
@@ -149,6 +157,7 @@ class OrderTicketService:
         except ValueError as exception_obj:
             raise OrderStop("Symbol must be a simple US stock or ETF symbol") from exception_obj
         window_dict = self._window_dict(release_obj, now_ts)
+        self._check_recovery(target_obj, asset_str)
         plan_float, vplan_id_int = None, None
         if kind_str == "complete":
             missing_dict, row_dict = self._missing_row(target_obj, asset_str)
@@ -194,6 +203,7 @@ class OrderTicketService:
         target_obj = self.target_fn(pod_id_str)
         release_obj = target_obj.release_obj
         asset_str = expected_dict["asset_str"]
+        self._check_recovery(target_obj, asset_str)
         type_str = str(body_dict.get("broker_order_type_str") or "").upper()
         if type_str not in ORDER_TYPE_TUPLE:
             raise OrderStop("Choose At close, Now or Limit")
@@ -253,6 +263,7 @@ class OrderTicketService:
         except ValueError as exception_obj:
             raise OrderStop("Pod state changed since the check · check again") from exception_obj
         try:
+            self._check_recovery(target_obj, asset_str)
             self.pod_gate_obj.acquire(pod_id_str)
         except DashboardActionInFlightError as exception_obj:
             raise OrderStop("Another order is being sent for this pod") from exception_obj
@@ -260,6 +271,8 @@ class OrderTicketService:
             with operator_execution_context(confirmed_target_obj, self.target_loader_fn, ACTION_NAME_STR):
                 result_dict = self.sender_fn(release_obj=release_obj, request_body_dict=ticket_dict,
                     submitted_timestamp_ts=self.now_fn(), broker_adapter_obj=adapter_obj, log_path_str=self.log_path_fn())
+        except ManualDispatchRefused as exception_obj:
+            raise OrderStop(str(exception_obj)) from exception_obj
         except Exception:
             # Past validation the order may have reached the broker. Never claim it did not.
             return {"status_str": "unknown", "line_str": "Outcome unknown · check TWS before resending"}

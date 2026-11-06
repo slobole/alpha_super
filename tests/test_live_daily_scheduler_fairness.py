@@ -73,11 +73,15 @@ def test_monthly_unfilled_orders_keep_legacy_park_or_poll(tmp_path, monkeypatch,
     store_obj.mark_decision_plan_status(plan_obj.decision_plan_id_int, "submitted")
     _seed_post_execution_reconcile_truth(store_obj, plan_obj, 0.0, order_status_str)
     _configure_scheduler(monkeypatch, [release_obj])
-    result_obj = scheduler_service.get_scheduler_decision(store_obj, _time("2024-02-01", 16, 10), "unused", "paper")
+    result_obj = scheduler_service.get_scheduler_decision(store_obj, _time("2024-02-01", 16, 9), "unused", "paper")
     assert runner.is_vplan_execution_exception_parked(store_obj, plan_obj) is parked_bool
     assert result_obj.next_phase_str == ("manual_review_pending" if parked_bool else "post_execution_reconcile")
     assert result_obj.due_now_bool is (not parked_bool)
     assert result_obj.reason_code_str == ("execution_exception_parked" if parked_bool else "ready_to_reconcile")
+    # Approved v4 exception: even an unrelated parked cancellation gets one close+10m position recheck.
+    eod_obj = scheduler_service.get_scheduler_decision(store_obj, _time("2024-02-01", 16, 10), "unused", "paper")
+    assert eod_obj.next_phase_str == "post_execution_reconcile" and eod_obj.due_now_bool
+    assert eod_obj.reason_code_str == ("parked_eod_recheck_due" if parked_bool else "ready_to_reconcile")
     assert store_obj.get_vplan_by_id(plan_obj.vplan_id_int).status_str == "submitted"
     with store_obj._connect() as connection_obj:
         assert connection_obj.execute("SELECT COUNT(*) FROM mr_capsule_execution_alert").fetchone()[0] == 0

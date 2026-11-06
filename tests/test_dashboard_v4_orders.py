@@ -140,6 +140,8 @@ def fake_store(monkeypatch):
 
     monkeypatch.setattr(missing_module, "_ReadOnlyConfirmationStore", FakeStore)
     monkeypatch.setattr(missing_module, "_why_map", lambda db_path_str, vplan_id_int: state_dict["why"])
+    from alpha.live.dashboard_v4 import auto_complete_view
+    monkeypatch.setattr(auto_complete_view, "load_recovery_view_dict", lambda *args, **kwargs: {"row_list": []})
     return state_dict
 
 
@@ -238,7 +240,8 @@ def service_factory(monkeypatch):
             missing_fn=lambda target: missing or _missing_ok(), log_path_fn=lambda: "events.jsonl",
             target_loader_fn=lambda pod_id_str: target_obj, enabled_bool=True,
             broker_factory_fn=lambda release_obj: broker or FakeBroker(), sender_fn=sender or record_sender,
-            now_fn=lambda: now_ts, operator_id_str="ops", confirmation_fn=lambda target: {"state_hash_str": "x"})
+            now_fn=lambda: now_ts, operator_id_str="ops", confirmation_fn=lambda target: {"state_hash_str": "x"},
+            recovery_guard_fn=lambda *args: "")
         return service_obj, sent_list
     return build
 
@@ -255,6 +258,26 @@ def test_complete_check_then_send_moc(service_factory):
     assert (ticket_dict["broker_order_type_str"], ticket_dict["side_str"], ticket_dict["completion_vplan_id_int"],
         ticket_dict["confirmation_text_str"], ticket_dict["reason_str"]) == (
         "MOC", "BUY", 412, MANUAL_ORDER_CONFIRMATION_TEXT_STR, "Completion · VPlan #412 · APX")
+
+
+@pytest.mark.parametrize("kind_str", ["complete", "new"])
+def test_auto_completion_blackout_blocks_preview(service_factory, kind_str):
+    service_obj, sent_list = service_factory()
+    service_obj.recovery_guard_fn = lambda *args: "Auto-completion is working for APX"
+    with pytest.raises(OrderStop, match="Auto-completion is working"):
+        service_obj.check_dict("pod_manual", {"kind_str": kind_str, "asset_str": "APX"})
+    assert not sent_list
+
+
+@pytest.mark.parametrize("kind_str", ["complete", "new"])
+def test_auto_completion_blackout_blocks_an_already_open_card(service_factory, kind_str):
+    service_obj, sent_list = service_factory()
+    check_dict = service_obj.check_dict("pod_manual", {"kind_str": kind_str, "asset_str": "APX"})
+    service_obj.recovery_guard_fn = lambda *args: "Auto-completion is working for APX"
+    with pytest.raises(OrderStop, match="Auto-completion is working"):
+        service_obj.send_dict("pod_manual", {"confirmation_nonce_str": check_dict["confirmation_nonce_str"],
+            "broker_order_type_str": "MKT", "quantity_int": 300, "side_str": "BUY", "reason_str": "Complete gap"})
+    assert not sent_list
     with pytest.raises(OrderStop, match="Expired"):
         service_obj.send_dict("pod_manual", {"confirmation_nonce_str": check_dict["confirmation_nonce_str"],
             "broker_order_type_str": "MOC", "quantity_int": 300})
@@ -321,6 +344,25 @@ def test_send_refuses_when_broker_changed(service_factory):
     with pytest.raises(OrderStop, match="already open"):
         service_obj.send_dict("pod_manual", {"confirmation_nonce_str": nonce_str, "broker_order_type_str": "MKT", "quantity_int": 300})
     assert sent_list == []
+
+
+def test_final_dispatch_refusal_keeps_reason_and_consumes_nonce(service_factory):
+    from alpha.live.dashboard_authorization import ManualDispatchRefused
+
+    def refusing_sender(**keyword_dict):
+        raise ManualDispatchRefused("Auto-complete in progress")
+
+    service_obj, _ = service_factory(sender=refusing_sender)
+    check_dict = service_obj.check_dict("pod_manual", {"kind_str": "complete", "asset_str": "APX"})
+    send_dict = {"confirmation_nonce_str": check_dict["confirmation_nonce_str"],
+        "broker_order_type_str": "MKT", "quantity_int": 300}
+    with pytest.raises(OrderStop, match="Auto-complete in progress"):
+        service_obj.send_dict("pod_manual", send_dict)
+    with pytest.raises(OrderStop, match="Expired"):
+        service_obj.send_dict("pod_manual", send_dict)
+    # The refusal must release the in-process pod gate.
+    service_obj.pod_gate_obj.acquire("pod_manual")
+    service_obj.pod_gate_obj.release("pod_manual")
 
 
 def test_sender_failure_is_outcome_unknown(service_factory):

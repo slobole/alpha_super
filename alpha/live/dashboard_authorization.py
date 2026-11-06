@@ -20,6 +20,11 @@ from alpha.live.state_store_v2 import LiveStateStore
 
 
 _authorization_context_obj = ContextVar("dashboard_authorization", default=None)
+_manual_dispatch_target_obj = ContextVar("manual_dispatch_target", default=None)
+
+
+class ManualDispatchRefused(ValueError):
+    """A manual ticket was stopped before its sole placeOrder call."""
 
 
 def _json_default(value_obj):
@@ -114,10 +119,28 @@ def operator_execution_context(target_obj, target_loader_fn, action_name_str):
         raise ValueError("Confirmed target is no longer enabled.")
     validate_current_confirmation(current_target_obj, expected_dict)
     context_token_obj = _authorization_context_obj.set(expected_dict)
+    manual_target_token_obj = _manual_dispatch_target_obj.set(
+        current_target_obj if action_name_str == "manual_order" else None)
     try:
         yield
     finally:
+        _manual_dispatch_target_obj.reset(manual_target_token_obj)
         _authorization_context_obj.reset(context_token_obj)
+
+
+def assert_manual_dispatch_allowed(request_obj, as_of_ts):
+    """Recheck the read-only blackout after connect/qualification, before placeOrder."""
+    target_obj = _manual_dispatch_target_obj.get()
+    if target_obj is None:
+        return
+    release_obj = target_obj.release_obj
+    if (request_obj.pod_id_str != release_obj.pod_id_str
+            or request_obj.account_route_str != release_obj.account_route_str):
+        raise ManualDispatchRefused("Manual dispatch does not match the confirmed Pod/account.")
+    from alpha.live.dashboard_v4.missing_trades import manual_auto_completion_block_reason_str
+    reason_str = manual_auto_completion_block_reason_str(target_obj, request_obj.asset_str, as_of_ts)
+    if reason_str:
+        raise ManualDispatchRefused(reason_str)
 
 
 def assert_authorized_release(release_obj):
