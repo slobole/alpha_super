@@ -1,7 +1,8 @@
 # Opening cross-cancel completion: implementation and verification
 
-Status: implemented; final affected-suite verification passed on `codex/auto-complete-cross-cancel`.
-Additional repository-wide verification is still running; see the final verification section for its result.
+Status: implemented and verified on `codex/auto-complete-cross-cancel`; no unresolved feature findings.
+Functional implementation commit: `3478d62`. The verification follow-up contains one template whitespace fix,
+an intentionally changed deadline test, and this report. No deployment has occurred.
 Base: `7210df3e99c9e3f77bd6a4e8f9705bec7283ad8f`. Scope: the approved v4 handoff plus the explicitly authorized
 forward fix for missing cancellation messages. No push, merge, deployment, broker connection or real order.
 
@@ -49,6 +50,7 @@ The rule is always on when this code is deployed; there is no new switch or proc
 - A standard-route parked pod receives one positions recheck per exchange session at `close + 10 minutes`.
   Matching positions complete its plan and allow EOD. A mismatch stays parked. This recheck sends no orders.
 
+09:35 is the approved operating rule, not an empirically established optimal execution time.
 All boundaries come from the exchange calendar, including DST and early closes. Normal-session examples are
 09:34 manual blackout, 09:35 attempt, 09:36 dispatch cutoff, 10:00 GTD, 10:01 final check and 16:10 EOD recheck.
 
@@ -128,8 +130,27 @@ The preceding run had two legacy tests expecting permanent parking at 16:10. The
 remain asserted at 16:09, with the explicitly approved close+10m recheck asserted separately; no production code
 was changed to satisfy those old expectations. Independent rerun of that file: 8 passed.
 
-Broader repository-suite result and its unrelated failure triage will be added when it finishes. The broad run
-uses a disposable independent clone so tests cannot accidentally write the main checkout's Scout ledger.
+The broader repository run used a disposable independent clone: **10,513 passed, 8 failed, 76 skipped**, plus
+73 passing subtests. It tested an earlier snapshot of the same change; the final focused runs cover subsequent
+review fixes. The broad run is not reported as green. Its failures were classified as follows:
+
+- Two scheduler tests expected permanent parking at 16:10: updated to assert the approved EOD recheck while
+  retaining the old behavior at 16:09. The final 831-test run passes.
+- One deadline test rejected every MKT submission deadline: updated to accept bounded recovery MKT while still
+  rejecting LMT deadlines. MOC behavior remains covered. Socket/flow-vote/payload follow-up: **158 passed**
+  (`final_deadline_contract.xml` and `.log`).
+- Two monthly HTML golden tests detected one extra blank line on 25 Pod pages. A one-character Jinja fix
+  restored the original no-recovery HTML across all 37 captured routes. **No golden hashes were updated**.
+  Unchanged golden tests plus recovery UI: **31 passed**.
+- Three unrelated failures reproduce on clean baseline `7210df3e` and the candidate. The two Bench engine-map
+  import tests pass in isolation but fail after full collection because `norgatedata` is already imported.
+  The theme test reports the same four missing cluster-color tokens in both revisions. These were not changed.
+  See `results/review/auto_complete/bench_theme_baseline_comparison.md` and its four logs.
+
+Skipped tests are missing evidence, not passes. The explicitly run historical gates above supply the relevant
+local-data evidence. No second full 30-minute repository run was performed after the bounded fixes; the affected
+tests were rerun instead. A redundant expanded live/dashboard run was interrupted and is not counted as a pass.
+
 All 58 recorded CORE5/capsule dependency hashes still match the candidate source; see
 `results/review/auto_complete/replay_final_source_validation.json`.
 
@@ -142,7 +163,7 @@ All 58 recorded CORE5/capsule dependency hashes still match the candidate source
 | Reference prices | Existing sizing reference retained; actual official open used only for reporting. No close/open substitution. |
 | State/schema/config | One new lazy table; no ALTER/migration of old tables, pickle or YAML formats. V4 performs no pod-DB writes. |
 | Logs/readers | Existing fields preserved; five new lifecycle event types and separate recovery request reads. |
-| Windows/restarts | Temporary-DB tests cover atomic claim, restart/no replay, read-only UI and paths; no new process or client ID. |
+| Windows/restarts | Temporary-DB tests cover atomic claim, restart/no replay, read-only UI and paths. No new failure observed offline; production runtime was not exercised. No new process or client ID. |
 | Released pods | No released YAML changes; existing route/intent contracts and four pinned compatibility gates retained. |
 
 Quant review: no universe/estimation changes, parameter search, new strategy, train/test fit, target leakage or

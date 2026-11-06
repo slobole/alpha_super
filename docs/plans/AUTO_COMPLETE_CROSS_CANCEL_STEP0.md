@@ -67,4 +67,3 @@ The statements in Preparation describe the initial stop point. Implementation an
 the isolated branch; see [the implementation report](AUTO_COMPLETE_CROSS_CANCEL_IMPLEMENTATION.md).
 No client files, database contents, services or real orders were changed. The historical records were not backfilled.
 Production remains on its existing code until the owner separately deploys the change.
-

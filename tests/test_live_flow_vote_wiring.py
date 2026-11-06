@@ -102,7 +102,7 @@ def test_the_post_close_report_waits_for_the_closing_prints(tmp_path):
     assert claim_post_close_report_attempt(store_obj, release_obj, decision_obj, grace_ts)
 
 
-def test_socket_client_accepts_a_send_deadline_on_moc_and_still_refuses_it_on_mkt(monkeypatch):
+def test_socket_client_accepts_auction_and_recovery_send_deadlines_but_not_limits(monkeypatch):
     socket_obj = IBKRSocketClient()
     reached_list = []
 
@@ -123,13 +123,16 @@ def test_socket_client_accepts_a_send_deadline_on_moc_and_still_refuses_it_on_mk
             unit_str="shares", amount_float=-10.0, target_bool=False, trade_id_int=None, sizing_reference_price_float=90.0,
             portfolio_value_float=1e5, decision_plan_id_int=1, vplan_id_int=1, submission_deadline_timestamp_str=deadline_str)
 
-    with pytest.raises(RuntimeError, match="stop before any broker call"):
-        socket_obj.submit_order_request_list(account_route_str=ROUTE_STR, broker_order_request_list=[request("MOC")], submitted_timestamp_ts=datetime.now(UTC))
-    assert reached_list
+    # v4 recovery adds a bounded MKT send deadline; auction order behavior remains unchanged.
+    for order_type_str in ("MOC", "MKT"):
+        reached_list.clear()
+        with pytest.raises(RuntimeError, match="stop before any broker call"):
+            socket_obj.submit_order_request_list(account_route_str=ROUTE_STR, broker_order_request_list=[request(order_type_str)], submitted_timestamp_ts=datetime.now(UTC))
+        assert reached_list
     # The guarded path wraps the refusal so the send claim is kept for reconciliation; nothing reached the broker.
     reached_list.clear()
-    with pytest.raises(Exception, match="MOO or MOC"):
-        socket_obj.submit_order_request_list(account_route_str=ROUTE_STR, broker_order_request_list=[request("MKT")], submitted_timestamp_ts=datetime.now(UTC))
+    with pytest.raises(Exception, match="an MOO, MOC or MKT order"):
+        socket_obj.submit_order_request_list(account_route_str=ROUTE_STR, broker_order_request_list=[request("LMT")], submitted_timestamp_ts=datetime.now(UTC))
     assert not reached_list
 
 
