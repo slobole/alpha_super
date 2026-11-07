@@ -620,7 +620,8 @@ function clustersOf(tree) {
 }
 // what the page calls groups: the clusters with the parked engine taken out
 const betGroups = (tree = TREE) => clustersOf(tree).map((g) => g.filter((i) => !E[i].parked)).filter((g) => g.length);
-const groupsOnMap = () => betGroups().map((g) => g.filter((i) => simOn[i])).filter((g) => g.length);
+// under two years the shapes are the whole-history groups, the same ones that set the colours and the tiles
+const groupsOnMap = () => betGroups(shortWindow() ? TREE_ALL : TREE).map((g) => g.filter((i) => simOn[i])).filter((g) => g.length);
 // under 104 weeks a correlation tree is too noisy to call groups
 const windowWeeks = () => WEEKS.length - firstWeek(winA());
 const shortWindow = () => windowWeeks() < 104;
@@ -740,7 +741,7 @@ function renderSim() {
   const pts = simPts = simCoords.map((c) => [ox + k * (c[0] - x0), oy + k * (c[1] - y0)]);
   simHot = null;
   dotSpots.simbox = E.map((e, i) => ({ id: e.id, x: pts[i][0], y: pts[i][1] })).filter((p, i) => simOn[i]);
-  const short = shortWindow(), found = groupsOnMap(), several = short ? [] : found.filter((g) => g.length > 1);
+  const found = groupsOnMap(), several = found.filter((g) => g.length > 1);
   const hulls = several.map((g) => {
     const hull = hullOf(g.map((i) => pts[i]));
     return `<path class="hull${g.some((i) => shows(E[i])) ? '' : ' dim'}" d="${hull.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join('')}${hull.length > 2 ? 'Z' : ''}" stroke-width="46"/>`;
@@ -750,7 +751,7 @@ function renderSim() {
   let pairs = '';
   const segs = [];
   for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
-    if (!simOn[i] || !simOn[j] || E[i].parked || E[j].parked || CORR[i][j] < cutValue || (!short && groupOf[i] === groupOf[j])) continue;
+    if (!simOn[i] || !simOn[j] || E[i].parked || E[j].parked || CORR[i][j] < cutValue || groupOf[i] === groupOf[j]) continue;
     segs.push([pts[i][0], pts[i][1], pts[j][0], pts[j][1]]);
     pairs += `<line class="pair${shows(E[i]) && shows(E[j]) ? '' : ' dim'}" x1="${pts[i][0].toFixed(1)}" y1="${pts[i][1].toFixed(1)}" x2="${pts[j][0].toFixed(1)}" y2="${pts[j][1].toFixed(1)}" stroke="var(--axis)"/>`;
   }
@@ -807,7 +808,7 @@ function renderBetStats() {
   $('b-count').hidden = short;
   $('b-groups').textContent = found.length;
   $('b-split').textContent = `${several} with several engines, ${found.length - several} alone${parked.length ? `, ${parked.join(' and ')} parked` : ''}`;
-  $('b-cutlabel').innerHTML = esc(fewWeeks() ? `Lines join pairs above ${cut} over the whole history: ${weeks} is too short` : short ? `Lines join pairs above ${cut}. ${weeks} is too short to group` : `Groups join when their average correlation is above ${cut}. ${weeks}`);
+  $('b-cutlabel').innerHTML = esc(fewWeeks() ? `Groups and lines above ${cut} use the whole history: ${weeks} is too short` : short ? `Groups from the whole history, ${weeks} too short to regroup. Lines join pairs above ${cut} in these ${weeks}` : `Groups join when their average correlation is above ${cut}. ${weeks}`);
 }
 
 /* correlation heat with its tree */
