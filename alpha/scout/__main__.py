@@ -85,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
         for entry_dict in report_dict["gaps"]:
             print(f"GAP  {entry_dict['created_str'] or '?':<10}  {entry_dict['study_id_str']}  (reports/{entry_dict['folder_str']})")
         print(summary_str(report_dict))
-        return 0
+        return 1 if report_dict["overdue_count_int"] else 0
     if args.command == "daily":
         from alpha.scout.daily import run_daily
 

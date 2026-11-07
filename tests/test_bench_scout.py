@@ -132,3 +132,13 @@ def test_families_page_counts_trials_grades_and_discoveries(seeded_client):
 
 def test_nav_has_scout_link(seeded_client):
     assert 'href="/scout"' in seeded_client.get("/scout").get_data(as_text=True)
+
+
+def test_shadows_page_survives_a_non_utf8_forward_log(seeded_client):
+    """A24 coverage: an unreadable forward log shows no sessions instead of a 500."""
+    shadow_dir_path = scout_pages.SCOUT_ROOT_PATH / "shadow"
+    folder_list = [p for p in shadow_dir_path.iterdir() if p.is_dir() and p.name != "reports"]
+    assert folder_list
+    for folder_path in folder_list:
+        (folder_path / "forward_log.csv").write_bytes(bytes([0xFF, 0xFE, 0x00]) + b"bad")
+    assert seeded_client.get("/scout/shadows").status_code == 200

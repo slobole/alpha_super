@@ -172,9 +172,11 @@ def log_forward(registration_id_str: str, forward_ser: pd.Series, as_of_date: da
     log_path, revision_path = folder_path / FORWARD_LOG_NAME_STR, folder_path / REVISION_LOG_NAME_STR
     as_of_str = as_of_date.isoformat()
     new_ser = pd.Series(forward_ser.to_numpy(dtype=float), index=pd.DatetimeIndex(forward_ser.index).strftime("%Y-%m-%d"))
+    new_ser = new_ser[~new_ser.index.duplicated(keep="last")].dropna()  # a missing return is not logged
     logged_df = pd.read_csv(log_path, dtype={"date_str": str}) if log_path.exists() else pd.DataFrame(
         columns=["date_str", "return_float", "first_recorded_str"])
     logged_ser = pd.Series(logged_df["return_float"].to_numpy(dtype=float), index=logged_df["date_str"].astype(str))
+    logged_ser = logged_ser[~logged_ser.index.duplicated(keep="first")]  # a hand-made duplicate: the first record wins
     common_index = new_ser.index.intersection(logged_ser.index)
     diff_ser = (new_ser.loc[common_index] - logged_ser.loc[common_index]).abs()
     revised_index = diff_ser.index[diff_ser > REVISION_TOLERANCE_FLOAT]
@@ -237,7 +239,10 @@ def run_shadow_monitor(ledger: Ledger | None = None, as_of_date: date | None = N
             realized_ser = provider_for(registration_id_str)(row_dict)
             report_dict = shadow_report(row_dict, realized_ser, as_of_date)
             forward_ser = realized_ser.loc[row_dict["start_date_str"]:].dropna()
-            report_dict["log"] = log_forward(registration_id_str, forward_ser, as_of_date, root_path=log_root_path)
+            try:  # a broken log file must never replace the shadow's status (a RED) with ERROR
+                report_dict["log"] = log_forward(registration_id_str, forward_ser, as_of_date, root_path=log_root_path)
+            except Exception as log_error:
+                report_dict["log"] = {"error_str": f"{type(log_error).__name__}: {log_error}"}
             report_list.append(report_dict)
         except Exception as error:  # one broken provider must not hide the other shadows; the row says ERROR
             report_list.append({

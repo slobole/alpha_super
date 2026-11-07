@@ -175,3 +175,12 @@ def test_a23_registrations_validate_sum_to_each_study_and_are_ordered_parent_fir
         placed_set.add(reg.registration_id_str)
     for word_str, reason_str, source_str in grade_dict.values():
         assert word_str in GRADE_WORD_TUPLE and word_str != "CANDIDATE" and reason_str and source_str
+
+
+def test_grace_boundary_day(tmp_path):
+    path = tmp_path / "registry.json"
+    path.write_text(json.dumps({"studies": [_study("s", "pakal-research/reports/s/REPORT.md", "2026-10-11T09:00:00+00:00")]}),
+                    encoding="utf-8")
+    empty_ledger = Ledger(tmp_path / "ledger.jsonl")
+    assert kb_link_report(empty_ledger, path, as_of_date=date(2026, 10, 14))["overdue_count_int"] == 0  # day 3: pending
+    assert kb_link_report(empty_ledger, path, as_of_date=date(2026, 10, 15))["overdue_count_int"] == 1  # day 4: overdue

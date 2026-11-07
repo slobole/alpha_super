@@ -9,7 +9,7 @@
     <div class="notice-detail">No shadow report has been written.</div></div>
   {% else %}
   <p class="sc-legend"><i class="k-fwd"></i>Forward path <i class="k-mean"></i>Expected average <i class="k-band"></i>5% to 95% range.
-    The range uses every {{ horizon_int }}-session window of the backtest, compounded, with no resampling. The x axis counts sessions since the start.</p>
+    The range is pointwise over every {{ horizon_int }}-session window of the in-sample backtest, compounded, with no resampling: a guide, not a test, and a strategy picked from many tends to sit below it. The forward path is the append-only log (first-seen values); the table's return is today's rebuild. The x axis counts sessions since the start.</p>
   {% for s in shadow_row_list %}
   <section class="panel pad sc-shadow">
     <div class="sc-shead">

@@ -197,7 +197,7 @@ def _read_csv_rows(path_obj: Path) -> list[dict]:
     try:
         with path_obj.open("r", encoding="utf-8", newline="") as csv_file:
             return list(csv.DictReader(csv_file))
-    except OSError:
+    except (OSError, ValueError, csv.Error):  # unreadable or not UTF-8: the page shows no sessions, never a 500
         return []
 
 

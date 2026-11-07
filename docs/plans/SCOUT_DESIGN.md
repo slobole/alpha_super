@@ -1450,7 +1450,9 @@ Code: `alpha/scout/shadow.py` (`log_forward`), tests `tests/test_scout_shadow_lo
   (date, return, first recorded on). Logged rows are never rewritten. A logged session that the rebuild now computes
   more than 1e-9 away is written once per new value to `forward_revisions.csv` (logged and rebuilt values, date seen);
   the report shows logged sessions and revised sessions per shadow. Judging (CBI, CUSUM) still reads the rebuilt path:
-  the log is the record and the input for a forward-only view. The logs began 2026-11-07, so the sessions from each
+  the log is the record and the input for a forward-only view. A failing log (corrupt or locked file) is reported in
+  the row's log block and never replaces the shadow's status; missing returns are not logged; a duplicated logged date
+  keeps its first record. "First recorded" is the run's as-of date, so a manual run with a past date stamps that date. The logs began 2026-11-07, so the sessions from each
   start to 11-06 carry first-recorded 2026-11-07 (rebuilt, not seen on the day).
 - **Where the log lives:** under `results/`, which git does not track, like the expected series; the ledger keeps
   the hashes, the log is backed up with the workstation.
@@ -1460,7 +1462,10 @@ Code: `alpha/scout/shadow.py` (`log_forward`), tests `tests/test_scout_shadow_lo
   without adding a test. The selection risk sits in choosing the engines, and each engine's family DSR (S5) already
   carries it; that is what A23 corrected.
 - **The cards' DSR at today's family N.** Re-running only the S5 correlation-aware DSR of the saved re-audition bundles
-  with today's prior trials (scratch script, same seed; each reproduces its card's p at the card's N):
+  with today's prior trials (scratch script, seed 0, 20,000 draws; each reproduces its card's p at the card's N to Monte
+  Carlo error, since the prior-max draw below changed the random stream; "0.0000" means below the resolution floor,
+  about 5e-5). The table compares with the card's own N (50-1,000), so it is not the A23 step alone: for DV2 industry
+  ETF the A23 step was 1,996 → 12,534, but the card was issued at 50.
 
   | Pod | Family | N on card | N now | Live p on card | Live p now |
   |---|---|---:|---:|---:|---:|
@@ -1480,7 +1485,10 @@ Code: `alpha/scout/shadow.py` (`log_forward`), tests `tests/test_scout_shadow_lo
   the check counts every prior trial as an independent draw, the conservative fallback of `family_trial_summary`. In the
   large families most prior trials are near-copies (period re-reads, cost layers, neighbouring cells), so hundreds of
   thousands of "independent" trials overstate the null by a wide margin, and a p of 1.0 there says the fallback is
-  uninformative, not that the edge is gone. The DSR stays a WARN (P2: MCPT is the gate). What it does say: only the
+  uninformative, not that the edge is gone. For etf_short_term_reversal, 9,375 of the 12,534 are cells of one rule
+  (the Quantitativo QQQ band grid read five times), so DV2 industry ETF's 0.31 is mostly that artefact. A second-order
+  point for the same open item: the prior trials are given the pod's own sample length for their null spread. The DSR
+  stays a WARN (P2: MCPT is the gate). What it does say: only the
   small families (EOM, Compass) pass even under the harshest count; for the rest an honest DSR needs an effective N
   for the prior trials (stored trial series or a cluster estimate per study), which is open. Fix in the same pass:
   `null_selected_sharpe_draws` drew an N-wide normal matrix per draw and ran out of memory above about 10^4 prior

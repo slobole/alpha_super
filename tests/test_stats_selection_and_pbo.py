@@ -173,3 +173,20 @@ def test_mcpt_refuses_zero_filled_listings_when_the_mask_is_given():
     mask_mat[:100, 1] = False
     with pytest.raises(ValueError, match="mcpt_live_spans"):
         mcpt(lambda mat: 0.0, return_mat, permutation_count_int=3, random_seed_int=0, availability_mask_mat=mask_mat)
+
+
+def test_prior_trial_max_matches_brute_force_and_stays_finite_for_huge_n():
+    # A24: the max of N independent prior trials is drawn from its inverse CDF; it must match N explicit normals
+    from alpha.stats.psr_dsr import null_selected_sharpe_draws as draws_fn
+
+    observation_count_int, n_int = 401, 50
+    new_vec = draws_fn(np.eye(1) * 0 + 1, observation_count_int, prior_independent_trial_count_int=n_int,
+                       draw_count_int=40000, random_seed_int=3)
+    rng = np.random.default_rng(7)
+    scale_float = 1.0 / np.sqrt(observation_count_int - 1.0)
+    brute_vec = np.maximum(rng.standard_normal(40000), rng.standard_normal((40000, n_int)).max(axis=1)) * scale_float
+    assert abs(new_vec.mean() - brute_vec.mean()) < 0.01 * brute_vec.mean()
+    assert abs(np.quantile(new_vec, 0.95) - np.quantile(brute_vec, 0.95)) < 0.02 * np.quantile(brute_vec, 0.95)
+    mean_list = [draws_fn(np.eye(1), observation_count_int, prior_independent_trial_count_int=n,
+                          draw_count_int=5000, random_seed_int=0).mean() for n in (1, 10**4, 10**9)]
+    assert np.isfinite(mean_list).all() and mean_list[0] < mean_list[1] < mean_list[2]

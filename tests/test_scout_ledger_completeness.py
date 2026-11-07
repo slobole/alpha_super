@@ -101,10 +101,17 @@ def test_shadow_monitor_reports_a_broken_provider_and_keeps_the_others(ledger, t
     module.broken = broken
     monkeypatch.setitem(sys.modules, "fake_provider_module", module)
     monkeypatch.setattr(shadow_module, "SHADOW_PROVIDER_DICT", {"idea": "fake_provider_module:good", "other": "fake_provider_module:broken"})
-    out_path, report_list = run_shadow_monitor(ledger, output_dir_path=tmp_path / "out")
+    out_path, report_list = run_shadow_monitor(ledger, output_dir_path=tmp_path / "out", log_root_path=tmp_path / "logs")
     status_dict = {r["pod_id_str"]: r["status_str"] for r in report_list}
     assert status_dict["other"] == "ERROR" and status_dict["idea"] != "ERROR"
     assert "frozen configuration changed" in (out_path / "shadow.md").read_text(encoding="utf-8")
+    assert {r["pod_id_str"]: r.get("log", {}) for r in report_list}["idea"]["logged_sessions_int"] > 0
+
+    # A24: a corrupt forward log is reported in the row's log block and never turns the shadow's status into ERROR
+    (tmp_path / "logs" / "idea" / "forward_log.csv").write_text("date_str,return_float,first_recorded_str\nx,abc,y\n", encoding="utf-8")
+    _, report_list = run_shadow_monitor(ledger, output_dir_path=tmp_path / "out2", log_root_path=tmp_path / "logs")
+    idea_dict = {r["pod_id_str"]: r for r in report_list}["idea"]
+    assert idea_dict["status_str"] == status_dict["idea"] and "error_str" in idea_dict["log"]
 
 
 class _FakeFamily:

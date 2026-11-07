@@ -44,3 +44,13 @@ def test_a_rebuilt_session_that_differs_is_a_revision_and_the_log_keeps_the_firs
     third = log_forward("reg", _ser({"2026-11-03": -0.011}), date(2026, 11, 6), root_path=tmp_path)
     assert third["revised_today_int"] == 1 and third["revisions_total_int"] == 1  # still one revised session
     assert len(pd.read_csv(tmp_path / "reg" / REVISION_LOG_NAME_STR)) == 2
+
+
+def test_duplicate_logged_date_and_missing_returns_do_not_break_the_log(tmp_path):
+    log_forward("reg", _ser({"2026-11-02": 0.01}), date(2026, 11, 2), root_path=tmp_path)
+    log_path = tmp_path / "reg" / FORWARD_LOG_NAME_STR
+    with open(log_path, "a", encoding="utf-8") as log_file:  # a hand-made duplicate row
+        log_file.write("2026-11-02,0.03,2026-11-02\n")
+    result = log_forward("reg", _ser({"2026-11-02": 0.02, "2026-11-03": float("nan")}), date(2026, 11, 3), root_path=tmp_path)
+    # the first record wins and the changed value is one revision; the NaN session is not logged
+    assert result["revised_today_int"] == 1 and result["appended_int"] == 0
