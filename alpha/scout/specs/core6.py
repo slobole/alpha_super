@@ -12,9 +12,15 @@ In the overlay modes, when BIL is short of the BTC weight (all five sleeves long
 the book never levers.
 
 Signals (CORE5 LIVE_CONFIG, unchanged, alpha/scout/specs/core5.py): per asset, SMA10 > adaptive MA (drawdown-percentile
-speed between 50 and 200 sessions). BTC's signal close is the CoinMetrics PriceUSD stamp of session date D (end of the
-UTC day, after the 16:00 ET equity close); sigma60 = std of the last 60 of those returns x sqrt(252).
+speed between 50 and 200 sessions). BTC's signal close (signal_str):
+    "close" (LIVE_CONFIG, owner decision 2026-11-07) the traded unit's own 16:00 ET close: IBIT from 2024-01-11 with
+            vehicle "ibit", Binance 16:00 ET before that from 2017-08-17, the CoinMetrics stamp before 2017-08-17. Same
+            clock as the five ETFs and no extra live data source. Measured against "coinmetrics" (2026-11-07): the BTC
+            switch agrees on 99.7% of sessions since 2017-08, the same 34 flips, Sharpe 1.27 both, yearly gap <= 0.33 pts.
+    "coinmetrics" (the study) the CoinMetrics PriceUSD stamp of session date D (end of the UTC day, after 16:00 ET).
+sigma60 = std of the last 60 signal-close returns x sqrt(252).
 Rebalance: any long-state change (BTC included) or the last XNYS session of the month; fill at Open(T+1) (core5 rule).
+STUDY_CONFIG (vehicle "spot", signal "coinmetrics") reproduces the Pakal qualification run exactly.
 
 Execution: the Scout weights engine (parity mode) with adjusted fractional units, the default CostModel, the DBC short
 with split sign flips and the 1% borrow model. BTC pays an extra 12.5 bp on traded notional at the fill price (15 bp a
@@ -25,9 +31,9 @@ Data (local, read-only, no download): Pakal's cached BTC unit
     signal  CoinMetrics PriceUSD on the XNYS session grid;
     unit    Binance BTCUSDT 5m bars ending 09:30 ET (Open) and 16:00 ET (Close) from 2017-08-17; before that
             Open = Close = the CoinMetrics stamp of the session (a later, conservative fill);
-    vehicle "spot" (default) or "ibit": IBIT CAPITALSPECIAL Open/Close from 2024-01-11, level-spliced.
-*** CRITICAL*** weights for execution date t use closes <= t-1 only; the decision is taken after 00:00 UTC following the
-close of t-1 (when the BTC daily stamp exists) and fills at Open(t). Tests: tests/test_scout_core6.py.
+    vehicle "ibit" (LIVE_CONFIG) or "spot": IBIT CAPITALSPECIAL Open/Close from 2024-01-11, level-spliced.
+*** CRITICAL*** weights for execution date t use closes <= t-1 only; the decision is taken after the 16:00 ET close of
+t-1 ("close") or after 00:00 UTC following it ("coinmetrics") and fills at Open(t). Tests: tests/test_scout_core6.py.
 
 Research only: core5.py, the CORE5 strategy and every live path are untouched; this module is not wired to anything.
 """
@@ -58,7 +64,8 @@ class Core6Config:
     crypto_sleeve_fraction_float: float = 1.0 / 6.0
     crypto_vol_window_int: int = 60
     crypto_extra_slippage_float: float = 0.0015 - 0.00025
-    vehicle_str: str = "spot"
+    vehicle_str: str = "ibit"
+    signal_str: str = "close"
     backtest_start_date_str: str = "2011-08-01"
     capital_float: float = 1_000_000.0
 
@@ -71,21 +78,25 @@ class Core6Config:
             raise ValueError(f"mode_str must be one of {MODE_TUPLE}.")
         if self.vehicle_str not in ("spot", "ibit"):
             raise ValueError("vehicle_str must be 'spot' or 'ibit'.")
+        if self.signal_str not in ("close", "coinmetrics"):
+            raise ValueError("signal_str must be 'close' or 'coinmetrics'.")
 
 
 LIVE_CONFIG = Core6Config()
+STUDY_CONFIG = Core6Config(vehicle_str="spot", signal_str="coinmetrics")
 
 
 @dataclass(frozen=True)
 class Core6Inputs:
     core5_inputs: core5.Core5Inputs
-    crypto_signal_ser: pd.Series   # CoinMetrics end-of-day close on the core5 calendar
+    crypto_signal_ser: pd.Series   # BTC signal close on the core5 calendar (unit close or CoinMetrics stamp)
     open_df: pd.DataFrame          # core5 traded ETFs + BTC unit
     close_df: pd.DataFrame
     dividend_df: pd.DataFrame
 
 
-def load_inputs(vehicle_str: str = "spot", unit_path: Path = UNIT_PATH) -> Core6Inputs:
+def load_inputs(vehicle_str: str = LIVE_CONFIG.vehicle_str, signal_str: str = LIVE_CONFIG.signal_str,
+                unit_path: Path = UNIT_PATH) -> Core6Inputs:
     base = core5.load_inputs()
     unit_df = pd.read_parquet(unit_path)
     date_index = base.open_df.index
@@ -100,6 +111,8 @@ def load_inputs(vehicle_str: str = "spot", unit_path: Path = UNIT_PATH) -> Core6
         level_float = float(close_ser.loc[:IBIT_LISTING_TS].dropna().iloc[-1] / ibit_df["Close"].loc[IBIT_LISTING_TS])
         open_ser = open_ser.where(date_index < IBIT_LISTING_TS, ibit_df["Open"].reindex(date_index) * level_float)
         close_ser = close_ser.where(date_index < IBIT_LISTING_TS, ibit_df["Close"].reindex(date_index) * level_float)
+    if signal_str == "close":
+        signal_ser = close_ser  # the traded unit's own 16:00 ET close, same clock as the five ETFs
     column_list = list(TRADED_TUPLE)
     return Core6Inputs(
         core5_inputs=base, crypto_signal_ser=signal_ser,
@@ -174,11 +187,12 @@ def simulate_config(inputs: Core6Inputs, config: Core6Config = LIVE_CONFIG) -> t
 
 
 def daily_return_ser(config: Core6Config = LIVE_CONFIG) -> pd.Series:
-    return simulate_config(load_inputs(config.vehicle_str), config)[0]
+    return simulate_config(load_inputs(config.vehicle_str, config.signal_str), config)[0]
 
 
 def shadow_daily_return_ser(shadow_row_dict: dict) -> pd.Series:
-    """S8 provider for a future forward shadow: the frozen configuration on the newest cached data. The BTC unit cache
-    must be refreshed (core6_qualification/c6q_data.py) before each read; ETF data is not panel-sealed."""
+    """S8 provider for a future forward shadow: the frozen configuration on the newest data. With the live IBIT vehicle and
+    signal, new days come from Norgate IBIT and need no BTC unit cache refresh; the "spot"/"coinmetrics" options still
+    need core6_qualification/c6q_data.py rerun before each read. ETF data is not panel-sealed."""
     config = Core6Config(**shadow_row_dict.get("frozen_config_dict", {}))
     return daily_return_ser(config).loc[shadow_row_dict["start_date_str"]:]
