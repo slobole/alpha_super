@@ -505,6 +505,8 @@ def create_app(
     register_routes(flask_app_obj, _csrf_failure_response_fn)
     from alpha.bench.engine_map.pages import register_routes as register_map_routes
     register_map_routes(flask_app_obj, _csrf_failure_response_fn)
+    from alpha.bench.scout_pages import register_routes as register_scout_routes
+    register_scout_routes(flask_app_obj)
 
     @flask_app_obj.route("/portfolios")
     def portfolios_page_fn() -> str:

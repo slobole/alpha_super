@@ -265,3 +265,10 @@ add a colour to the signature palette, never to the stylesheet.
 
 For the complete Capacity workflow and report-reading guide, see
 [`docs/research/CAPACITY_ANALYSIS_GUIDE.md`](../../docs/research/CAPACITY_ANALYSIS_GUIDE.md).
+
+## Scout pages
+
+`/scout` (overview), `/scout/shadows`, `/scout/ledger` and `/scout/families` are read-only
+views of what the Scout jobs wrote under `results/scout` and `research_ledger`. They never
+write, and a missing file shows "no data yet". Code: `alpha/bench/scout_pages.py`; the
+data roots are module-level constants there.

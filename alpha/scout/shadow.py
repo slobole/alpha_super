@@ -151,6 +151,53 @@ def shadow_report(row_dict: dict, realized_daily_ser: pd.Series, as_of_date: dat
     return report_dict
 
 
+FORWARD_LOG_NAME_STR = "forward_log.csv"
+REVISION_LOG_NAME_STR = "forward_revisions.csv"
+REVISION_TOLERANCE_FLOAT = 1e-9
+
+
+def log_forward(registration_id_str: str, forward_ser: pd.Series, as_of_date: date,
+                root_path: Path | None = None) -> dict:
+    """Append each new forward session to an append-only log, and record any logged session the rebuild now computes
+    differently (A24).
+
+    The monitor rebuilds the whole forward path from the frozen spec on the newest data every day, so a data revision
+    (a Norgate correction, a late corporate action) would change past shadow days without a trace. The log keeps what
+    was known on the day each session was first computed: rows are never rewritten. A session whose rebuilt return
+    differs by more than REVISION_TOLERANCE_FLOAT is written to the revision log with both values. Judging (CBI, CUSUM)
+    still reads the rebuilt path; the log is the record and the input for any later forward-only view.
+    """
+    folder_path = Path(root_path or SHADOW_ROOT_PATH) / registration_id_str
+    folder_path.mkdir(parents=True, exist_ok=True)
+    log_path, revision_path = folder_path / FORWARD_LOG_NAME_STR, folder_path / REVISION_LOG_NAME_STR
+    as_of_str = as_of_date.isoformat()
+    new_ser = pd.Series(forward_ser.to_numpy(dtype=float), index=pd.DatetimeIndex(forward_ser.index).strftime("%Y-%m-%d"))
+    logged_df = pd.read_csv(log_path, dtype={"date_str": str}) if log_path.exists() else pd.DataFrame(
+        columns=["date_str", "return_float", "first_recorded_str"])
+    logged_ser = pd.Series(logged_df["return_float"].to_numpy(dtype=float), index=logged_df["date_str"].astype(str))
+    common_index = new_ser.index.intersection(logged_ser.index)
+    diff_ser = (new_ser.loc[common_index] - logged_ser.loc[common_index]).abs()
+    revised_index = diff_ser.index[diff_ser > REVISION_TOLERANCE_FLOAT]
+    seen_df = pd.read_csv(revision_path, dtype={"date_str": str}) if revision_path.exists() else pd.DataFrame(
+        columns=["date_str", "logged_return_float", "rebuilt_return_float", "seen_on_str"])
+    last_rebuilt_dict = seen_df.groupby("date_str")["rebuilt_return_float"].last().to_dict() if len(seen_df) else {}
+    # a revision is written when the rebuilt value is new for that session, not again on every later day
+    new_revised_list = [d for d in revised_index if d not in last_rebuilt_dict
+                        or abs(new_ser.loc[d] - float(last_rebuilt_dict[d])) > REVISION_TOLERANCE_FLOAT]
+    if new_revised_list:
+        revision_df = pd.DataFrame({"date_str": new_revised_list, "logged_return_float": logged_ser.loc[new_revised_list].to_numpy(),
+                                    "rebuilt_return_float": new_ser.loc[new_revised_list].to_numpy(), "seen_on_str": as_of_str})
+        revision_df.to_csv(revision_path, mode="a", header=not revision_path.exists(), index=False)
+        seen_df = pd.concat([seen_df, revision_df], ignore_index=True) if len(seen_df) else revision_df
+    missing_ser = new_ser.loc[new_ser.index.difference(logged_ser.index)].sort_index()
+    if len(missing_ser):
+        pd.DataFrame({"date_str": missing_ser.index, "return_float": missing_ser.to_numpy(),
+                      "first_recorded_str": as_of_str}).to_csv(log_path, mode="a", header=not log_path.exists(), index=False)
+    return {"logged_sessions_int": int(len(logged_ser) + len(missing_ser)), "appended_int": int(len(missing_ser)),
+            "revised_today_int": len(new_revised_list), "revisions_total_int": int(seen_df["date_str"].nunique()),
+            "log_path_str": str(log_path)}
+
+
 def provider_for(registration_id_str: str):
     module_str, function_str = SHADOW_PROVIDER_DICT[registration_id_str].split(":")
     return getattr(importlib.import_module(module_str), function_str)
@@ -160,31 +207,38 @@ def render_markdown(report_list: list[dict], as_of_str: str) -> str:
     line_list = [f"# Scout shadows (S8), {as_of_str}", "",
                  "Simulated forward tracking from each registration onward. RED = the calibrated Cold Blood Index or the "
                  "monthly CUSUM alarmed; retiring stays the owner's decision.", "",
-                 "| Registration | Start | Status | Forward months | MinTRL months | Expected Sharpe | Cumulative | CBI now |",
-                 "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |"]
+                 "Logged = sessions in the append-only forward log; Revised = logged sessions the rebuild later computed "
+                 "differently (a data revision), kept in forward_revisions.csv.", "",
+                 "| Registration | Start | Status | Forward months | MinTRL months | Expected Sharpe | Cumulative | CBI now | Logged | Revised |",
+                 "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
     for report_dict in report_list:
-        shadow_dict, live_dict = report_dict["shadow"], report_dict.get("live") or {}
+        shadow_dict, live_dict, log_dict = report_dict["shadow"], report_dict.get("live") or {}, report_dict.get("log") or {}
         min_trl = shadow_dict["min_trl_months_float"]
         line_list.append(
             f"| {report_dict['pod_id_str']} | {shadow_dict['start_date_str']} | {report_dict['status_str']} | "
             f"{shadow_dict['forward_months_float']:.1f} | {('%.0f' % min_trl) if min_trl else 'n/a'} | "
             f"{shadow_dict['expected_annual_sharpe_float']:.2f} | "
             f"{('%+.2f%%' % (100 * live_dict['cumulative_return_float'])) if live_dict else 'n/a'} | "
-            f"{('%.3f' % live_dict['current_cbi_float']) if live_dict.get('current_cbi_float') is not None else 'n/a'} |")
+            f"{('%.3f' % live_dict['current_cbi_float']) if live_dict.get('current_cbi_float') is not None else 'n/a'} | "
+            f"{log_dict.get('logged_sessions_int', 'n/a')} | {log_dict.get('revisions_total_int', 'n/a')} |")
     error_list = [r for r in report_list if r.get("error_str")]
     if error_list:
         line_list += ["", "## Errors", ""] + [f"- {r['pod_id_str']}: {r['error_str']}" for r in error_list]
     return "\n".join(line_list) + "\n"
 
 
-def run_shadow_monitor(ledger: Ledger | None = None, as_of_date: date | None = None, output_dir_path: Path | None = None) -> tuple[Path, list[dict]]:
+def run_shadow_monitor(ledger: Ledger | None = None, as_of_date: date | None = None, output_dir_path: Path | None = None,
+                       log_root_path: Path | None = None) -> tuple[Path, list[dict]]:
     ledger = ledger or Ledger()
     as_of_date = as_of_date or date.today()
     report_list = []
     for registration_id_str, row_dict in shadow_rows(ledger).items():
         try:
             realized_ser = provider_for(registration_id_str)(row_dict)
-            report_list.append(shadow_report(row_dict, realized_ser, as_of_date))
+            report_dict = shadow_report(row_dict, realized_ser, as_of_date)
+            forward_ser = realized_ser.loc[row_dict["start_date_str"]:].dropna()
+            report_dict["log"] = log_forward(registration_id_str, forward_ser, as_of_date, root_path=log_root_path)
+            report_list.append(report_dict)
         except Exception as error:  # one broken provider must not hide the other shadows; the row says ERROR
             report_list.append({
                 "pod_id_str": registration_id_str, "status_str": "ERROR", "error_str": f"{type(error).__name__}: {error}",

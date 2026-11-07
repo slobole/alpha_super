@@ -1,0 +1,47 @@
+/* Scout pages. Scoped under .scout; colours are Bench tokens. */
+.scout .sc-tabs { display: flex; gap: 18px; margin-top: 10px; border-bottom: 1px solid var(--color-border); }
+.scout .sc-tabs a { padding: 6px 0; color: var(--color-muted); text-decoration: none; border-bottom: 2px solid transparent; }
+.scout .sc-tabs a.active, .scout .sc-tabs a:hover { color: var(--color-ink); border-bottom-color: var(--color-ink); }
+.scout .sc-h2 { font-size: 0.95rem; margin: 22px 0 8px; }
+.scout .sc-asof, .scout .sc-note, .scout .sc-legend, .scout .sc-empty { color: var(--color-muted); font-size: 13px; margin: 10px 0; }
+.scout .sc-table { width: 100%; border-collapse: collapse; }
+.scout .sc-table th, .scout .sc-table td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--color-grid); vertical-align: middle; }
+.scout .sc-table thead th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--color-muted); font-weight: 600; }
+.scout .sc-table tbody th { font-weight: 600; }
+.scout .sc-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.scout .sc-line { color: var(--color-muted); }
+.scout .sc-pill { display: inline-block; padding: 1px 8px; border: 1px solid currentColor; border-radius: 3px; font-size: 12px; font-weight: 600; margin-left: 4px; }
+.scout .sc-green { color: var(--color-profit); }
+.scout .sc-amber { color: var(--color-warning-dark); }
+.scout .sc-red { color: var(--color-loss); }
+.scout .sc-grey { color: var(--color-muted); }
+.scout .sc-bar { display: inline-block; width: 120px; height: 6px; background: var(--color-grid); border-radius: 3px; vertical-align: middle; margin-right: 8px; overflow: hidden; }
+.scout .sc-bar i { display: block; height: 100%; background: var(--color-accent, var(--color-ink)); }
+.scout .sc-shadow { margin-bottom: 14px; }
+.scout .sc-shead { display: flex; align-items: center; gap: 10px; }
+.scout .sc-shead h2 { font-size: 0.95rem; margin: 0; font-family: var(--font-code); }
+.scout .sc-stats { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 10px 0; }
+.scout .sc-stats span { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--color-muted); }
+.scout .sc-stats b { font-variant-numeric: tabular-nums; }
+.scout .sc-chart { width: 100%; max-width: 760px; height: auto; display: block; }
+.scout .sc-grid { stroke: var(--color-grid); stroke-width: 1; }
+.scout .sc-zero { stroke: var(--color-muted); stroke-width: 1; stroke-dasharray: 3 3; }
+.scout .sc-tick { fill: var(--color-muted); font-size: 10px; }
+.scout .sc-band { fill: var(--color-ink); fill-opacity: .08; stroke: none; }
+.scout .sc-mean { fill: none; stroke: var(--color-muted); stroke-width: 1.5; stroke-dasharray: 5 3; }
+.scout .sc-fwd { fill: none; stroke: var(--color-ink); stroke-width: 2.2; }
+.scout .sc-dot { fill: var(--color-ink); }
+.scout .sc-legend i { display: inline-block; width: 18px; height: 0; border-top: 2px solid var(--color-ink); vertical-align: middle; margin: 0 4px 0 12px; }
+.scout .sc-legend i.k-mean { border-top: 2px dashed var(--color-muted); }
+.scout .sc-legend i.k-band { height: 8px; border: 0; background: color-mix(in srgb, var(--color-ink) 12%, transparent); }
+.scout .sc-filters { display: flex; gap: 18px; align-items: center; margin: 12px 0; }
+.scout .sc-filters select { margin-left: 6px; }
+.scout .sc-count { color: var(--color-muted); font-size: 13px; }
+.scout .sc-grade { font-weight: 600; }
+.scout .sc-g-candidate { color: var(--color-profit); }
+.scout .sc-g-watchlist { color: var(--color-warning-dark); }
+.scout .sc-g-rejected { color: var(--color-loss); }
+.scout .sc-g-diagnostic, .scout .sc-g-not_tested, .scout .sc-g-ungraded { color: var(--color-muted); }
+/* wide tables scroll inside their panel instead of widening the page */
+.scout .panel { overflow-x: auto; }
+.scout .sc-table td.sc-desc { min-width: 260px; max-width: 420px; }

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Scout families{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='scout.css') }}">{% endblock %}
+{% block content %}
+<div class="scout">
+  {% include "_scout_head.html" %}
+  {% if not row_list %}
+  <div class="notice notice-info"><div class="notice-title">No data yet.</div>
+    <div class="notice-detail">No families or registrations were found.</div></div>
+  {% else %}
+  <section class="panel pad">
+    <table class="sc-table">
+      <thead><tr><th>Family</th><th>What it is</th><th class="num">Registrations</th><th class="num">Prior trials</th>
+        {% for g in grade_column_list %}<th class="num">{{ g|replace('_', ' ')|title }}</th>{% endfor %}
+        <th class="num">Discoveries</th></tr></thead>
+      <tbody>
+      {% for f in row_list %}
+        <tr><th scope="row" class="mono">{{ f.id_str }}</th><td class="sc-line sc-desc">{{ f.description_str or '–' }}</td>
+          <td class="num">{{ f.registrations_int }}</td><td class="num">{{ f.trials_int }}</td>
+          {% for g in grade_column_list %}<td class="num">{{ f.grade_dict.get(g, 0) or '' }}</td>{% endfor %}
+          <td class="num">{{ f.discoveries_int if has_fdr_bool else '–' }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="sc-note">Discoveries are registrations that pass the false discovery test (Benjamini-Yekutieli) in the latest report{% if not has_fdr_bool %}; there is no report yet{% endif %}.</p>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}

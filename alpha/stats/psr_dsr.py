@@ -191,7 +191,11 @@ def null_selected_sharpe_draws(
     else:
         selected_vec = draw_mat[np.arange(draw_count_int), select_index_fn(draw_mat)]
     if prior_independent_trial_count_int > 0:
-        prior_max_vec = rng_obj.standard_normal((draw_count_int, prior_independent_trial_count_int)).max(axis=1) * scale_float
+        # The max of N independent standard normals, drawn exactly by its inverse CDF: P(max <= x) = Phi(x)^N, so
+        # max = Phi^-1(U^(1/N)), written as isf(-expm1(log(U) / N)) to keep precision near 1. Same distribution as
+        # drawing N normals per row, without an N-wide matrix (families now hold 10^4-10^6 prior trials, A24).
+        uniform_vec = rng_obj.random(draw_count_int)
+        prior_max_vec = stats.norm.isf(-np.expm1(np.log(uniform_vec) / prior_independent_trial_count_int)) * scale_float
         selected_vec = np.maximum(selected_vec, prior_max_vec)
     return selected_vec
 

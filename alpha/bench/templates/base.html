@@ -27,6 +27,9 @@
         <a href="{{ url_for('map_page_fn') }}" class="{{ 'active' if active_nav == 'map' }}">
           <span class="sidebar-icon">{% include "_icon_map.svg" %}</span><span>Map</span>
         </a>
+        <a href="{{ url_for('scout.scout_overview_fn') }}" class="{{ 'active' if active_nav == 'scout' }}">
+          <span class="sidebar-icon">{% include "_icon_scout.svg" %}</span><span>Scout</span>
+        </a>
         <a href="{{ url_for('compare_page_fn') }}" class="{{ 'active' if active_nav == 'compare' }}">
           <span class="sidebar-icon">{% include "_icon_compare.svg" %}</span><span>Compare</span>
         </a>

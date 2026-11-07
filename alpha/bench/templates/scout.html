@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Scout{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='scout.css') }}">{% endblock %}
+{% block content %}
+<div class="scout">
+  {% include "_scout_head.html" %}
+  {% if not has_data_bool %}
+  <div class="notice notice-info"><div class="notice-title">No data yet.</div>
+    <div class="notice-detail">The daily Scout run has not written a status file.</div></div>
+  {% else %}
+  <p class="sc-asof">Daily run for {{ as_of_str }}, written {{ written_str }} UTC.
+    <span class="sc-pill sc-{{ 'green' if overall_ok_bool else 'red' }}">{{ 'All parts ran' if overall_ok_bool else 'A part failed' }}</span></p>
+  <section class="panel pad" aria-label="Daily parts">
+    <table class="sc-table">
+      <tbody>
+      {% for row in status_row_list %}
+        <tr><th scope="row">{{ row.name_str }}</th>
+            <td><span class="sc-pill sc-{{ row.state_str }}">{{ row.word_str }}</span></td>
+            <td class="sc-line">{{ row.line_str }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% endif %}
+
+  <h2 class="sc-h2">Live pods against their backtest</h2>
+  {% if pod_row_list %}
+  <section class="panel pad">
+    <table class="sc-table">
+      <thead><tr><th>Pod</th><th>Status</th><th>Data through</th><th class="num">Return since start</th><th class="num">Drawdown</th><th class="num">Sessions</th></tr></thead>
+      <tbody>
+      {% for pod in pod_row_list %}
+        <tr><th scope="row">{{ pod.label_str }}</th>
+          <td><span class="sc-pill sc-{{ pod.state_str }}">{{ pod.status_str }}</span></td>
+          <td>{{ pod.through_str }}
+            {% if pod.stale_bool %}<span class="sc-pill sc-amber">STALE{% if pod.behind_int %}, {{ pod.behind_int }} sessions behind{% endif %}</span>{% endif %}</td>
+          <td class="num">{{ pod.return_str }}</td><td class="num">{{ pod.drawdown_str }}</td><td class="num">{{ pod.sessions_int if pod.sessions_int is not none else '–' }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% else %}<p class="sc-empty">No pod health data yet.</p>{% endif %}
+
+  <h2 class="sc-h2">Shadows</h2>
+  {% if shadow_row_list %}
+  <section class="panel pad">
+    <table class="sc-table">
+      <thead><tr><th>Shadow</th><th>Status</th><th>Forward months, of the months needed</th><th class="num">Return</th></tr></thead>
+      <tbody>
+      {% for s in shadow_row_list %}
+        <tr><th scope="row">{{ s.id_str }}</th>
+          <td><span class="sc-pill sc-{{ s.state_str }}">{{ s.status_str }}</span></td>
+          <td><div class="sc-bar" title="{{ s.progress_pct_int }} percent"><i style="width: {{ s.progress_pct_int }}%"></i></div>
+              {{ s.months_str }} of {{ s.trl_str }}</td>
+          <td class="num">{{ s.return_str }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="sc-note"><a href="{{ url_for('scout.scout_shadows_fn') }}">Charts on the Shadows page</a></p>
+  </section>
+  {% else %}<p class="sc-empty">No shadow reports yet.</p>{% endif %}
+</div>
+{% endblock %}

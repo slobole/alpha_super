@@ -1440,6 +1440,52 @@ the `kb` part of `alpha/scout/daily.py`, three families in `alpha/scout/families
   with the square root of log N, so the bar rises about 11% for etf_short_term_reversal (the DV2 industry-ETF family)
   and about 1% for calendar_and_flow. Cards are not re-issued by this amendment.
 
+**A24 (2026-11-07, the shadow forward log; book-level DSR not built).**
+Code: `alpha/scout/shadow.py` (`log_forward`), tests `tests/test_scout_shadow_log.py`.
+
+- **Gap:** the S8 monitor rebuilt every shadow's forward path from the frozen spec on the newest data and kept only a
+  summary. A data revision (Norgate correction, late corporate action) would change past shadow days with no trace, and
+  no record existed of what was known on each day.
+- **Fix:** each run appends the sessions not yet logged to `results/scout/shadow/<registration>/forward_log.csv`
+  (date, return, first recorded on). Logged rows are never rewritten. A logged session that the rebuild now computes
+  more than 1e-9 away is written once per new value to `forward_revisions.csv` (logged and rebuilt values, date seen);
+  the report shows logged sessions and revised sessions per shadow. Judging (CBI, CUSUM) still reads the rebuilt path:
+  the log is the record and the input for a forward-only view. The logs began 2026-11-07, so the sessions from each
+  start to 11-06 carry first-recorded 2026-11-07 (rebuilt, not seen on the day).
+- **Where the log lives:** under `results/`, which git does not track, like the expected series; the ledger keeps
+  the hashes, the log is backed up with the workstation.
+- **Book-level DSR: not built.** The 2026-11-05 fund-ladder robustness pass already computed the DSR of each book against
+  its weight grid: 1.0 everywhere, because the grid's books are blends of the same engines, so their Sharpe dispersion
+  is tiny and the expected maximum under the null is close to the plain Sharpe. A ledger family of books would add rows
+  without adding a test. The selection risk sits in choosing the engines, and each engine's family DSR (S5) already
+  carries it; that is what A23 corrected.
+- **The cards' DSR at today's family N.** Re-running only the S5 correlation-aware DSR of the saved re-audition bundles
+  with today's prior trials (scratch script, same seed; each reproduces its card's p at the card's N):
+
+  | Pod | Family | N on card | N now | Live p on card | Live p now |
+  |---|---|---:|---:|---:|---:|
+  | EOM | calendar_and_flow | 50 | 3,295 | 0.0000 | 0.0005 |
+  | EOM flow rules | calendar_and_flow | 1,000 | 3,295 | 0.0000 | 0.0000 |
+  | Compass QQQ | macro_regime_allocation | 826 | 1,822 | 0.0004 | 0.0005 |
+  | DV2 industry ETF | etf_short_term_reversal | 50 | 12,534 | 0.0017 | 0.31 |
+  | Sector IBS VOX IYR | etf_short_term_reversal | 50 | 12,534 | 0.0074 | 0.81 |
+  | TAA 3x | tactical_asset_allocation | 103 | 27,989 | 0.0078 | 0.89 |
+  | TAA 3x 1/N | tactical_asset_allocation | 103 | 27,989 | 0.026 | 1.00 |
+  | HPI vote | us_equity_short_term_reversal | 100 | 754,441 | 0.0001 | 0.76 |
+  | CORE5 | time_series_trend_and_breakout | 50 | 182,315 | 0.0012 | 0.97 |
+  | DV2 S&P 500 | us_equity_short_term_reversal | 200 | 754,441 | 0.0042 | 1.00 |
+  | NDX NATR20 | equity_cross_sectional_momentum | 150 | 658,670 | 0.0075 | 1.00 |
+
+  The cards were issued (2026-10-02) before the retro registrations of A19-A23 grew the families. **Read with care:**
+  the check counts every prior trial as an independent draw, the conservative fallback of `family_trial_summary`. In the
+  large families most prior trials are near-copies (period re-reads, cost layers, neighbouring cells), so hundreds of
+  thousands of "independent" trials overstate the null by a wide margin, and a p of 1.0 there says the fallback is
+  uninformative, not that the edge is gone. The DSR stays a WARN (P2: MCPT is the gate). What it does say: only the
+  small families (EOM, Compass) pass even under the harshest count; for the rest an honest DSR needs an effective N
+  for the prior trials (stored trial series or a cluster estimate per study), which is open. Fix in the same pass:
+  `null_selected_sharpe_draws` drew an N-wide normal matrix per draw and ran out of memory above about 10^4 prior
+  trials; it now draws the maximum exactly from its inverse CDF.
+
 **Not adopted from the critique.** One correction: the critique said the kill rule closes gap G-006.
 It does not. G-006's missing circuit breaker is about **repeated reconciliation failures**, not about
 performance. A performance kill rule is a separate, currently unrecorded gap, and P1 should add it to

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Scout ledger{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='scout.css') }}">{% endblock %}
+{% block content %}
+<div class="scout">
+  {% include "_scout_head.html" %}
+  {% if not row_list %}
+  <div class="notice notice-info"><div class="notice-title">No data yet.</div>
+    <div class="notice-detail">The ledger has no registrations.</div></div>
+  {% else %}
+  <div class="sc-filters">
+    <label>Family <select id="f-family"><option value="">All</option>{% for f in family_list %}<option>{{ f }}</option>{% endfor %}</select></label>
+    <label>Grade <select id="f-grade"><option value="">All</option>{% for g in grade_list %}<option>{{ g }}</option>{% endfor %}</select></label>
+    <span class="sc-count" id="f-count">{{ row_list|length }} registrations</span>
+  </div>
+  <section class="panel pad">
+    <table class="sc-table" id="ledger-table">
+      <thead><tr><th>Registration</th><th>Family</th><th>Grade</th><th class="num">Prior trials</th><th>Retro</th><th>Date</th><th>Card</th></tr></thead>
+      <tbody>
+      {% for r in row_list %}
+        <tr data-family="{{ r.family_str }}" data-grade="{{ r.grade_str }}">
+          <th scope="row" class="mono">{{ r.id_str }}</th><td>{{ r.family_str }}</td>
+          <td><span class="sc-grade sc-g-{{ r.grade_str|lower }}" title="{{ r.grade_detail_str }}">{{ r.grade_str|replace('_', ' ')|title }}</span></td>
+          <td class="num">{{ r.trials_int }}</td><td>{{ 'Yes' if r.retro_bool else 'No' }}</td><td>{{ r.date_str }}</td>
+          <td>{% if r.card_url_str %}<a href="{{ r.card_url_str }}" target="_blank" rel="noopener">Card</a>{% endif %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  <script src="{{ url_for('static', filename='scout.js') }}" defer></script>
+  {% endif %}
+</div>
+{% endblock %}

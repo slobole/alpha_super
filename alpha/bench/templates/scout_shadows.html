@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Scout shadows{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='scout.css') }}">{% endblock %}
+{% block content %}
+<div class="scout">
+  {% include "_scout_head.html" %}
+  {% if not shadow_row_list %}
+  <div class="notice notice-info"><div class="notice-title">No data yet.</div>
+    <div class="notice-detail">No shadow report has been written.</div></div>
+  {% else %}
+  <p class="sc-legend"><i class="k-fwd"></i>Forward path <i class="k-mean"></i>Expected average <i class="k-band"></i>5% to 95% range.
+    The range uses every {{ horizon_int }}-session window of the backtest, compounded, with no resampling. The x axis counts sessions since the start.</p>
+  {% for s in shadow_row_list %}
+  <section class="panel pad sc-shadow">
+    <div class="sc-shead">
+      <h2>{{ s.id_str }}</h2>
+      <span class="sc-pill sc-{{ s.state_str }}">{{ s.status_str }}</span>
+    </div>
+    <div class="sc-stats">
+      <div><span>Forward months</span><b>{{ s.months_str }} of {{ s.trl_str }}</b>
+        <div class="sc-bar" title="{{ s.progress_pct_int }} percent"><i style="width: {{ s.progress_pct_int }}%"></i></div></div>
+      <div><span>Expected Sharpe</span><b>{{ s.sharpe_str }}</b></div>
+      <div><span>Return since start</span><b>{{ s.return_str }}</b></div>
+      <div><span>Sessions</span><b>{{ s.sessions_int }}</b></div>
+      <div><span>Data revisions</span><b>{{ s.revision_int }}</b></div>
+    </div>
+    {% if s.chart %}{{ s.chart }}{% endif %}
+    {% if s.chart_note_str %}<p class="sc-note">{{ s.chart_note_str }}</p>{% endif %}
+  </section>
+  {% endfor %}
+  {% endif %}
+</div>
+{% endblock %}
