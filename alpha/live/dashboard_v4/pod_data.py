@@ -34,7 +34,7 @@ CHILD_FIELD_DICT = {
     "vplan_broker_order": ("broker_order_record_id_int", "broker_order_id_str", "decision_plan_id_int", "vplan_id_int", "account_route_str", "asset_str", "broker_order_type_str", "unit_str", "amount_float", "filled_amount_float", "remaining_amount_float", "avg_fill_price_float", "status_str", "last_status_timestamp_str", "submitted_timestamp_str", "submission_key_str", "order_request_key_str"),
     "vplan_broker_ack": ("broker_order_ack_id_int", "decision_plan_id_int", "vplan_id_int", "account_route_str", "order_request_key_str", "asset_str", "broker_order_type_str", "local_submit_ack_bool", "broker_response_ack_bool", "ack_status_str", "ack_source_str", "broker_order_id_str", "response_timestamp_str"),
     "vplan_fill": ("fill_record_id_int", "broker_order_id_str", "decision_plan_id_int", "vplan_id_int", "account_route_str", "asset_str", "fill_amount_float", "fill_price_float", "official_open_price_float", "open_price_source_str", "fill_timestamp_str"),
-    "vplan_broker_order_event": ("broker_order_event_id_int", "broker_order_id_str", "decision_plan_id_int", "vplan_id_int", "account_route_str", "asset_str", "status_str", "filled_amount_float", "remaining_amount_float", "avg_fill_price_float", "event_timestamp_str", "event_source_str", "submission_key_str", "order_request_key_str"),
+    "vplan_broker_order_event": ("broker_order_event_id_int", "broker_order_id_str", "decision_plan_id_int", "vplan_id_int", "account_route_str", "asset_str", "status_str", "filled_amount_float", "remaining_amount_float", "avg_fill_price_float", "event_timestamp_str", "event_source_str", "submission_key_str", "order_request_key_str", "message_str"),
 }
 
 

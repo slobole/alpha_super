@@ -18,6 +18,7 @@ import uuid
 
 from alpha.data import FredSeriesLoadError
 from alpha.live import ndx_e2_adapter, reference_compare, scheduler_utils, strategy_host
+from alpha.live import auto_complete
 from alpha.live.beyond6040_adapter import BEYOND6040_STRATEGY_IMPORT_STR, require_beyond6040_position_match, validate_beyond6040_release
 from alpha.live.core5_adapter import (
     CORE5_STRATEGY_IMPORT_STR, require_core5_position_match,
@@ -1394,7 +1395,11 @@ def _build_latest_broker_order_row_by_asset_map_dict(
                 or existing_broker_order_row_dict.get("submitted_timestamp_str")
                 or ""
             )
-        if existing_broker_order_row_dict is None or candidate_timestamp_str >= existing_timestamp_str:
+        candidate_recovery_bool = ":auto-complete:" in str(broker_order_row_dict.get("order_request_key_str") or "")
+        existing_recovery_bool = existing_broker_order_row_dict is not None and ":auto-complete:" in str(
+            existing_broker_order_row_dict.get("order_request_key_str") or "")
+        if (existing_broker_order_row_dict is None or candidate_recovery_bool and not existing_recovery_bool
+                or candidate_recovery_bool == existing_recovery_bool and candidate_timestamp_str >= existing_timestamp_str):
             latest_broker_order_row_by_asset_map_dict[asset_str] = broker_order_row_dict
     return latest_broker_order_row_by_asset_map_dict
 
@@ -1709,6 +1714,21 @@ def _build_terminal_unresolved_row_dict_list(
             continue
         terminal_unresolved_row_dict_list.append(execution_row_dict)
     return terminal_unresolved_row_dict_list
+
+
+def is_vplan_execution_exception_parked_with_auto(state_store_obj, vplan_obj, *, as_of_ts):
+    if auto_complete.active_auto_completion_bool(state_store_obj, vplan_obj, as_of_ts):
+        return False
+    with state_store_obj._connect() as connection_obj:
+        attempt_list = auto_complete.load_attempt_row_list(connection_obj, vplan_obj.vplan_id_int)
+    if attempt_list:
+        snapshot_obj = state_store_obj.get_latest_broker_snapshot_for_account(vplan_obj.account_route_str)
+        position_dict = vplan_obj.current_broker_position_map if snapshot_obj is None else snapshot_obj.position_amount_map
+        if any(row_dict["ended_timestamp_str"]
+                and abs(float(vplan_obj.target_share_map.get(row_dict["asset_str"], 0))
+                    - float(position_dict.get(row_dict["asset_str"], 0))) > 1e-9 for row_dict in attempt_list):
+            return True
+    return is_vplan_execution_exception_parked(state_store_obj, vplan_obj)
 
 
 def is_vplan_execution_exception_parked(
@@ -3602,6 +3622,9 @@ def submit_ready_vplans(
                 else SubmitBatchResult(submit_ack_status_str="complete", ack_coverage_ratio_float=1.0))
         except Exception as exception_obj:
             if not guarded_dispatch_bool:
+                cross_result_obj = getattr(exception_obj, "cross_cancel_result_obj", None)
+                if cross_result_obj is not None:
+                    auto_complete._persist_result(state_store_obj, vplan_obj, cross_result_obj)
                 raise
             reason_str = record_dispatch_failure(state_store_obj, release_obj, vplan_obj,
                 broker_order_request_list, exception_obj, as_of_ts, before_send_bool=not send_started_bool,
@@ -4049,6 +4072,10 @@ def _persist_daily_execution_report(state_store_obj, broker_adapter_obj, release
                 completion_request_list.append(BrokerOrderRequest(**json.loads(row_obj[1])))
             except (TypeError, ValueError):
                 continue
+        for attempt_dict in auto_complete.load_attempt_row_list(connection_obj, vplan_obj.vplan_id_int):
+            if attempt_dict["request_json_str"]:
+                completion_request_list.append(BrokerOrderRequest(**json.loads(attempt_dict["request_json_str"])))
+                completion_ref_set.add(attempt_dict["order_request_key_str"])
         legacy_manual_key_dict = {}
         if connection_obj.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='mr_capsule_execution_request'").fetchone():
             legacy_row_list = connection_obj.execute("""SELECT r.order_request_key_str,r.request_kind_str,r.request_json_str
@@ -4127,7 +4154,8 @@ def _persist_daily_execution_report(state_store_obj, broker_adapter_obj, release
 
 
 def _reconcile_daily_cycles(state_store_obj, broker_adapter_resolver_obj, as_of_ts, env_mode_str,
-        pod_id_str, log_path_str, trace_enabled_bool, trace_log_root_path_str, decision_plan_id_list=None):
+        pod_id_str, log_path_str, trace_enabled_bool, trace_log_root_path_str, decision_plan_id_list=None,
+        releases_root_path_str=None):
     from alpha.live.daily_reporting import (claim_post_close_report_attempt,
         finish_post_close_report_attempt, get_retry_post_close_report_decision_id_list)
 
@@ -4236,7 +4264,8 @@ def _reconcile_daily_cycles(state_store_obj, broker_adapter_resolver_obj, as_of_
             settlement_snapshot_obj = None if as_of_ts >= target_close_ts else initial_daily_snapshot_obj
             daily_result_obj = reconcile_daily_cycle(state_store_obj, broker_adapter_obj, release_obj,
                 decision_plan_obj, as_of_ts, vplan_obj=vplan_obj, vplan_sent_bool=vplan_sent_bool,
-                initial_daily_snapshot_obj=settlement_snapshot_obj)
+                initial_daily_snapshot_obj=settlement_snapshot_obj, log_path_str=log_path_str,
+                releases_root_path_str=releases_root_path_str)
             for report_obj in daily_result_obj.reporting_result_list:
                 try:
                     _persist_daily_execution_report(state_store_obj, broker_adapter_obj, release_obj, decision_plan_obj,
@@ -4348,7 +4377,8 @@ def post_execution_reconcile(
     if daily_decision_id_list or retry_report_id_list:
         completed_vplan_count_int = _reconcile_daily_cycles(state_store_obj, broker_adapter_resolver_obj, as_of_ts,
             env_mode_str, pod_id_str, log_path_str, trace_enabled_bool, trace_log_root_path_str,
-            decision_plan_id_list=list(dict.fromkeys([*daily_decision_id_list, *retry_report_id_list])))
+            decision_plan_id_list=list(dict.fromkeys([*daily_decision_id_list, *retry_report_id_list])),
+            releases_root_path_str=releases_root_path_str)
     submitted_vplan_list = [vplan_obj for vplan_obj in state_store_obj.get_submitted_vplan_list(exclude_daily_reconcile_bool=True)
         if pod_id_str is None or vplan_obj.pod_id_str == pod_id_str]
     assert_authorized_vplans("post_execution_reconcile", submitted_vplan_list)
@@ -4363,6 +4393,9 @@ def post_execution_reconcile(
         release_obj = state_store_obj.get_release_by_id(vplan_obj.release_id_str)
         if release_obj.mode_str != env_mode_str:
             continue
+        parked_recheck_bool = (is_vplan_execution_exception_parked_with_auto(state_store_obj, vplan_obj, as_of_ts=as_of_ts)
+            and auto_complete.parked_recheck_due_bool(state_store_obj, vplan_obj, release_obj, as_of_ts))
+        auto_result_dict = {"active_bool": False}
         try:
             broker_adapter_obj = broker_adapter_resolver_obj.get_adapter(release_obj)
             decision_plan_obj = state_store_obj.get_decision_plan_by_id(int(vplan_obj.decision_plan_id_int))
@@ -4387,6 +4420,21 @@ def post_execution_reconcile(
                     allowed_broker_order_id_set=known_broker_order_id_set,
                 )
             )
+            # Cross recovery uses this observation for original partial fills and re-send terminal state.
+            auto_result_dict = auto_complete.reconcile_auto_completion(
+                state_store_obj, broker_adapter_obj, release_obj, vplan_obj, as_of_ts, log_path_str=log_path_str,
+                releases_root_path_str=releases_root_path_str, observed_result_obj=SubmitBatchResult(
+                    broker_order_record_list=broker_order_record_list, broker_order_event_list=broker_order_event_list,
+                    broker_order_fill_list=broker_fill_list))
+            if auto_result_dict["observed_result_obj"] is not None:
+                # Preserve known original quantities again in the ordinary persistence below.
+                broker_order_record_list = auto_result_dict["observed_result_obj"].broker_order_record_list
+            if auto_result_dict["sent_bool"]:
+                broker_snapshot_obj = broker_adapter_obj.get_account_snapshot(vplan_obj.account_route_str)
+                state_store_obj.upsert_broker_snapshot_cache(broker_snapshot_obj)
+            elif auto_result_dict["snapshot_obj"] is not None:
+                broker_snapshot_obj = auto_result_dict["snapshot_obj"]
+                state_store_obj.upsert_broker_snapshot_cache(broker_snapshot_obj)
             session_open_context_dict = _session_open_context_dict(
                 release_obj=release_obj,
                 reference_timestamp_ts=vplan_obj.target_execution_timestamp_ts,
@@ -4577,7 +4625,8 @@ def post_execution_reconcile(
                 ),
                 log_path_str=log_path_str,
             )
-        if len(terminal_unresolved_row_dict_list) > 0 and not post_execution_snapshot_exists_bool:
+        if (len(terminal_unresolved_row_dict_list) > 0 and not post_execution_snapshot_exists_bool
+                and not auto_result_dict["active_bool"]):
             log_event(
                 "execution_exception_parked",
                 _build_vplan_log_payload_dict(
@@ -4608,7 +4657,11 @@ def post_execution_reconcile(
                 ),
                 log_path_str=log_path_str,
             )
-        completed_bool = bool(reconciliation_result_obj.passed_bool)
+        completed_bool = bool(reconciliation_result_obj.passed_bool) and not auto_result_dict["active_bool"]
+        if parked_recheck_bool:
+            auto_complete.record_parked_recheck(state_store_obj, vplan_obj, as_of_ts)
+            log_event("parked_pod_rechecked", _build_vplan_log_payload_dict(release_obj, vplan_obj, as_of_ts,
+                {"completed_bool": completed_bool}), log_path_str=log_path_str)
         if completed_bool:
             state_store_obj.mark_vplan_status(int(vplan_obj.vplan_id_int or 0), "completed")
             state_store_obj.mark_decision_plan_status(int(vplan_obj.decision_plan_id_int), "completed")

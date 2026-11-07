@@ -36,7 +36,8 @@ IDENTITY_PATTERN_OBJ = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}\Z")
 COUNT_FIELD_SET = {"broker_order_count_int", "broker_order_event_count_int", "broker_order_ack_count_int",
     "fill_count_int", "missing_ack_count_int", "terminal_unresolved_count_int", "order_count_int",
     "filled_order_count_int", "diff_count_int", "target_count_int", "eod_snapshot_count_int"}
-NUMBER_FIELD_SET = {"ack_coverage_ratio_float", "target_share_float", "broker_share_float", "residual_share_float"}
+NUMBER_FIELD_SET = {"ack_coverage_ratio_float", "target_share_float", "broker_share_float", "residual_share_float",
+    "quantity_float", "filled_quantity_float", "remaining_quantity_float", "fill_price_float"}
 CODE_FIELD_SET = {"status_str", "reason_code_str", "decision_plan_status_str", "vplan_status_str",
     "submit_ack_status_str", "reconciliation_status_str", "snapshot_stage_str", "next_phase_str",
     "execution_policy_str", "action_name_str", "initial_status_str", "latest_broker_order_status_str"}
@@ -196,6 +197,9 @@ def _event_dict(record_dict, identity_dict, *, source_str, as_of_ts, from_date_s
         value_obj = field_dict.get(field_str)
         if type(value_obj) in (int, float) and math.isfinite(value_obj):
             payload_dict[field_str] = value_obj
+    for field_str in ("broker_acknowledged_bool", "sent_bool"):
+        if type(field_dict.get(field_str)) is bool:
+            payload_dict[field_str] = field_dict[field_str]
     for field_str in TIME_FIELD_SET:
         value_ts = _timestamp_ts(field_dict.get(field_str))
         if value_ts is not None:

@@ -132,7 +132,7 @@ class OrderTicketService:
             raise OrderStop("Nothing to complete · broker holds the plan")
         if row_dict["state_str"] == "sent":
             raise OrderStop("Already sent · " + row_dict["text_str"].removeprefix("Sent · "))
-        if row_dict["state_str"] != "missing":
+        if row_dict["state_str"] != "missing" and not row_dict.get("can_complete_bool"):
             raise OrderStop("No pre-fill · use New order")
         return missing_dict, row_dict
 
@@ -212,7 +212,7 @@ class OrderTicketService:
             reason_str = " ".join(str(body_dict.get("reason_str") or "").split())[:REASON_MAX_LEN_INT]
             if not reason_str:
                 raise OrderStop("Reason is required")
-        if side_str == "SELL" and quantity_obj > expected_dict["held_float"] + 1e-9:
+        if expected_dict["kind_str"] == "new" and side_str == "SELL" and quantity_obj > expected_dict["held_float"] + 1e-9:
             raise OrderStop(f"Blocked · {asset_str} holds {_share_str(expected_dict['held_float'])} · this pod does not go short")
         limit_float = None
         if type_str == "LMT":

@@ -110,6 +110,13 @@ def _ack_dict(plan_dict, order_list, ack_list, *, as_of_ts):
 def _apply_ack_evidence(row_dict, source_dict, *, as_of_ts):
     """Detailed contradictions can weaken a summary, never promote a stage."""
     order_list, ack_list = (source_dict.get(key_str) or [] for key_str in ("order_list", "ack_list"))
+    recovery_order_list = [item_dict for item_dict in order_list if ":auto-complete:" in str(item_dict.get("order_request_key_str") or "")]
+    recovery_ack_list = [item_dict for item_dict in ack_list if ":auto-complete:" in str(item_dict.get("order_request_key_str") or "")]
+    if recovery_order_list or recovery_ack_list:
+        order_list = [item_dict for item_dict in order_list if item_dict not in recovery_order_list]
+        ack_list = [item_dict for item_dict in ack_list if item_dict not in recovery_ack_list]
+        row_dict["broker_order_count_int"] = len(order_list)
+        row_dict["broker_ack_count_int"] = sum(item_dict.get("broker_response_ack_bool") in (True, 1) for item_dict in ack_list)
     critical_count_int = sum(item_dict.get("ack_status_str") == "missing_critical" for item_dict in ack_list)
     if critical_count_int:
         row_dict["missing_ack_count_int"] = max(row_dict.get("missing_ack_count_int") or 0, critical_count_int)
@@ -180,6 +187,22 @@ def build_evidence_tables_dict(source_dict, *, as_of_ts, fresh_bool):
             _number_str(abs(filled_float)) if filled_float is not None else "—", _number_str(price_float, price_bool=True),
             _text_str(order_id_str) or "—"],
             state_str="fail" if ack_label_str == "No ack" and fresh_bool else ""))
+    for order_dict in order_list:
+        reference_str = str(order_dict.get("order_request_key_str") or "")
+        if ":auto-complete:" not in reference_str:
+            continue
+        amount_float = _number_float(order_dict.get("amount_float"))
+        if amount_float is None:
+            continue
+        order_id_str = str(order_dict.get("broker_order_id_str") or "")
+        status_str = str(order_dict.get("status_str") or "Unknown") if fresh_bool else "Unknown"
+        timestamp_str = order_dict.get("submitted_timestamp_str")
+        order_rows.append(_row_dict([_text_str(order_dict.get("asset_str")),
+            f"{'BUY' if amount_float > 0 else 'SELL'} {_number_str(abs(amount_float))} · MKT",
+            status_str, "re-send", _time_str(timestamp_str, as_of_ts) if timestamp_str else "—",
+            _number_str(order_dict.get("filled_amount_float")),
+            _number_str(order_dict.get("avg_fill_price_float"), price_bool=True), order_id_str or "—"],
+            state_str="fail" if status_str.lower() in {"cancelled", "rejected", "inactive"} else ""))
     decision_dict = source_dict.get("decision_dict") or {}
     target_map = decision_dict.get("display_target_weight_map_dict") or decision_dict.get("target_weight_map_dict") or {}
     decision_rows = [_row_dict([_text_str(symbol_str), _number_str(weight_float * 100) + "%" if _number_float(weight_float) is not None else "—"])

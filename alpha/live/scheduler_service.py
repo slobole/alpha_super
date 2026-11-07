@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from alpha.live import runner, scheduler_utils
+from alpha.live import runner, scheduler_utils, auto_complete
 from alpha.live.daily_reconcile import (
     DAILY_TERMINAL_STATUS_SET,
     _exception_list as build_daily_exception_list,
@@ -228,6 +228,10 @@ def get_scheduler_decision(
                     daily_check_dict = _build_daily_check_dict(
                         state_store_obj, release_obj, latest_decision_plan_obj, current_vplan_obj, as_of_ts=as_of_ts)
                     matched_wait_bool = daily_check_dict is not None and bool(daily_check_dict["match_bool"])
+                    if current_vplan_obj is not None and auto_complete.active_auto_completion_bool(
+                            state_store_obj, current_vplan_obj, as_of_ts):
+                        matched_wait_bool = False
+                        reconcile_due_ts = min(reconcile_due_ts, target_ts + timedelta(minutes=5))
                     if matched_wait_bool:
                         # Nothing the active poll could do: read again on the slow
                         # interval, back to the active poll for the last half hour.
@@ -329,12 +333,20 @@ def get_scheduler_decision(
             continue
 
         if current_vplan_obj is not None and current_vplan_obj.status_str in ("submitted", "submitting"):
-            if runner.is_vplan_execution_exception_parked(state_store_obj, current_vplan_obj):
-                parked_manual_review_pod_id_list.append(release_obj.pod_id_str)
+            if runner.is_vplan_execution_exception_parked_with_auto(state_store_obj, current_vplan_obj, as_of_ts=as_of_ts):
+                if auto_complete.parked_recheck_due_bool(state_store_obj, current_vplan_obj, release_obj, as_of_ts):
+                    immediate_candidate_list.append(_build_candidate_dict(priority_int=5, due_timestamp_ts=as_of_ts,
+                        next_phase_str="post_execution_reconcile", reason_code_str="parked_eod_recheck_due",
+                        pod_id_str=release_obj.pod_id_str, active_poll_bool=False))
+                else:
+                    parked_manual_review_pod_id_list.append(release_obj.pod_id_str)
                 continue
             reconcile_due_timestamp_ts = current_vplan_obj.target_execution_timestamp_ts + timedelta(
                 seconds=reconcile_grace_seconds_int
             )
+            if auto_complete.active_auto_completion_bool(state_store_obj, current_vplan_obj, as_of_ts):
+                reconcile_due_timestamp_ts = min(reconcile_due_timestamp_ts,
+                    current_vplan_obj.target_execution_timestamp_ts + timedelta(minutes=5))
             if reconcile_due_timestamp_ts <= as_of_ts:
                 immediate_candidate_list.append(
                     _build_candidate_dict(

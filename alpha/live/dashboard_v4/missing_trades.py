@@ -107,8 +107,6 @@ def load_missing_trades_dict(target_obj, *, as_of_ts: datetime, shared_account_b
     for tests), or "unknown" (saved evidence could not be read). Rule set: handoff §6.
     """
     release_obj = target_obj.release_obj
-    if shared_account_bool:
-        return _hidden_dict("Account shared with another pod")
     try:
         store_obj = _ReadOnlyConfirmationStore(target_obj.db_path_str)
         try:
@@ -123,12 +121,33 @@ def load_missing_trades_dict(target_obj, *, as_of_ts: datetime, shared_account_b
         return _hidden_dict("No order plan")
     if vplan_obj.account_route_str != release_obj.account_route_str or vplan_obj.pod_id_str != release_obj.pod_id_str:
         return {"status_str": "unknown", "reason_str": "Plan identity does not match the pod", "row_list": []}
-    if vplan_obj.status_str not in ELIGIBLE_VPLAN_STATUS_SET:
+    if vplan_obj.status_str not in ELIGIBLE_VPLAN_STATUS_SET and vplan_obj.status_str != "submitting":
         return _hidden_dict("Plan not sent")
-    if decision_obj is not None and decision_obj.decision_plan_id_int != vplan_obj.decision_plan_id_int:
-        return _hidden_dict("A newer decision supersedes this plan")
-    if snapshot_obj is None or snapshot_obj.snapshot_timestamp_ts <= vplan_obj.target_execution_timestamp_ts:
-        return _hidden_dict("Waiting for broker positions after the plan's execution time")
+    newer_plan_bool = decision_obj is not None and decision_obj.decision_plan_id_int != vplan_obj.decision_plan_id_int
+    from alpha.live.dashboard_v4.auto_complete_view import load_recovery_view_dict
+    try:
+        recovery_dict = load_recovery_view_dict(target_obj, vplan_obj, snapshot_obj, as_of_ts=as_of_ts, newer_plan_bool=newer_plan_bool)
+    except (sqlite3.Error, OSError, ValueError, TypeError, KeyError):
+        return {"status_str": "unknown", "reason_str": "Saved completion evidence could not be verified", "row_list": []}
+    recovery_rows = recovery_dict["row_list"]
+    if shared_account_bool or newer_plan_bool:
+        recovery_rows = [row_dict for row_dict in recovery_rows if row_dict.get("auto_complete_bool")]
+        if not recovery_rows:
+            return _hidden_dict("Account shared with another pod" if shared_account_bool else "A newer decision supersedes this plan")
+        return {"status_str": "ok", "reason_str": "", "row_list": recovery_rows, "vplan_id_int": vplan_obj.vplan_id_int,
+            "fresh_bool": True, "target_share_map": dict(vplan_obj.target_share_map), "recovery_dict": recovery_dict,
+            "positions_timestamp_ts": snapshot_obj.snapshot_timestamp_ts if snapshot_obj is not None else None}
+    if vplan_obj.status_str == "submitting" and not recovery_rows:
+        return _hidden_dict("Plan not sent")
+    before_execution_bool = snapshot_obj is None or snapshot_obj.snapshot_timestamp_ts <= vplan_obj.target_execution_timestamp_ts
+    if before_execution_bool:
+        if not recovery_rows:
+            return _hidden_dict("Waiting for broker positions after the plan's execution time")
+        return {"status_str": "ok", "reason_str": "", "row_list": recovery_rows,
+            "vplan_id_int": vplan_obj.vplan_id_int, "fresh_bool": True,
+            "target_share_map": dict(vplan_obj.target_share_map),
+            "positions_timestamp_ts": snapshot_obj.snapshot_timestamp_ts if snapshot_obj is not None else None,
+            "saved_intent_bool": True, "recovery_dict": recovery_dict}
     fresh_bool = plan_fresh_bool(vplan_obj.target_execution_timestamp_ts, as_of_ts, release_obj.session_calendar_id_str)
     try:
         why_dict, ack_set = _why_map(target_obj.db_path_str, vplan_obj.vplan_id_int)
@@ -179,7 +198,16 @@ def load_missing_trades_dict(target_obj, *, as_of_ts: datetime, shared_account_b
             else:
                 why_str = why_dict.get(asset_str) or "differs from plan"
             row_list.append({**row_dict, "state_str": "missing", "text_str": "Missing · " + why_str})
+    recovery_map = {row_dict["asset_str"]: row_dict for row_dict in recovery_rows}
+    if not fresh_bool:
+        for row_dict in recovery_rows:
+            if row_dict.get("can_complete_bool") and not row_dict.get("auto_complete_bool"):
+                row_dict.update(can_complete_bool=False, text_str=row_dict["text_str"] + " · plan older than 1 session · use New order")
+    legacy_manual_set = {row_dict["asset_str"] for row_dict in row_list if row_dict["state_str"] in {"sent", "closed"}}
+    row_list = [row_dict for row_dict in row_list if row_dict["asset_str"] not in recovery_map or row_dict["asset_str"] in legacy_manual_set]
+    row_list.extend(row_dict for row_dict in recovery_rows if row_dict["asset_str"] not in legacy_manual_set)
+    row_list.sort(key=lambda row_dict: row_dict["asset_str"])
     return {"status_str": "ok", "reason_str": "", "row_list": row_list,
         "vplan_id_int": vplan_obj.vplan_id_int, "fresh_bool": fresh_bool,
         "target_share_map": {asset_str: float(value_obj) for asset_str, value_obj in vplan_obj.target_share_map.items()},
-        "positions_timestamp_ts": snapshot_obj.snapshot_timestamp_ts}
+        "positions_timestamp_ts": snapshot_obj.snapshot_timestamp_ts, "recovery_dict": recovery_dict}

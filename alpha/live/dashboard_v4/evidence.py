@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from alpha.live.execution_engine import build_broker_order_request_list_from_vplan
+from alpha.live.auto_complete import load_attempt_row_list
 from alpha.live.ops_report import parse_timestamp_ts
 
 
@@ -20,6 +21,7 @@ QUANTITY_TOLERANCE_FLOAT = 1e-9  # Same share tolerance as the execution engine.
 # sell per decision and asset, keyed "<submission key>:daily-completion:<asset>"
 # (alpha.live.daily_reconcile). Monthly plans never carry this marker.
 DAILY_COMPLETION_KEY_MARKER_STR = ":daily-completion:"
+AUTO_COMPLETION_KEY_MARKER_STR = ":auto-complete:"
 
 
 class _EvidenceError(ValueError):
@@ -105,6 +107,7 @@ def load_cycle_evidence_dict(target_obj, pod_row_dict: dict[str, Any], *, as_of_
             order_row_list = connection_obj.execute("SELECT * FROM vplan_broker_order WHERE vplan_id_int = ?", (vplan_id_int,)).fetchall()
             fill_row_list = connection_obj.execute("SELECT * FROM vplan_fill WHERE vplan_id_int = ?", (vplan_id_int,)).fetchall()
             ack_row_list = connection_obj.execute("SELECT * FROM vplan_broker_ack WHERE vplan_id_int = ?", (vplan_id_int,)).fetchall()
+            attempt_row_list = load_attempt_row_list(connection_obj, vplan_id_int)
         plan_dict = dict(vplan_obj)
         result_dict.update(vplan_status_str=plan_dict["status_str"], fill_record_count_int=len(fill_row_list))
         delta_map_dict = json.loads(plan_dict["order_delta_json_str"])
@@ -140,9 +143,10 @@ def load_cycle_evidence_dict(target_obj, pod_row_dict: dict[str, Any], *, as_of_
         request_map_dict = {request_obj.order_request_key_str: request_obj for request_obj in request_list}
         order_map_dict: dict[str, dict[str, Any]] = {}
         request_key_set: set[str] = set()
-        opening_row_list, completion_row_list = [], []
+        opening_row_list, completion_row_list, recovery_row_list = [], [], []
         for order_row_obj in order_row_list:
-            (completion_row_list if DAILY_COMPLETION_KEY_MARKER_STR in str(order_row_obj["order_request_key_str"] or "")
+            (recovery_row_list if AUTO_COMPLETION_KEY_MARKER_STR in str(order_row_obj["order_request_key_str"] or "") else
+                completion_row_list if DAILY_COMPLETION_KEY_MARKER_STR in str(order_row_obj["order_request_key_str"] or "")
                 else opening_row_list).append(order_row_obj)
         for order_row_obj in opening_row_list:
             order_dict = dict(order_row_obj)
@@ -200,6 +204,40 @@ def load_cycle_evidence_dict(target_obj, pod_row_dict: dict[str, Any], *, as_of_
             order_dict.update(requested_share_float=amount_float, sparse_terminal_bool=False,
                 filled_share_float=0.0, fill_timestamp_list=[], completion_bool=True)
             order_map_dict[order_id_str] = order_dict
+        attempt_map_dict = {attempt_dict["order_request_key_str"]: attempt_dict for attempt_dict in attempt_row_list}
+        for order_row_obj in recovery_row_list:
+            order_dict = dict(order_row_obj)
+            order_id_str = str(order_dict["broker_order_id_str"] or "")
+            request_key_str = str(order_dict["order_request_key_str"] or "")
+            attempt_dict = attempt_map_dict.get(request_key_str) or {}
+            request_dict = json.loads(attempt_dict.get("request_json_str") or "{}")
+            original_dict = order_map_dict.get(str(attempt_dict.get("original_broker_order_id_str") or "")) or {}
+            expected_dict = {"release_id_str": release_obj.release_id_str, "pod_id_str": release_obj.pod_id_str,
+                "account_route_str": release_obj.account_route_str, "decision_plan_id_int": decision_id_int,
+                "vplan_id_int": vplan_id_int, "asset_str": order_dict["asset_str"], "submission_key_str": submission_key_str,
+                "order_request_key_str": f"{submission_key_str}{AUTO_COMPLETION_KEY_MARKER_STR}{order_dict['asset_str']}",
+                "broker_order_type_str": "MKT", "unit_str": "shares"}
+            amount_float = _quantity_float(order_dict["amount_float"])
+            reported_float = _quantity_float(order_dict["filled_amount_float"])
+            if (not order_id_str or order_id_str in order_map_dict or not isinstance(request_dict, dict)
+                    or any(request_dict.get(field_str) != value_obj for field_str, value_obj in expected_dict.items())
+                    or any(order_dict.get(field_str) != expected_dict[field_str] for field_str in
+                        ("account_route_str", "decision_plan_id_int", "vplan_id_int", "submission_key_str", "order_request_key_str", "broker_order_type_str", "unit_str"))
+                    or any(attempt_dict.get(field_str) != expected_dict[field_str] for field_str in
+                        ("pod_id_str", "account_route_str", "decision_plan_id_int", "vplan_id_int", "asset_str"))
+                    or attempt_dict.get("broker_order_id_str") not in (None, order_id_str)
+                    or original_dict.get("asset_str") != order_dict["asset_str"]
+                    or original_dict.get("completion_bool")
+                    or amount_float * original_dict.get("requested_share_float", 0) <= 0
+                    or abs(amount_float) > abs(original_dict.get("requested_share_float", 0)) + QUANTITY_TOLERANCE_FLOAT
+                    or abs(amount_float - _quantity_float(request_dict.get("amount_float"))) > QUANTITY_TOLERANCE_FLOAT
+                    or abs(abs(amount_float) - _quantity_float(attempt_dict.get("quantity_float"))) > QUANTITY_TOLERANCE_FLOAT
+                    or reported_float < 0 or reported_float > abs(amount_float) + QUANTITY_TOLERANCE_FLOAT):
+                raise _EvidenceError("A saved auto-completion order does not match its recorded request.")
+            order_dict["submitted_ts"] = _timestamp_ts(order_dict["submitted_timestamp_str"], as_of_ts=as_of_ts)
+            order_dict.update(requested_share_float=amount_float, sparse_terminal_bool=False,
+                filled_share_float=0.0, fill_timestamp_list=[], completion_bool=True)
+            order_map_dict[order_id_str] = order_dict
         if any(order_dict["sparse_terminal_bool"] for order_dict in order_map_dict.values()):
             # Terminal broker refreshes can save zero/zero/zero quantities.
             # Only exact ACK identities plus complete, identifiable executions
@@ -208,7 +246,8 @@ def load_cycle_evidence_dict(target_obj, pod_row_dict: dict[str, Any], *, as_of_
             ack_request_set: set[str] = set()
             ack_order_set: set[str] = set()
             for ack_row_obj in ack_row_list:
-                if DAILY_COMPLETION_KEY_MARKER_STR in str(ack_row_obj["order_request_key_str"] or ""):
+                if any(marker_str in str(ack_row_obj["order_request_key_str"] or "")
+                       for marker_str in (DAILY_COMPLETION_KEY_MARKER_STR, AUTO_COMPLETION_KEY_MARKER_STR)):
                     continue  # Not part of the opening batch's proof.
                 order_id_str = str(ack_row_obj["broker_order_id_str"] or "")
                 request_key_str = ack_row_obj["order_request_key_str"]

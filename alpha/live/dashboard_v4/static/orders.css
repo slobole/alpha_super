@@ -7,6 +7,7 @@
 .gap-tbl td.act { text-align: right; width: 1%; white-space: nowrap; }
 .gap-tbl tr.is-sent td { background: var(--blue-bg); }
 .gap-tbl tr.is-off td { color: var(--ink-3); }
+.issue.auto-complete-planned { border-color: var(--amber); background: var(--amber-bg); }
 
 .tkt-inline { border-color: var(--ink); }
 .tkt-inline .panel-h { border-bottom: 1px solid var(--rule); padding-bottom: 12px; }

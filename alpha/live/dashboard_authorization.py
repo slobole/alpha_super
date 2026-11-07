@@ -20,8 +20,6 @@ from alpha.live.state_store_v2 import LiveStateStore
 
 
 _authorization_context_obj = ContextVar("dashboard_authorization", default=None)
-
-
 def _json_default(value_obj):
     if isinstance(value_obj, datetime):
         return value_obj.isoformat()

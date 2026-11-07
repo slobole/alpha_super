@@ -68,6 +68,53 @@ def test_material_event_is_normalized_redacted_and_keeps_exact_cycle_evidence(tm
         assert private_str not in text_str
 
 
+@pytest.mark.parametrize("filled_quantity_obj,remaining_float,fill_price_obj,title_str", [
+    (3.0, 7.0, None, "Partly filled · 7 missing"),
+    (0.0, 10.0, None, "Not filled · 10 missing"),
+    (None, 7.0, None, "Not filled · 7 missing"),
+    (None, 7.0, 22.42, "Partly filled · 7 missing"),
+])
+def test_recovery_execution_evidence_survives_saved_log_to_activity(
+        tmp_path, filled_quantity_obj, remaining_float, fill_price_obj, title_str):
+    from alpha.live.dashboard_v4.activity import _event_row_dict
+
+    provider_obj = _provider_obj(tmp_path)
+    log_path_obj = Path(provider_obj.event_log_path_str)
+    _write_records(log_path_obj, _record_dict("auto_complete_not_completed", asset_str="DBC", side_str="BUY",
+        quantity_float=10.0, remaining_quantity_float=remaining_float,
+        filled_quantity_float=filled_quantity_obj, fill_price_float=fill_price_obj))
+    before_bytes = log_path_obj.read_bytes()
+    event_dict, = _load_dict(provider_obj)["event_list"]
+    assert event_dict["payload_dict"].get("filled_quantity_float") == filled_quantity_obj
+    assert _event_row_dict(event_dict, {}, [])["title_str"] == title_str
+    assert log_path_obj.read_bytes() == before_bytes
+
+
+@pytest.mark.parametrize("mode_str,filled_quantity_obj,title_str", [
+    ("live", 3.0, "Partly filled · 7 missing"), ("live", 0.0, "Not filled · 7 missing"),
+    ("live", None, "Not filled · 7 missing"), ("paper", 3.0, None),
+])
+def test_real_recovery_emitter_reaches_activity(tmp_path, mode_str, filled_quantity_obj, title_str):
+    """The real writer, not a hand-built record: the event must carry the scope Activity requires."""
+    from alpha.live import auto_complete
+    from alpha.live.dashboard_v4.activity import _event_row_dict
+
+    provider_obj = _provider_obj(tmp_path)
+    release_obj = SimpleNamespace(**{**vars(_target_obj().release_obj), "mode_str": mode_str})
+    vplan_obj = SimpleNamespace(pod_id_str="pod_one", account_route_str="U111", vplan_id_int=9, decision_plan_id_int=7)
+    now_ts = datetime.now(timezone.utc)
+    auto_complete._emit(provider_obj.event_log_path_str, "auto_complete_not_completed", release_obj, vplan_obj, "DBC",
+        now_ts, quantity_float=10.0, remaining_quantity_float=7.0, filled_quantity_float=filled_quantity_obj,
+        side_str="BUY", fill_price_float=None)
+    event_list = activity_data.load_activity_source_dict(provider_obj, as_of_ts=now_ts + timedelta(minutes=1),
+        days_int=7)["event_list"]
+    if title_str is None:
+        assert event_list == []  # Paper events stay out of LIVE Activity, like every other pod event.
+    else:
+        event_dict, = event_list
+        assert _event_row_dict(event_dict, {}, [])["title_str"] == title_str
+
+
 @pytest.mark.parametrize("field_str,value_obj", [
     ("mode_str", "paper"), ("env_mode_str", "incubation"), ("session_mode_str", "sim"),
     ("pod_id_str", "other_pod"), ("pod_str", "other_pod"), ("account_route_str", "U999"),

@@ -36,6 +36,7 @@ from alpha.live.dashboard_v4.tools import build_tools_page_dict, resolve_tools_t
 from alpha.live.dashboard_v4.tools_actions import ToolsActionService, register_tools_action_routes
 from alpha.live.dashboard_v4.tools_execution import SyntheticToolsActionProvider
 from alpha.live.dashboard_v4.missing_trades import load_missing_trades_dict, read_completion_event_list
+from alpha.live.dashboard_v4.auto_complete_view import apply_recovery_overview, apply_recovery_pod
 from alpha.live.dashboard_v4.monthly_report import build_monthly_report_dict, report_art_name_str
 from alpha.live.dashboard_v4.report_programs import SUGGESTED_PROGRAM_TUPLE, ReportProgramStore, ReportProgramReadError, register_program_route
 from alpha.live.dashboard_v4.report_archive import ReportArchiveStore, ReportArchiveError, ReportArchiveNotFoundError
@@ -417,6 +418,7 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
                 backtest_view_dict["rare_dict"]["reviewed_bool"] = backtest_view_dict["rare_dict"].get("review_key_str") in reviewed_set
         pod_page_dict["orders_dict"] = build_orders_dict(pod_id_str, workspace_dict,
             overview_dict["source_fresh_bool"] and not pod_page_dict.get("historical_bool"))
+        apply_recovery_pod(pod_page_dict, pod_page_dict["orders_dict"])
         if pod_page_dict["attention_dict"] and not pod_page_dict["historical_bool"]:
             attach_next_command_list([pod_page_dict["attention_dict"]], workspace_dict, provider_obj,
                 demo_bool=demo_bool, as_of_ts=clock_fn())
@@ -463,17 +465,24 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         if added_list:
             apply_attention_verdict(overview_dict)
 
-    def attach_missing_trades_attention(overview_dict, workspace_dict):
+    def attach_missing_trades_attention(overview_dict, workspace_dict, *, recovery_only_bool=False):
         """One Overview line per pod with missing trades: "2 trades missing · APX BUY 300, MDLZ SELL 41"."""
         if not orders_supported_bool():
             return
         added_int = 0
+        recovery_bool = False
         for pod_dict in overview_dict["pod_list"]:
             try:
                 missing_dict = missing_trades_dict(resolve_tools_target_obj(workspace_dict, provider_obj, pod_dict["pod_id_str"]))
             except (ValueError, OSError, KeyError):
                 continue
-            row_list = [row_dict for row_dict in missing_dict.get("row_list") or [] if row_dict["state_str"] in {"missing", "off"}]
+            if missing_dict.get("status_str") == "ok":
+                apply_recovery_overview(overview_dict, pod_dict, missing_dict)
+                recovery_bool = recovery_bool or bool(pod_dict.get("recovery_summary_dict"))
+            if recovery_only_bool:
+                continue
+            row_list = [row_dict for row_dict in missing_dict.get("row_list") or []
+                        if row_dict["state_str"] in {"missing", "off", "not_completed", "not_automatic"}]
             if missing_dict.get("status_str") != "ok" or not row_list:
                 continue
             item_list = [f"{row_dict['asset_str']} {row_dict['side_str']} {row_dict['quantity_int']}" for row_dict in row_list]
@@ -482,13 +491,21 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             existing_dict = next((item_dict for item_dict in overview_dict["attention_list"]
                 if item_dict["pod_id_str"] == pod_dict["pod_id_str"]), None)
             if existing_dict is not None:
-                existing_dict["detail_str"] = (existing_dict.get("detail_str") or "").rstrip() + f" · {title_str} · {detail_str}"
+                if existing_dict.get("kind_str") != "auto_complete":
+                    existing_dict["detail_str"] = (existing_dict.get("detail_str") or "").rstrip() + f" · {title_str} · {detail_str}"
                 continue
             overview_dict["attention_list"].append({"state_str": "late", "pod_name_str": pod_dict.get("name_str") or pod_dict["pod_id_str"],
                 "pod_id_str": pod_dict["pod_id_str"], "title_str": title_str, "detail_str": "· " + detail_str,
                 "age_str": "—", "kind_str": "missing_trades", "next_command_list": []})
             added_int += 1
-        if added_int:
+        if recovery_bool:
+            overview_dict["live_state_str"] = min(
+                [pod_dict["state_str"] for pod_dict in overview_dict["pod_list"]] + [overview_dict["system_dict"]["state_str"]],
+                key=lambda state_str: STATE_RANK_DICT.get(state_str, 9))
+            if not overview_dict["attention_list"] and overview_dict["system_dict"]["state_str"] == "done":
+                overview_dict.update(verdict_str="Nothing needs you.", verdict_detail_str="Automatic completions are tracked below.",
+                    verdict_state_str="done", verdict_kind_str="ok")
+        if added_int or recovery_bool:
             apply_attention_verdict(overview_dict)
 
     def build_orders_dict(pod_id_str, workspace_dict, fresh_bool):
@@ -509,8 +526,13 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         orders_dict["status_str"] = missing_dict["status_str"]
         if missing_dict["status_str"] == "ok":
             orders_dict["row_list"] = missing_dict["row_list"]
-            orders_dict["meta_str"] = (f"VPlan #{missing_dict['vplan_id_int']} · positions "
-                + missing_dict["positions_timestamp_ts"].astimezone(MARKET_TIMEZONE_OBJ).strftime("%H:%M"))
+            orders_dict["recovery_dict"] = missing_dict.get("recovery_dict") or {}
+            position_ts = missing_dict.get("positions_timestamp_ts")
+            orders_dict["meta_str"] = f"VPlan #{missing_dict['vplan_id_int']}"
+            if missing_dict.get("saved_intent_bool"):
+                orders_dict["meta_str"] += " · saved intent"
+            if position_ts is not None:
+                orders_dict["meta_str"] += " · positions " + position_ts.astimezone(MARKET_TIMEZONE_OBJ).strftime("%H:%M")
         return orders_dict
 
     @flask_app_obj.get("/")
@@ -621,6 +643,8 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             source_dict = (provider_obj.get_system_source_dict(workspace_dict, as_of_ts=acquisition_ts)
                 if hasattr(provider_obj, "get_system_source_dict") else load_system_source_dict(
                     provider_obj, workspace_dict, as_of_ts=acquisition_ts, performance_db_path_str=database_path_str))
+        if overview_dict["source_fresh_bool"]:
+            attach_missing_trades_attention(overview_dict, workspace_dict, recovery_only_bool=True)
         completed_ts = clock_fn()
         render_ts = parse_timestamp_ts(overview_dict["clock_timestamp_str"])
         # All reads consume the lifetime; this does not reacquire cycle evidence.

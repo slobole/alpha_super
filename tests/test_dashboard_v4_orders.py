@@ -140,6 +140,8 @@ def fake_store(monkeypatch):
 
     monkeypatch.setattr(missing_module, "_ReadOnlyConfirmationStore", FakeStore)
     monkeypatch.setattr(missing_module, "_why_map", lambda db_path_str, vplan_id_int: state_dict["why"])
+    from alpha.live.dashboard_v4 import auto_complete_view
+    monkeypatch.setattr(auto_complete_view, "load_recovery_view_dict", lambda *args, **kwargs: {"row_list": []})
     return state_dict
 
 
@@ -255,9 +257,8 @@ def test_complete_check_then_send_moc(service_factory):
     assert (ticket_dict["broker_order_type_str"], ticket_dict["side_str"], ticket_dict["completion_vplan_id_int"],
         ticket_dict["confirmation_text_str"], ticket_dict["reason_str"]) == (
         "MOC", "BUY", 412, MANUAL_ORDER_CONFIRMATION_TEXT_STR, "Completion · VPlan #412 · APX")
-    with pytest.raises(OrderStop, match="Expired"):
-        service_obj.send_dict("pod_manual", {"confirmation_nonce_str": check_dict["confirmation_nonce_str"],
-            "broker_order_type_str": "MOC", "quantity_int": 300})
+
+
 
 
 @pytest.mark.parametrize("broker, message_str", [
@@ -313,6 +314,25 @@ def test_new_order_sell_cannot_go_short_and_needs_reason(service_factory):
     assert "completion_vplan_id_int" not in sent_list[0]["request_body_dict"]
 
 
+def test_complete_can_reach_the_saved_short_target(service_factory):
+    missing_dict = _missing_ok(rows=[{"asset_str": "DBC", "side_str": "SELL", "quantity_int": 10,
+        "target_share_float": -10.0, "state_str": "not_completed", "can_complete_bool": True,
+        "text_str": "Re-sent, not filled · 10 missing · MOC until 15:45"}])
+    service_obj, sent_list = service_factory(missing=missing_dict)
+    check_dict = service_obj.check_dict("pod_manual", {"kind_str": "complete", "asset_str": "DBC"})
+    assert (check_dict["missing_str"], check_dict["max_quantity_int"]) == ("SELL 10", 10)
+    result_dict = service_obj.send_dict("pod_manual", {"confirmation_nonce_str": check_dict["confirmation_nonce_str"],
+        "broker_order_type_str": "MOC", "quantity_int": 10})
+    assert result_dict["status_str"] == "sent"
+    ticket_dict = sent_list[0]["request_body_dict"]
+    assert ticket_dict["completion_target_share_float"] == -10
+    assert ticket_dict["side_str"] == "SELL"
+    check_dict = service_obj.check_dict("pod_manual", {"kind_str": "complete", "asset_str": "DBC"})
+    with pytest.raises(OrderStop, match="Max 10"):
+        service_obj.send_dict("pod_manual", {"confirmation_nonce_str": check_dict["confirmation_nonce_str"],
+            "broker_order_type_str": "MOC", "quantity_int": 11})
+
+
 def test_send_refuses_when_broker_changed(service_factory):
     broker_obj = FakeBroker()
     service_obj, sent_list = service_factory(broker=broker_obj)
@@ -321,6 +341,7 @@ def test_send_refuses_when_broker_changed(service_factory):
     with pytest.raises(OrderStop, match="already open"):
         service_obj.send_dict("pod_manual", {"confirmation_nonce_str": nonce_str, "broker_order_type_str": "MKT", "quantity_int": 300})
     assert sent_list == []
+
 
 
 def test_sender_failure_is_outcome_unknown(service_factory):

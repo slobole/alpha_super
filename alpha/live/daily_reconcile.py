@@ -8,6 +8,7 @@ import json
 import math
 
 from alpha.live import scheduler_utils
+from alpha.live import auto_complete
 from alpha.live.beyond6040_adapter import BEYOND6040_CONTRACT_STR, BEYOND6040_STRATEGY_IMPORT_STR
 from alpha.live.core5_adapter import CORE5_CONTRACT_STR, CORE5_STRATEGY_IMPORT_STR
 from alpha.live.execution_engine import build_broker_order_request_list_from_vplan
@@ -119,6 +120,12 @@ def load_daily_owned_order_ref_set(state_store_obj, release_obj, decision_plan_o
     owned_ref_set = set()
     target_timestamp_str = decision_plan_obj.target_execution_timestamp_ts.isoformat()
     with state_store_obj._connect() as connection_obj:
+        if connection_obj.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                (auto_complete.TABLE_NAME_STR,)).fetchone():
+            owned_ref_set.update(row_obj[0] for row_obj in connection_obj.execute("""SELECT a.order_request_key_str
+                FROM auto_completion_attempt a JOIN vplan v ON v.vplan_id_int=a.vplan_id_int
+                WHERE a.pod_id_str=? AND a.account_route_str=? AND julianday(v.target_execution_timestamp_str)<=julianday(?)""",
+                (release_obj.pod_id_str, release_obj.account_route_str, target_timestamp_str)))
         for table_str in ("vplan_broker_order", "vplan_broker_ack", "daily_completion_request"):
             row_list = connection_obj.execute(f"""SELECT r.order_request_key_str FROM {table_str} r
                 JOIN vplan v ON v.vplan_id_int=r.vplan_id_int
@@ -221,7 +228,8 @@ def _exception_list(decision_plan_obj, vplan_obj, snapshot_obj, *, vplan_sent_bo
 
 
 def reconcile_daily_cycle(state_store_obj, broker_adapter_obj, release_obj, decision_plan_obj, as_of_ts,
-        *, vplan_obj=None, vplan_sent_bool=True, initial_daily_snapshot_obj=None):
+        *, vplan_obj=None, vplan_sent_bool=True, initial_daily_snapshot_obj=None, log_path_str=None,
+        releases_root_path_str=None):
     """Poll within the session; after its close return actual holdings for commit.
 
     The caller commits final holdings, strategy memory, status and one exception
@@ -258,13 +266,27 @@ def reconcile_daily_cycle(state_store_obj, broker_adapter_obj, release_obj, deci
         snapshot_obj = daily_snapshot_obj.broker_snapshot_obj
         exception_list = _exception_list(decision_plan_obj, vplan_obj, snapshot_obj,
             vplan_sent_bool=vplan_sent_bool)
+        if vplan_obj is not None and vplan_sent_bool:
+            auto_complete.reconcile_auto_completion(state_store_obj, broker_adapter_obj, release_obj,
+                vplan_obj, as_of_ts, log_path_str=log_path_str, releases_root_path_str=releases_root_path_str)
+            auto_complete.finish_daily_closed_attempts(state_store_obj, release_obj, vplan_obj, snapshot_obj,
+                as_of_ts, log_path_str=log_path_str)
         return DailyReconcileResult("completed_with_exceptions" if exception_list else "completed", snapshot_obj, exception_list)
     if vplan_obj is not None and vplan_sent_bool and target_ts < as_of_ts:
+        auto_result_dict = auto_complete.reconcile_auto_completion(
+            state_store_obj, broker_adapter_obj, release_obj, vplan_obj, as_of_ts, log_path_str=log_path_str,
+            releases_root_path_str=releases_root_path_str)
+        reporting_result_list.extend(auto_result_dict["reporting_result_list"])
+        if auto_result_dict["sent_bool"] or auto_result_dict["snapshot_obj"] is not None:
+            # The ordinary completion candidates must observe any preceding recovery fills.
+            daily_snapshot_obj = _refresh(broker_adapter_obj, release_obj, as_of_ts)
         # Freeze the candidate set from this poll's first observation. Later
         # refreshes only revalidate a candidate immediately before its send.
         first_snapshot_obj = daily_snapshot_obj
         candidate_list = []
         for asset_str, target_float in sorted(vplan_obj.target_share_map.items()):
+            if asset_str in auto_result_dict["affected_asset_set"]:
+                continue
             if (asset_str == "BIL" and target_float < 0) or (
                     asset_str != "BIL" and abs(target_float) > QUANTITY_TOLERANCE_FLOAT):
                 continue

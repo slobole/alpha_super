@@ -704,3 +704,162 @@ def test_orders_without_recovery_deadline_preserve_all_broker_fields(monkeypatch
         account="SIM_pod", orderRef=request_obj.order_request_key_str,
         orderId=1, permId=1001, filledQuantity=0, **legacy_kwargs_dict)
     assert asdict(ib_obj.placed_order_list[0]) == asdict(expected_order_obj)
+
+
+class _CrossCancelSubmitIB(_ExpirySubmitIB):
+    """The real ib_async error path drops a reason when the trade is already done."""
+
+    def __init__(self, clock_list, fail_refresh_bool=False):
+        from ib_async import IB
+        super().__init__(clock_list)
+        self.raw_ib_obj = IB()
+        self.raw_ib_obj.wrapper.clientId = 31
+        self.errorEvent = self.raw_ib_obj.errorEvent
+        self.emitted_bool = False
+        self.fail_refresh_bool = fail_refresh_bool
+
+    def placeOrder(self, contract_obj, order_obj):
+        from ib_async.order import OrderStatus, Trade
+        super().placeOrder(contract_obj, order_obj)
+        trade_obj = Trade(contract_obj, order_obj, OrderStatus(orderId=order_obj.orderId,
+            permId=order_obj.permId, status="Cancelled", filled=0, remaining=0),
+            log=[SimpleNamespace(time=self.clock_list[0], status="Cancelled", message="", errorCode=0)])
+        self.trade_list[-1] = trade_obj
+        self.raw_ib_obj.wrapper.trades[(31, order_obj.orderId)] = trade_obj
+        return trade_obj
+
+    def reqOpenOrders(self):
+        return []
+
+    def sleep(self, seconds_float):
+        self.raw_ib_obj.sleep(seconds_float)
+
+    def reqCompletedOrders(self, apiOnly=False):
+        if not self.emitted_bool:
+            self.emitted_bool = True
+            self.raw_ib_obj.wrapper.error(self.trade_list[0].order.orderId, 202,
+                "Order would cross related resting order", "")
+            # A different order's error must never attach to this submission.
+            self.errorEvent.emit(98765, 202, "Order would cross related resting order", None)
+            if self.fail_refresh_bool:
+                raise ConnectionError("Lost connection after cancellation callback")
+        return self.trade_list
+
+
+def test_raw_cross_cancel_reason_survives_done_trade_and_reaches_database(monkeypatch, tmp_path):
+    import json
+    from dataclasses import replace
+    from alpha.live.state_store_v2 import LiveStateStore
+    clock_list = [datetime(2026, 11, 2, 14, 23, tzinfo=UTC)]
+    ib_obj = _CrossCancelSubmitIB(clock_list)
+    client_obj = _expiry_client_obj(monkeypatch, ib_obj)
+    request_obj = replace(_funding_request_obj(), decision_plan_id_int=1, vplan_id_int=1)
+    result_obj = client_obj.submit_order_request_list("SIM_pod", [request_obj], clock_list[0])
+    assert all(not item_obj.message for item_obj in ib_obj.trade_list[0].log)
+    error_list = [item_obj for item_obj in result_obj.broker_order_event_list
+        if item_obj.event_source_str == "ibkr.error"]
+    assert len(error_list) == 1
+    event_obj = error_list[0]
+    assert (event_obj.broker_order_id_str, event_obj.order_request_key_str, event_obj.status_str) == (
+        "1001", request_obj.order_request_key_str, "Cancelled")
+    assert event_obj.message_str == "Order would cross related resting order"
+    assert event_obj.raw_payload_dict["error_code_int"] == 202
+    state_store_obj = LiveStateStore(str(tmp_path / "captured.sqlite3"))
+    state_store_obj.insert_vplan_broker_order_event_list(result_obj.broker_order_event_list)
+    with state_store_obj._connect() as connection_obj:
+        saved_obj = connection_obj.execute("SELECT message_str,raw_payload_json_str FROM vplan_broker_order_event "
+            "WHERE event_source_str='ibkr.error'").fetchone()
+    assert saved_obj[0] == event_obj.message_str
+    assert json.loads(saved_obj[1])["error_code_int"] == 202
+
+
+@pytest.mark.parametrize("guarded_bool", [False, True])
+def test_raw_cross_cancel_is_retained_in_partial_result(monkeypatch, guarded_bool):
+    from dataclasses import replace
+    from alpha.live.guarded_dispatch import DispatchFailure
+    from alpha.live.ibkr_socket_client import CrossCancelSubmitError
+    clock_list = [datetime(2026, 11, 2, 14, 23, tzinfo=UTC)]
+    ib_obj = _CrossCancelSubmitIB(clock_list, fail_refresh_bool=True)
+    client_obj = _expiry_client_obj(monkeypatch, ib_obj)
+    request_obj = replace(_funding_request_obj(), submission_deadline_timestamp_str=(
+        "2026-11-02T14:28:00+00:00" if guarded_bool else None))
+    with pytest.raises(DispatchFailure if guarded_bool else CrossCancelSubmitError) as failure_obj:
+        client_obj.submit_order_request_list("SIM_pod", [request_obj], clock_list[0])
+    result_obj = (failure_obj.value.partial_result_obj if guarded_bool else failure_obj.value.cross_cancel_result_obj)
+    assert any(event_obj.message_str == "Order would cross related resting order"
+        for event_obj in result_obj.broker_order_event_list)
+    assert len(ib_obj.placed_order_list) == 1
+
+
+@pytest.mark.parametrize("dispatch_ts,expected_count_int", [
+    (datetime(2026, 11, 2, 20, 49, 59, tzinfo=UTC), 1),
+    (datetime(2026, 11, 2, 20, 50, tzinfo=UTC), 0),
+    (datetime(2026, 11, 2, 20, 50, 1, tzinfo=UTC), 0),
+])
+def test_auto_complete_deadline_checked_after_contract_qualification(monkeypatch, dispatch_ts, expected_count_int):
+    from dataclasses import replace
+    from alpha.live.guarded_dispatch import DispatchFailure
+    clock_list = [datetime(2026, 11, 2, 14, 35, tzinfo=UTC)]
+    ib_obj = _ExpirySubmitIB(clock_list)
+    ib_obj.after_qualification_ts = dispatch_ts
+    client_obj = _expiry_client_obj(monkeypatch, ib_obj)
+    request_obj = replace(_funding_request_obj(), broker_order_type_str="MKT",
+        submission_deadline_timestamp_str="2026-11-02T20:50:00+00:00")
+    if expected_count_int:
+        client_obj.submit_order_request_list("SIM_pod", [request_obj], clock_list[0])
+        assert ib_obj.placed_order_list[0].tif == "DAY"
+        assert not ib_obj.placed_order_list[0].goodTillDate
+    else:
+        with pytest.raises(DispatchFailure, match="deadline passed"):
+            client_obj.submit_order_request_list("SIM_pod", [request_obj], clock_list[0])
+    assert len(ib_obj.placed_order_list) == expected_count_int
+
+
+@pytest.mark.parametrize("cancel_bool,initial_cancel_bool", [(False, False), (True, False), (True, True)])
+def test_moo_observes_immediate_cancel_after_first_ack(monkeypatch, cancel_bool, initial_cancel_bool):
+    from eventkit import Event
+
+    class DelayedCancelIB(_ExpirySubmitIB):
+        def __init__(self, clock_list):
+            super().__init__(clock_list)
+            self.errorEvent = Event()
+            self.elapsed_float = 0.0
+            self.poll_count_int = 0
+            self.emitted_bool = False
+
+        def placeOrder(self, contract_obj, order_obj):
+            trade_obj = super().placeOrder(contract_obj, order_obj)
+            if initial_cancel_bool:
+                trade_obj.orderStatus.status = "Cancelled"
+            return trade_obj
+
+        def reqOpenOrders(self):
+            return [trade_obj for trade_obj in self.trade_list if trade_obj.orderStatus.status != "Cancelled"]
+
+        def reqCompletedOrders(self, apiOnly=False):
+            self.poll_count_int += 1
+            return [trade_obj for trade_obj in self.trade_list if trade_obj.orderStatus.status == "Cancelled"]
+
+        def sleep(self, seconds_float):
+            self.elapsed_float += seconds_float
+            if cancel_bool and not self.emitted_bool:
+                self.emitted_bool = True
+                trade_obj = self.trade_list[0]
+                trade_obj.orderStatus.status = "Cancelled"
+                # The asynchronous error is separate from the status-only trade log.
+                self.errorEvent.emit(trade_obj.order.orderId, 202, "Order would cross related resting order", None)
+
+    clock_list = [datetime(2026, 11, 2, 14, 23, tzinfo=UTC)]
+    ib_obj = DelayedCancelIB(clock_list)
+    client_obj = _expiry_client_obj(monkeypatch, ib_obj)
+    monkeypatch.setattr("alpha.live.ibkr_socket_client.monotonic", lambda: ib_obj.elapsed_float)
+    result_obj = client_obj.submit_order_request_list("SIM_pod", [_funding_request_obj()], clock_list[0])
+    captured_list = [event_obj for event_obj in result_obj.broker_order_event_list
+        if event_obj.event_source_str == "ibkr.error"]
+    assert len(captured_list) == int(cancel_bool)
+    assert len(ib_obj.placed_order_list) == 1
+    assert ib_obj.poll_count_int > 1
+    assert 0 < ib_obj.elapsed_float <= 1
+    assert len(ib_obj.errorEvent) == 0
+    if cancel_bool:
+        assert result_obj.broker_order_record_list[-1].status_str == "Cancelled"
