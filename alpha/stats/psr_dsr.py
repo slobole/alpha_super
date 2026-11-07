@@ -173,8 +173,16 @@ def null_selected_sharpe_draws(
     prior_independent_trial_count_int: int = 0,
     draw_count_int: int = 20000,
     random_seed_int: int = 0,
+    prior_group_count_list: list[int] | None = None,
+    prior_group_correlation_float: float = 0.0,
 ) -> np.ndarray:
     """Draws of the per-period Sharpe the search would select under the null (see `null_selected_sharpe_benchmark`).
+
+    `prior_group_count_list` (A25): one entry per earlier study of the family, its trial count N_i. Each study's best
+    null Sharpe is drawn exactly as the max of N_i normals with a common correlation rho,
+    sqrt(rho) * Z0_i + sqrt(1 - rho) * max_iid(N_i), with Z0_i shared inside the study and independent between studies.
+    This keeps the spread of the max (a surrogate of M independent trials matching only its mean is too narrow and
+    makes tail p-values liberal). rho = 0 is the old count-every-trial-as-independent case.
 
     Returning draws rather than only their mean allows an exact null p-value. When the earlier grids of the family
     have stored return series, put their columns into `correlation_mat` (their true correlation) instead of counting
@@ -197,6 +205,17 @@ def null_selected_sharpe_draws(
         uniform_vec = rng_obj.random(draw_count_int)
         prior_max_vec = stats.norm.isf(-np.expm1(np.log(uniform_vec) / prior_independent_trial_count_int)) * scale_float
         selected_vec = np.maximum(selected_vec, prior_max_vec)
+    if prior_group_count_list:
+        if not 0.0 <= prior_group_correlation_float < 1.0:
+            raise ValueError("prior_group_correlation_float must be in [0, 1).")
+        for group_count_int in prior_group_count_list:
+            if group_count_int <= 0:
+                continue
+            common_vec = rng_obj.standard_normal(draw_count_int)
+            iid_max_vec = stats.norm.isf(-np.expm1(np.log(rng_obj.random(draw_count_int)) / group_count_int))
+            group_max_vec = (np.sqrt(prior_group_correlation_float) * common_vec
+                             + np.sqrt(1.0 - prior_group_correlation_float) * iid_max_vec) * scale_float
+            selected_vec = np.maximum(selected_vec, group_max_vec)
     return selected_vec
 
 

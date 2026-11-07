@@ -190,3 +190,25 @@ def test_prior_trial_max_matches_brute_force_and_stays_finite_for_huge_n():
     mean_list = [draws_fn(np.eye(1), observation_count_int, prior_independent_trial_count_int=n,
                           draw_count_int=5000, random_seed_int=0).mean() for n in (1, 10**4, 10**9)]
     assert np.isfinite(mean_list).all() and mean_list[0] < mean_list[1] < mean_list[2]
+
+
+def test_prior_group_draw_is_the_exact_equicorrelated_max():
+    # A25: each earlier study's max is drawn as sqrt(rho) Z0 + sqrt(1 - rho) max_iid(N); compare with brute force,
+    # in the tail too (a mean-matched iid surrogate is too narrow there)
+    from alpha.stats.psr_dsr import null_selected_sharpe_draws as draws_fn
+
+    observation_count_int, n_int, rho_float = 2, 300, 0.5  # scale 1
+    new_vec = draws_fn(np.zeros((1, 1)) + 1, observation_count_int, prior_group_count_list=[n_int],
+                       prior_group_correlation_float=rho_float, draw_count_int=60000, random_seed_int=4)
+    rng = np.random.default_rng(9)
+    common_vec = rng.standard_normal(60000)
+    brute_mat = np.sqrt(rho_float) * common_vec[:, None] + np.sqrt(1 - rho_float) * rng.standard_normal((60000, n_int))
+    brute_vec = np.maximum(rng.standard_normal(60000), brute_mat.max(axis=1))
+    for q_float in (0.5, 0.95, 0.99):
+        assert abs(np.quantile(new_vec, q_float) - np.quantile(brute_vec, q_float)) < 0.04
+    # rho 0 is the old all-independent count
+    old_vec = draws_fn(np.eye(1), 401, prior_independent_trial_count_int=500, draw_count_int=40000, random_seed_int=1)
+    grouped_vec = draws_fn(np.eye(1), 401, prior_group_count_list=[200, 300], draw_count_int=40000, random_seed_int=2)
+    assert abs(old_vec.mean() - grouped_vec.mean()) < 0.01 * old_vec.mean()
+    with pytest.raises(ValueError):
+        draws_fn(np.eye(1), 401, prior_group_count_list=[10], prior_group_correlation_float=1.0)

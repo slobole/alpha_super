@@ -14,7 +14,7 @@ import pytest
 from alpha.scout.__main__ import main as scout_cli_main
 from alpha.scout.ledger import GENESIS_HASH_STR, LEDGER_RELATIVE_PATH, Ledger, LedgerIntegrityError, row_hash_str
 from alpha.scout.registration import Registration, register
-from alpha.scout.trials import effective_trial_count, family_trial_summary, record_trial
+from alpha.scout.trials import effective_trial_count, family_trial_summary, prior_effective_trial_count, record_trial
 
 REPO_ROOT_PATH = Path(__file__).resolve().parents[1]
 
@@ -308,7 +308,7 @@ def test_family_summary_uses_trial_returns_for_n_eff(tmp_path):
     base_vec = np.random.default_rng(1).normal(0, 0.01, 500)
     near_identical_df = pd.DataFrame({f"t{i}": base_vec + np.random.default_rng(i).normal(0, 1e-5, 500) for i in range(3)})
     summary = family_trial_summary(ledger, "us_equity_short_term_reversal", near_identical_df)
-    assert summary.effective_trial_count_float == pytest.approx(31.0)
+    assert summary.effective_trial_count_float == pytest.approx(1.0 + prior_effective_trial_count(30))
     with pytest.raises(ValueError, match="one column per recorded trial"):
         family_trial_summary(ledger, "us_equity_short_term_reversal", near_identical_df.iloc[:, :2])
 
@@ -333,7 +333,8 @@ def test_family_trial_summary_counts_trials_and_prior_trials(tmp_path):
     summary = family_trial_summary(ledger, "us_equity_short_term_reversal")
     assert summary.recorded_trial_count_int == 3
     assert summary.prior_trial_count_int == 30
-    assert summary.effective_trial_count_float == pytest.approx(33.0)
+    assert summary.prior_effective_trial_count_float == pytest.approx(prior_effective_trial_count(30))
+    assert summary.effective_trial_count_float == pytest.approx(3.0 + prior_effective_trial_count(30))
     assert summary.trial_sharpe_variance_float == pytest.approx(np.var([0.02, 0.05, 0.08], ddof=1))
     empty_summary = family_trial_summary(ledger, "calendar_and_flow")
     assert empty_summary.effective_trial_count_float == 1.0
@@ -358,3 +359,24 @@ def test_non_string_keys_are_refused_before_they_can_brick_the_chain(tmp_path):
     ledger.append("note", {"metrics_dict": {"by_offset": {"2": 0.1, "10": 0.2}}})
     ledger.append("note", {"text_str": "still appendable"})
     assert ledger.verify() == 2
+
+
+def test_prior_effective_count_matches_expected_max_and_is_conservative():
+    """A25: M independent trials with the expected max of N trials at the prior correlation (0.3); never above N,
+    never below the count measured on an equicorrelated grid with a higher true correlation."""
+    from alpha.stats.psr_dsr import exact_expected_max_z
+
+    assert prior_effective_trial_count(0) == 0.0 and prior_effective_trial_count(1) == 1.0
+    value_list = [prior_effective_trial_count(n) for n in (2, 27, 810, 10_000, 100_000)]
+    assert all(1.0 <= m <= n for m, n in zip(value_list, (2, 27, 810, 10_000, 100_000)))
+    assert value_list == sorted(value_list)
+    assert exact_expected_max_z(prior_effective_trial_count(810)) == pytest.approx(np.sqrt(0.7) * exact_expected_max_z(810), rel=1e-6)
+    assert exact_expected_max_z(prior_effective_trial_count(810, 0.5)) == pytest.approx(np.sqrt(0.5) * exact_expected_max_z(810), rel=1e-6)
+    # simulate a grid of 200 trials with true common correlation 0.7: its matched count sits below the rule's
+    rng = np.random.default_rng(0)
+    common_vec = rng.standard_normal(20000)
+    draw_mat = np.sqrt(0.7) * common_vec[:, None] + np.sqrt(0.3) * rng.standard_normal((20000, 200))
+    measured_target_float = float(draw_mat.max(axis=1).mean())
+    assert measured_target_float < exact_expected_max_z(prior_effective_trial_count(200))
+    with pytest.raises(ValueError):
+        prior_effective_trial_count(-1)

@@ -17,8 +17,19 @@ lopsided grids that real searches produce). The single cut at ρ = 0.5 is the on
 tuning choice; P2 calibration may revisit it.
 
 Family N for the DSR = N_eff of the family's recorded trials
-                       + prior_trials_int declared by retro registrations.
-Prior trials are counted as independent, which is the conservative choice.
+                       + the effective count of the prior_trials_int declared by retro registrations.
+
+Prior trials have no stored return series, so they are modelled (A25): each registration's N prior trials are N
+normals with a common correlation rho = PRIOR_TRIAL_CORRELATION_FLOAT, and registrations are independent of each
+other. For the S5 null p-value, `null_selected_sharpe_draws(prior_group_count_list=..., prior_group_correlation_float=...)`
+draws that max exactly (sqrt(rho) Z0 + sqrt(1 - rho) max_iid(N)), keeping its spread. For the DSR formula, whose
+benchmark is an expected maximum, `prior_effective_trial_count` gives the M independent trials with the same expected
+max, E[max_M] = sqrt(1 - rho) E[max_N]; matching only the mean makes a too-narrow null, so it is not used for p-values.
+Evidence for the size of rho: on all 29 saved Scout grids the measured within-grid correlation (0.56-0.99) gives a
+smaller expected max than the rule at 0.5 (e.g. 810 multi-rule EOM cells: measured M 14, rule 50). Pakal studies mix
+more rules, hence the headline 0.3. Treating registrations as independent is conservative for the expected max, but only
+incidentally. The raw count stays in `prior_trial_count_int`; counting every prior trial as independent (A23 and
+before) made the DSR of large families uninformative.
 """
 
 from __future__ import annotations
@@ -29,13 +40,30 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 from scipy.cluster.hierarchy import fcluster, linkage
+from scipy.optimize import brentq
 from scipy.spatial.distance import squareform
 
 from alpha.scout.ledger import REPO_ROOT_PATH, Ledger
 from alpha.scout.registration import registration_rows
+from alpha.stats.psr_dsr import exact_expected_max_z
 
 CLUSTER_CUT_CORRELATION_FLOAT = 0.5
+# Headline 0.3 (chosen before the A25 table): conservative for pakal studies that mix rules, universes and periods;
+# 0.5 (measured Scout grids) and 0 (all independent, A23) are reported beside it.
+PRIOR_TRIAL_CORRELATION_FLOAT = 0.3
 MODE_TUPLE = ("parity", "truth")
+
+
+def prior_effective_trial_count(prior_trial_count_int: int, correlation_float: float = PRIOR_TRIAL_CORRELATION_FLOAT) -> float:
+    """M independent trials with the expected maximum of N equicorrelated ones (module docstring, A25); 0 for N = 0."""
+    if prior_trial_count_int < 0 or not 0.0 <= correlation_float < 1.0:
+        raise ValueError("prior_trial_count_int must be >= 0 and correlation_float in [0, 1).")
+    if prior_trial_count_int <= 1:
+        return float(prior_trial_count_int)
+    target_float = np.sqrt(1.0 - correlation_float) * exact_expected_max_z(float(prior_trial_count_int))
+    if target_float <= exact_expected_max_z(1.0):
+        return 1.0
+    return float(brentq(lambda m_float: exact_expected_max_z(m_float) - target_float, 1.0, float(prior_trial_count_int)))
 
 
 def effective_trial_count(trial_return_df: pd.DataFrame, min_overlap_int: int = 60) -> float:
@@ -125,6 +153,10 @@ class FamilyTrialSummary:
     family_id_str: str
     recorded_trial_count_int: int
     prior_trial_count_int: int
+    # A25: the prior trials' effective count (sum over registrations of prior_effective_trial_count)
+    prior_effective_trial_count_float: float
+    # A25: trial count of each registration with prior trials, for the exact correlated null draw
+    prior_group_count_tuple: tuple
     effective_trial_count_float: float
     # None when fewer than two trials are recorded: the family's Sharpe dispersion is unknown.
     # `deflated_sharpe_ratio` then falls back to the null sampling variance 1 / (T − 1).
@@ -139,11 +171,10 @@ def family_trial_summary(ledger: Ledger, family_id_str: str, trial_return_df: pd
     order), N_eff comes from the correlation clusters of their returns.
     """
     trial_row_list = [row_dict for row_dict in ledger.rows("trial") if row_dict["family_id_str"] == family_id_str]
-    prior_trial_count_int = sum(
-        int(row_dict.get("prior_trials_int") or 0)
-        for row_dict in registration_rows(ledger).values()
-        if row_dict["family_id_str"] == family_id_str
-    )
+    prior_list = [int(row_dict.get("prior_trials_int") or 0) for row_dict in registration_rows(ledger).values()
+                  if row_dict["family_id_str"] == family_id_str]
+    prior_trial_count_int = sum(prior_list)
+    prior_effective_float = sum(prior_effective_trial_count(n_int) for n_int in prior_list)
     sharpe_vec = np.array([row_dict["per_period_sharpe_float"] for row_dict in trial_row_list], dtype=float)
     recorded_trial_count_int = int(sharpe_vec.size)
 
@@ -158,6 +189,8 @@ def family_trial_summary(ledger: Ledger, family_id_str: str, trial_return_df: pd
         family_id_str=family_id_str,
         recorded_trial_count_int=recorded_trial_count_int,
         prior_trial_count_int=prior_trial_count_int,
-        effective_trial_count_float=max(1.0, recorded_effective_float + prior_trial_count_int),
+        prior_effective_trial_count_float=prior_effective_float,
+        prior_group_count_tuple=tuple(n_int for n_int in prior_list if n_int > 0),
+        effective_trial_count_float=max(1.0, recorded_effective_float + prior_effective_float),
         trial_sharpe_variance_float=float(sharpe_vec.var(ddof=1)) if recorded_trial_count_int >= 2 else None,
     )

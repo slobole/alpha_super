@@ -1494,6 +1494,44 @@ Code: `alpha/scout/shadow.py` (`log_forward`), tests `tests/test_scout_shadow_lo
   `null_selected_sharpe_draws` drew an N-wide normal matrix per draw and ran out of memory above about 10^4 prior
   trials; it now draws the maximum exactly from its inverse CDF.
 
+**A25 (2026-11-07, prior trials modelled per study instead of as independent draws).**
+Code: `alpha/scout/trials.py` (`prior_effective_trial_count`, `FamilyTrialSummary.prior_group_count_tuple`),
+`alpha/stats/psr_dsr.py` (`null_selected_sharpe_draws(prior_group_count_list=..., prior_group_correlation_float=...)`).
+Tests: `tests/test_scout_ledger.py`, `tests/test_stats_selection_and_pbo.py`.
+
+- **Model:** each registration's N prior trials are N normals with a common correlation rho; registrations are
+  independent. The S5 null draws each study's best exactly, sqrt(rho) Z0 + sqrt(1 - rho) max_iid(N). A first version
+  replaced each study by M independent trials with the same expected max; the quant review showed that surrogate is
+  about twice too narrow at large N, so tail p-values came out liberal (a true 5% read as 0.4-2.5%). The M count is
+  kept only for the DSR formula, whose benchmark is an expected max.
+- **rho:** headline 0.3, chosen before this table: pakal studies mix rules, universes and periods. Evidence that it is
+  conservative for Scout-style grids: on all 29 saved grids the measured correlation (0.56-0.99) gives a smaller
+  expected max than the rule even at 0.5 (810 multi-rule EOM cells: measured M 14, rule 50). 0.5 and 0 (the A24 table)
+  are sensitivities only, never a selector.
+- **S5 live p at today's family trials** (saved bundles, seed 0, 20,000 draws; card p at the card's own N):
+
+  | Pod | Family studies | Raw prior trials | Card p | p, rho 0.3 | p, rho 0.5 | p, rho 0 |
+  |---|---:|---:|---:|---:|---:|---:|
+  | EOM | 19 | 3,295 | <5e-5 | 0.0008 | 0.0006 | 0.0005 |
+  | EOM flow rules | 19 | 3,295 | <5e-5 | <5e-5 | <5e-5 | 0.0001 |
+  | Compass QQQ | 7 | 1,822 | 0.0004 | 0.0004 | 0.0003 | 0.0006 |
+  | DV2 industry ETF | 21 | 12,534 | 0.0017 | 0.16 | 0.09 | 0.31 |
+  | HPI vote | 71 | 754,441 | 0.0001 | 0.36 | 0.17 | 0.76 |
+  | Sector IBS VOX IYR | 21 | 12,534 | 0.0074 | 0.44 | 0.27 | 0.82 |
+  | TAA 3x | 31 | 27,989 | 0.0078 | 0.53 | 0.32 | 0.89 |
+  | CORE5 | 56 | 182,315 | 0.0012 | 0.66 | 0.36 | 0.97 |
+  | TAA 3x 1/N | 31 | 27,989 | 0.026 | 0.84 | 0.61 | 1.00 |
+  | DV2 S&P 500 | 71 | 754,441 | 0.0042 | 0.91 | 0.62 | 1.00 |
+  | NDX NATR20 | 94 | 658,670 | 0.0075 | 1.00 | 0.93 | 1.00 |
+  | NDX VXN | 94 | 658,670 | 0.062 | 1.00 | 1.00 | 1.00 |
+
+- **Reading:** with each study's variants allowed to be correlated, the large-family results are no longer an artefact
+  of counting near-copies, and they still do not pass. Given how many studies the house ran in stock reversal,
+  momentum, trend and TAA, a best result as good as these pods' is what luck alone would often give. Only the
+  month-end flow (EOM) and Compass QQQ clear the bar in every setting; DV2 industry ETF comes closest of the rest
+  (0.09-0.16). The DSR stays a WARN and the S5 gate stays the MCPT on each pod's own grid, which these pods passed; the
+  forward shadows and the live record are what can settle it. Cards are not re-issued by this amendment.
+
 **Not adopted from the critique.** One correction: the critique said the kill rule closes gap G-006.
 It does not. G-006's missing circuit breaker is about **repeated reconciliation failures**, not about
 performance. A performance kill rule is a separate, currently unrecorded gap, and P1 should add it to
