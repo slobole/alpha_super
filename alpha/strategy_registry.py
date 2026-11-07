@@ -123,6 +123,10 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     # IBKR's own pre-trade checks decide funding and DBC borrow; the example
     # remains disabled. Research borrow remains fixed at 1%.
     "strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5": MaturityTier.WIRED,
+    # CORE6: CORE5 untouched plus a half-size vol-sized Bitcoin sleeve through IBIT, from BIL (docs/research/CORE6_20261107.md).
+    # PM checks passed 2026-11-07 (results/research/pm_readiness/2026-11-07_122829). No live route. Bitcoin before Jan 2024
+    # comes from Pakal's cache on this machine.
+    "strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core6": MaturityTier.PM_READY,
     # Beyond 60/40 trend tilt (T1): wired 2026-11-05 as a guarded next-open pod like CORE5 (docs/live/BEYOND6040_T1_WIRING_20261105.md);
     # research record docs/research/BEYOND_6040_20261105.md. Disabled template, no account, no book slot (owner decision). PM checks passed 2026-11-05.
     "strategies.taa_beyond_6040.strategy_taa_beyond_6040_trend_tilt": MaturityTier.WIRED,

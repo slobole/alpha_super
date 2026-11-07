@@ -79,6 +79,8 @@ RUNS: dict[str, tuple[str, dict]] = {
     "mo_leg3": ("strategies.momentum.strategy_mo_capsule_leg3_residual_r1000", {}),
     "vrp": ("strategies.vix_stuff.strategy_vrp_svxy_vixm_rsi2", {}),
     "t1": ("strategies.taa_beyond_6040.strategy_taa_beyond_6040_trend_tilt", {}),
+    # No column in the frozen frame: history from the saved research run of Nov 7, 2026. BTC before Jan 2024 from Pakal's cache.
+    "core6": ("strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core6", {}),
 }
 HEAVY = ("hpi_vote", "hpi_g", "hpi_g_spmo", "hpi_ibs_rsi", "dv2", "dv2_g", "dv2_g_spmo", "dv2_g_liq", "hpi_g_liq", "ndx_vxn", "ndx_atr", "ndx_atr_cap", "ndx_natr_cap")
 RETRY_UNTIL_SECONDS = 1200  # no retry starts this long after the first run started, so one refresh stays near 30 minutes

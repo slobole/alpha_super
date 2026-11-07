@@ -101,6 +101,7 @@ FROZEN_SINCE: dict[str, tuple[str, str]] = {
     "mo_capsule": ("2026-10-31", "The owner closed the capsule as three legs on Oct 31."),
     "vrp": ("2026-11-03", "Owner lock and frozen spec of Nov 3."),
     "t1": ("2026-11-05", "Study spec frozen and module added Nov 5; PM READY the same day."),
+    "core6": ("2026-11-07", "Signal moved to IBIT's 16:00 close Nov 7 (owner decision); research module the same day."),
 }
 PARKED: set[str] = set()
 LIVE_TIP = "Live by your note of Oct 20. The registry still says {tier}."
@@ -139,6 +140,7 @@ ENGINES = [
     ("downshock", "downshock", "Downshock", "Sector ETFs after sharp falls", "dips", [], "sector_ibs_vox_iyr_reaudition_20261002"),
     ("dispersion", "disp", "Dispersion", "Volatile industry ETF dips", "dips", [("disp_xlc", "With XLC"), ("disp_xlc_sma", "With XLC, 200-day filter")], "dispersion_ibs_kie_ihi_sma200_reaudition_20261002"),
     ("core5", "core5", "CORE5", "Five assets, each on its own trend", "macro", [], "core5_reaudition_20261002"),
+    ("core6", "core6", "CORE6", "CORE5 plus a small Bitcoin sleeve", "macro", [], "core6_btc_sleeve_qualification_20261106"),
     ("t1", "t1", "Beyond 60/40 T1", "Stocks, long bonds, gold, each out below its trend", "macro", [], None),
     ("compass", "compass", "Compass", "Sectors by growth and inflation", "macro", [("compass_qqq", "QQQ in the growth cell")], "compass_reaudition_20261002"),
     ("eom", "eom_flow", "EOM", "Month-end stock and bond flow", "macro", [], "eom_reaudition_20261002"),
@@ -171,6 +173,8 @@ WORDS = {
     "vrp": "Hold SVXY (short VIX futures) while VIX futures are in contango, more when SPY's two-day RSI is low; buy VIXM when the curve turns. Idle money in T-bills.",
     # strategies/taa_beyond_6040/strategy_taa_beyond_6040_trend_tilt.py, in plain words
     "t1": "Each month weight VTI, TLT and GLD by inverse 63-day volatility; an asset below its 10-month average is left out, its share stays in cash. Cut the whole book when its volatility is above 8.5%, back to 8%. No leverage.",
+    # strategies/taa_beyond_6040/strategy_taa_adaptive_macro_core6.py, in plain words
+    "core6": "CORE5 unchanged, plus Bitcoin through IBIT while Bitcoin is above its own CORE5 trend: a sixth of the book scaled to 10% volatility, about 2% on average, taken from T-bills. Before IBIT listed (Jan 2024) the run holds Bitcoin itself.",
     "disp": "Any of five industry ETFs that closes near its low on a wide-range day, above its 200-day average, gets a 20% slot.",
 }
 EOM_OPEN = 0.85
@@ -184,6 +188,7 @@ PLAN_FROM_STUDY = {
     "core5": (0.80, "plan", "Plan of record: the median of 200 random settings; its own read 0.95. Apr 2008 to 2022, no rate taken off. docs/research/SCOUT_ROBUSTNESS_20261002.md"),
     "compass": (0.85, "in-sample", "Honest in-sample figure, May 2003 to Aug 2026, no rate taken off. Holdout 1983 to 2002: 0.74. docs/research/INFLATION_COMPASS_DEEP_RESEARCH_20260928.md"),
     "mo_capsule": (0.65, "plan", "Plan of record: 11% / 0.65 / -26%. The backtest is the best of 11 day pairs, median Sharpe 0.72. docs/research/RESIDUAL_MOMENTUM_20261031.md"),
+    "core6": (0.87, "plan", "CORE5's plan 0.80 plus what Bitcoin added since 2021 (+0.07, t 1.3). The full-history gain (+0.40) is mostly 2012-13. docs/research/CORE6_20261107.md"),
     "t1": (0.65, "plan", "Over cash, 1970 to 2022 development sample with synthetic history before 2004, idle cash earning Fed funds (0.61 in T-bills, 0.30 at 0%); the 2023 to 2026 vault 0.50. docs/research/BEYOND_6040_20261105.md"),
     "vrp": (0.70, "plan", "Plan of record about 0.70, not the backtest's 0.93: the RSI2 boost, the threshold and VIXM were chosen after 460 trials. docs/research/VRP_RSI2_BUILD_20261103.md"),
     "eom_vote": (0.95, "plan", "Plan of record: what is left if the vote fades, always TLT in the final week plus the pair. 2003 to Oct 30, 2026, idle cash at 0%, no rate taken off. docs/research/EOM_TRADABLE_20261101.md"),
@@ -193,6 +198,8 @@ FADE = {"eom": {"sharpe": EOM_OPEN, "word": "if filled at the open", "label": "o
 # Next 10% again: month-end flow is one idea, so its older rule is never a candidate, and a mix holding either rule takes neither.
 NOT_CANDIDATE = {"eom": "Flow Vote is the newer rule of this family"}
 SAME_IDEA = {"eom": "month-end flow", "eom_vote": "month-end flow",
+             # CORE6 is CORE5 with a Bitcoin sleeve: one pod per engine
+             "core5": "CORE", "core6": "CORE",
              # the sized pods are DV2-G and HPI-G with other entry sizes: one pod per engine
              "dv2_g": "DV2-G", "dv2_g_liq": "DV2-G", "hpi_g": "HPI-G", "hpi_g_liq": "HPI-G",
              # the capsule and its legs are one engine: a mix holds the capsule or legs, never both
@@ -377,6 +384,12 @@ CAVEATS = {
         ("Optimistic", "About 441 trials. The commodity short was kept against its gates."),
         ("Requirement", "Shorts DBC: needs margin and a borrow, modelled at 1% a year."),
         ("Conservative", "Withholding: up to 0.2 points a year."),
+    ],
+    "core6": [
+        ("Optimistic", "Most of the gain is 2011-20; 2012-13 alone is almost half. Since 2021 +0.07 Sharpe over CORE5, not significant; since IBIT listed about zero."),
+        ("Design", "Holding the same small Bitcoin weight all the time gives the same Sharpe: the gain is owning about 2% Bitcoin, the trend switch saves about 1 point of drawdown."),
+        ("Optimistic", "Before Jan 2024 Bitcoin had no ETF: the run holds Bitcoin itself, from Pakal's cache, at 15 bp a side."),
+        ("Regime", "Less of a diversifier now: correlation with SPY 0.04 in 2011-16, 0.39 in 2024-26."),
     ],
     "compass": [
         ("Optimistic", "Settings sit at a lucky peak: 826 trials, failed the pre-2003 holdout. In sample about 0.85, holdout 0.74."),
