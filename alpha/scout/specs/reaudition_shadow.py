@@ -26,6 +26,7 @@ FAMILY_BUILDER_DICT: dict[str, str] = {
     "dv2_reaudition_20261002": "dv2_family",
     "dv2_ndx_reaudition_20261002": "dv2_ndx_family",
     "dv2_industry_etf_reaudition_20261002": "dv2_industry_family",
+    "eom_tradable_retro_20261101": "eom_v2_family",
 }
 
 

@@ -48,8 +48,12 @@ SHADOW_PROVIDER_DICT: dict[str, str] = {
     "dv2_reaudition_20261002": "alpha.scout.specs.reaudition_shadow:shadow_daily_return_ser",
     "dv2_ndx_reaudition_20261002": "alpha.scout.specs.reaudition_shadow:shadow_daily_return_ser",
     "dv2_industry_etf_reaudition_20261002": "alpha.scout.specs.reaudition_shadow:shadow_daily_return_ser",
+    # The month-end flow vote of 2026-11-01 (docs/research/EOM_TRADABLE_20261101.md).
+    "eom_tradable_retro_20261101": "alpha.scout.specs.reaudition_shadow:shadow_daily_return_ser",
     # Long SVXY (short volatility) / long VIXM with the RSI(2) boost, owner lock of 2026-11-03 (scripts/research/vrp_rsi2_build_20261103/).
     "vrp_rsi2_locked_retro_20261103": "alpha.scout.specs.vrp_rsi2:shadow_daily_return_ser",
+    # IBIT 20%-vol sleeve, the candidate 5% BTC slot beside GR1 (docs/research/BTC_GR1_SLOT_SHADOW_20261107.md).
+    "btc_vol_sleeve_gr1_slot_20261107": "alpha.scout.specs.btc_vol_sleeve:shadow_daily_return_ser",
 }
 
 
