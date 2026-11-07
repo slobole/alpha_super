@@ -11,8 +11,9 @@ Five parts, each isolated (one failure is reported and never hides the others):
    The live Flex store sits on the VPS; on the workstation the report reads downloaded XML files and says STALE when
    they are old. Nothing is wired to alerts or trading.
 4. **fdr**: the program-wide BY report over the ledger.
-5. **kb**: knowledge-base studies with no citing registration (`alpha.scout.kb_link`, A22). Report only: a gap or an
-   unreadable knowledge base is shown in the status file but never fails the run.
+5. **kb**: knowledge-base studies with no citing registration (`alpha.scout.kb_link`, A22). The part fails when a
+   study has waited more than `kb_link.GRACE_DAYS_INT` days for its retro registration, or when the knowledge base
+   cannot be read (A23); younger gaps are listed as pending.
 
 Output: results/scout/daily/<date>/daily_status.json and daily_status.md (what the Bench page reads), beside each
 part's own report folder. Research only: no live path, account or order is read for writing or touched.
@@ -97,10 +98,13 @@ def run_daily(as_of_date: date | None = None, flex_db_path: Path | None = None, 
         from alpha.scout.kb_link import kb_link_report, summary_str
 
         try:
-            report_dict = kb_link_report(ledger)
-        except Exception as error:  # report only: an unreadable knowledge base never fails the run
-            return {"status_str": "UNREADABLE", "summary_str": f"knowledge base not read: {type(error).__name__}: {error}"}
-        return {"status_str": "GAPS" if report_dict["gap_count_int"] else "OK", "gap_count_int": report_dict["gap_count_int"],
+            report_dict = kb_link_report(ledger, as_of_date=as_of_date)
+        except Exception as error:  # an unreadable knowledge base would hide every gap: it fails the part
+            return {"status_str": "UNREADABLE", "ok_bool": False,
+                    "summary_str": f"knowledge base not read: {type(error).__name__}: {error}"}
+        status_str = "OVERDUE" if report_dict["overdue_count_int"] else ("PENDING" if report_dict["gap_count_int"] else "OK")
+        return {"status_str": status_str, "ok_bool": status_str != "OVERDUE", "gap_count_int": report_dict["gap_count_int"],
+                "overdue_id_list": [e["study_id_str"] for e in report_dict["overdue"]],
                 "gap_id_list": [e["study_id_str"] for e in report_dict["gaps"]],
                 "pre_scout_count_int": len(report_dict["pre_scout"]), "cited_count_int": len(report_dict["cited"]),
                 "summary_str": summary_str(report_dict)}

@@ -1,10 +1,11 @@
-"""Scout A22: the knowledge base -> ledger link (gap list, pre-Scout cut, daily part never fails the run) and the
-A22 retro registrations (synthetic registry, temporary ledgers)."""
+"""Scout A22/A23: the knowledge base -> ledger link (gap list, pre-Scout cut, grace period, daily part fails on an
+overdue gap) and the A22 retro registrations (synthetic registry, temporary ledgers)."""
 
 from __future__ import annotations
 
 import importlib.util
 import json
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -90,20 +91,34 @@ def _quiet_daily(monkeypatch, tmp_path):
     monkeypatch.setattr(shadow_module, "SHADOW_ROOT_PATH", tmp_path / "shadow")
 
 
-def test_daily_kb_part_reports_gaps_and_never_fails_the_run(ledger, registry_path, tmp_path, monkeypatch):
+def test_gaps_older_than_the_grace_period_are_overdue(ledger, registry_path):
+    # cutoff 2026-10-09: october_gap (10-01) and the undated gap are overdue, prefix (10-11) is still pending
+    report_dict = kb_link_report(ledger, registry_path, as_of_date=date(2026, 10, 12))
+    assert {e["study_id_str"] for e in report_dict["overdue"]} == {"october_gap", "undated_gap"}
+    assert {e["study_id_str"] for e in report_dict["pending"]} == {"prefix"}
+    assert kb_link_report(ledger, registry_path, as_of_date=date(2026, 10, 15))["overdue_count_int"] == 3
+
+
+def test_daily_kb_part_fails_on_an_overdue_gap_and_passes_on_pending_ones(ledger, registry_path, tmp_path, monkeypatch):
     _quiet_daily(monkeypatch, tmp_path)
     monkeypatch.setattr("alpha.scout.kb_link.KB_REGISTRY_PATH", registry_path)
     monkeypatch.setattr(kb_link_report, "__defaults__", (registry_path,))
-    out_path, status_dict = daily_module.run_daily(ledger=ledger, output_root_path=tmp_path / "daily")
+    as_of_date = date(2026, 10, 12)
+    out_path, status_dict = daily_module.run_daily(as_of_date=as_of_date, ledger=ledger, output_root_path=tmp_path / "daily")
     kb_dict = status_dict["parts"]["kb"]
-    assert kb_dict["ok_bool"] and kb_dict["status_str"] == "GAPS" and kb_dict["gap_count_int"] == 3
-    assert set(kb_dict["gap_id_list"]) == {"october_gap", "undated_gap", "prefix"}
-    assert status_dict["ok_bool"]  # gaps are reported, the run still passes
+    assert not kb_dict["ok_bool"] and kb_dict["status_str"] == "OVERDUE" and kb_dict["gap_count_int"] == 3
+    assert set(kb_dict["overdue_id_list"]) == {"october_gap", "undated_gap"}
+    assert not status_dict["ok_bool"]  # an overdue study fails the run
     assert "october_gap" in (out_path / "daily_status.md").read_text(encoding="utf-8")
 
+    register(ledger, _registration("c", "pakal-research/reports/october_gap (5 evaluations)."))
+    register(ledger, _registration("d", "pakal-research/reports/undated_gap (2 evaluations)."))
+    _, status_dict = daily_module.run_daily(as_of_date=as_of_date, ledger=ledger, output_root_path=tmp_path / "daily2")
+    assert status_dict["parts"]["kb"]["status_str"] == "PENDING" and status_dict["ok_bool"]
+
     monkeypatch.setattr(kb_link_report, "__defaults__", (tmp_path / "no_such_registry.json",))
-    _, status_dict = daily_module.run_daily(ledger=ledger, output_root_path=tmp_path / "daily2")
-    assert status_dict["parts"]["kb"]["status_str"] == "UNREADABLE" and status_dict["ok_bool"]
+    _, status_dict = daily_module.run_daily(as_of_date=as_of_date, ledger=ledger, output_root_path=tmp_path / "daily3")
+    assert status_dict["parts"]["kb"]["status_str"] == "UNREADABLE" and not status_dict["ok_bool"]
 
 
 def _load_script(name_str: str):
@@ -129,3 +144,34 @@ def test_a22_registrations_validate_cite_their_study_and_are_graded():
     for rid, (word_str, reason_str, source_str) in module.GRADE_DICT.items():
         assert rid in id_list and word_str in GRADE_WORD_TUPLE and word_str != "CANDIDATE" and reason_str and source_str
     assert set(module.GRADE_DICT) == set(id_list)
+
+
+A23_DIR_PATH = Path(__file__).resolve().parents[1] / "scripts" / "research" / "scout_kb_link_20261107"
+
+
+def test_a23_registrations_validate_sum_to_each_study_and_are_ordered_parent_first():
+    spec = importlib.util.spec_from_file_location("a23_register", A23_DIR_PATH / "register.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    row_list, reg_list, grade_dict = module.row_list(), module.registration_list(), module.grade_dict()
+    id_list = [reg.registration_id_str for reg in reg_list]
+    assert len(set(id_list)) == len(id_list) == len(row_list) and set(grade_dict) == set(id_list)
+    total_dict: dict[str, int] = {}
+    for row, reg in zip(row_list, reg_list):
+        reg.validate()
+        assert reg.retro_bool and f"reports/{row['folder']} (" in reg.source_str
+        assert cites_bool(reg.source_str, row["folder"])
+        total_dict[row["study_id"]] = total_dict.get(row["study_id"], 0) + reg.prior_trials_int
+        assert reg.prior_trials_int <= row["kb_total_int"]
+    for row in row_list:  # each study's rows sum to its counted total, never above the knowledge-base count
+        assert total_dict[row["study_id"]] == row["counted_total_int"] <= row["kb_total_int"], row["study_id"]
+        # a count below the study's own is explained in the permanent row
+        assert row["counted_total_int"] == row["kb_total_int"] or row["count_note"] in module.source_str(row), row["study_id"]
+    placed_set = set()
+    for reg in reg_list:  # a parent inside the batch comes first and sits in the same family
+        if reg.parent_id_str in id_list:
+            assert reg.parent_id_str in placed_set
+            assert reg_list[id_list.index(reg.parent_id_str)].family_id_str == reg.family_id_str
+        placed_set.add(reg.registration_id_str)
+    for word_str, reason_str, source_str in grade_dict.values():
+        assert word_str in GRADE_WORD_TUPLE and word_str != "CANDIDATE" and reason_str and source_str

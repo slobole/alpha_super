@@ -17,8 +17,8 @@ FAMILY_DESCRIPTION_DICT: dict[str, str] = {
         "sellers. Examples: DV2, QPI, RSI(2), IBS, HPI on S&P 500 / NDX / Russell members."
     ),
     "etf_short_term_reversal": (
-        "The same liquidity-provision idea on sector, industry or country ETFs. Examples: sector IBS "
-        "down-shock, industry-ETF DV2."
+        "The same liquidity-provision idea on broad index, sector, industry or country ETFs. Examples: sector IBS "
+        "down-shock, industry-ETF DV2, QQQ / SPY IBS and band rules."
     ),
     "equity_cross_sectional_momentum": (
         "Holding recent relative winners among stocks, paid for under-reaction and slow information "
@@ -73,6 +73,26 @@ FAMILY_DESCRIPTION_DICT: dict[str, str] = {
         "differential), paid for bearing crash risk and supplying insurance to hedgers. Example: commodity curve carry "
         "(Koijen, Moskowitz, Pedersen and Vrugt 2018). Kept apart from momentum and trend: the signal is the curve "
         "shape at T, not past returns."
+    ),
+    "earnings_announcement_events": (
+        "Price effects tied to each firm's own scheduled earnings report: the announcement-month premium (Frazzini and "
+        "Lamont 2007, Savor and Wilson 2016), a firm's own history of report reactions and early or late reports, paid "
+        "for bearing announcement risk. Kept apart from calendar_and_flow (A23): the trigger is a firm-specific event "
+        "date, as for dividend_seeking_demand, not a shared calendar flow. Post-announcement drift stays in "
+        "equity_cross_sectional_momentum, as in earlier rows."
+    ),
+    "equity_value_quality_factors": (
+        "Holding the cheapest stocks on fundamentals (free-cash-flow yield, EBITDA/EV) or the most profitable, improving "
+        "and stable ones, held for months, paid for the value and profitability premia and for mispriced fundamentals. "
+        "Example: the QuantSolvings value / quality rebuild (A23). Not formulaic_alpha_mining: two explicit factor "
+        "mechanisms, not mined price/volume formulas."
+    ),
+    "relative_value_spread_convergence": (
+        "Holding the cheap leg and shorting the rich leg of two close substitutes (cointegrated pairs, spot against "
+        "futures, related commodities) until the spread returns to its long-run relation, paid for supplying "
+        "convergence capital that arbitrageurs find costly to hold in shocks. Example: the Fanelli crude-oil pairs "
+        "(A23). Kept apart from the reversal families, which buy a single oversold asset; earlier pairs rows (country-ETF "
+        "and stock pairs) stay in the reversal families where they were registered."
     ),
 }
 

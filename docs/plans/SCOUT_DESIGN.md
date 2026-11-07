@@ -1404,6 +1404,42 @@ Script: `scripts/research/scout_kb_link_20261017/register.py`, ledger rows 302-3
 - **Practice:** the daily status shows any new gap. A study in the knowledge base still gets its retro registration
   the same day, but a missed one is now visible the next morning.
 
+**A23 (2026-11-07, the knowledge-base gap closed and enforced).**
+Script: `scripts/research/scout_kb_link_20261107/register.py` with its data in `rows.json`. Code: `alpha/scout/kb_link.py`,
+the `kb` part of `alpha/scout/daily.py`, three families in `alpha/scout/families.py`. Tests: `tests/test_scout_kb_link.py`.
+
+- **Gap:** A22's check was report only. By 2026-11-07 the daily status listed 77 studies dated 2026-10-17..11-07 with no
+  citing registration, 48,873 evaluations by their own counts. Every DSR read a family N that was too small.
+- **Enforcement:** a gap older than `GRACE_DAYS_INT` (3) days is **overdue** and fails the daily `kb` part; younger
+  gaps are **pending**; an undated gap is overdue. An unreadable knowledge base now fails the part too, since it would
+  hide every gap.
+- **Fix:** 110 retro registrations for the 77 studies, each with one grade row "(outside Scout)". Seven agents drafted
+  the rows from each study's report, experiment ledger and frozen spec; an independent audit checked the counts and
+  families before the ledger write. Counted 46,508 of 48,873:
+  - null draws the studies counted as variants are removed (random-entry, random-rank, price-noise and
+    shuffled-history controls: quantitativo_211 620, filterk_selection_pod_rule 1,200, ndx_rsi2 40, qm_breakout_goren 70
+    and smaller ones). Placebo runs of the same rule on other assets stay (hy_bond_ma_cross 210);
+  - the umbrella `momentum_mr_trend_deep_20261020` counts its own house layer, 94 of 368; the rest are its three
+    children's rows, registered separately;
+  - `ssrn_filter_k_replication_20261020` counts 0: it audits the paper's printed tables and runs no backtest (as the
+    GQR audit in A22);
+  - re-runs of other studies' evaluations are counted again, as in A19 and A22.
+- **Families:** three new ones, each a mechanism no family held and none created to leave a large count:
+  `earnings_announcement_events` (964 from earnings_anchored_seasonality: firm-specific report dates, kept apart from
+  calendar_and_flow as dividend_seeking_demand is; this keeps 964 trials out of the N behind EOM and the Flow Vote),
+  `equity_value_quality_factors` (88) and `relative_value_spread_convergence` (131). Declined: a refiner crack-spread
+  family (10 trials, to macro_regime_allocation) and a volume-attention family (9 trials, to
+  us_equity_short_term_reversal with volume_shock_overnight).
+- **Audit fixes before the write:** three SPDR sector-rotation studies (sector atlas 1,352, selective short 176,
+  market concentration 47) moved from equity_cross_sectional_momentum to tactical_asset_allocation, as the SEC8 leg
+  `etf_momentum_leg_20261020`; three WATCHLIST grades set to REJECTED where the study's final decision is rejected
+  (qg risk sizing, qg stock filters, LOMAM); every count below the study's own states its reason in the row.
+- **Effect on family N (prior trials):** etf_short_term_reversal 1,996 → 12,534 (QQQ/SPY reversal grids, 9,375 from
+  the Quantitativo 2.11 rule; the family text now names broad index ETFs), index_and_listing_events 65 → 466,
+  calendar_and_flow 2,675 → 3,295, tactical_asset_allocation 24,021 → 27,989; the two large stock families move 1-4%. The DSR's expected maximum grows
+  with the square root of log N, so the bar rises about 11% for etf_short_term_reversal (the DV2 industry-ETF family)
+  and about 1% for calendar_and_flow. Cards are not re-issued by this amendment.
+
 **Not adopted from the critique.** One correction: the critique said the kill rule closes gap G-006.
 It does not. G-006's missing circuit breaker is about **repeated reconciliation failures**, not about
 performance. A performance kill rule is a separate, currently unrecorded gap, and P1 should add it to
