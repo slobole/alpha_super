@@ -1461,7 +1461,7 @@ Code: `alpha/scout/shadow.py` (`log_forward`), tests `tests/test_scout_shadow_lo
   is tiny and the expected maximum under the null is close to the plain Sharpe. A ledger family of books would add rows
   without adding a test. The selection risk sits in choosing the engines, and each engine's family DSR (S5) already
   carries it; that is what A23 corrected.
-- **The cards' DSR at today's family N.** Re-running only the S5 correlation-aware DSR of the saved re-audition bundles
+- **The cards' DSR at today's family N (superseded by A25 and A26: the counts below include the double counting A26 found).** Re-running only the S5 correlation-aware DSR of the saved re-audition bundles
   with today's prior trials (scratch script, seed 0, 20,000 draws; each reproduces its card's p at the card's N to Monte
   Carlo error, since the prior-max draw below changed the random stream; "0.0000" means below the resolution floor,
   about 5e-5). The table compares with the card's own N (50-1,000), so it is not the A23 step alone: for DV2 industry
@@ -1525,12 +1525,97 @@ Tests: `tests/test_scout_ledger.py`, `tests/test_stats_selection_and_pbo.py`.
   | NDX NATR20 | 94 | 658,670 | 0.0075 | 1.00 | 0.93 | 1.00 |
   | NDX VXN | 94 | 658,670 | 0.062 | 1.00 | 1.00 | 1.00 |
 
-- **Reading:** with each study's variants allowed to be correlated, the large-family results are no longer an artefact
-  of counting near-copies, and they still do not pass. Given how many studies the house ran in stock reversal,
-  momentum, trend and TAA, a best result as good as these pods' is what luck alone would often give. Only the
-  month-end flow (EOM) and Compass QQQ clear the bar in every setting; DV2 industry ETF comes closest of the rest
-  (0.09-0.16). The DSR stays a WARN and the S5 gate stays the MCPT on each pod's own grid, which these pods passed; the
-  forward shadows and the live record are what can settle it. Cards are not re-issued by this amendment.
+- **Reading: WITHDRAWN (A26).** This paragraph said that for stock reversal, momentum, trend and TAA "a best result as
+  good as these pods' is what luck alone would often give". The table above rests on family counts that A26 found
+  wrong: forward registrations' running totals were summed as new trials, book weight grids sat in TAA, and searches
+  run after the pods were chosen were charged to them. Use the A26 table instead.
+
+**A26 (2026-11-07, the family trial count corrected; chronological DSR).**
+Code: `alpha/scout/trials.py` (`registration_trial_count`, `registration_study_date_str`,
+`record_trial_count_correction`, `family_trial_summary(as_of_date_str=...)`), `alpha/bench/scout_pages.py`; ledger
+notes 821-822 by `scripts/research/scout_trial_counts_20261107/correct.py`. Tests: `tests/test_scout_ledger.py`.
+
+- **Found (owner challenge: "DV2 and HPI have a tested edge, TAA too, momentum is a known factor"):**
+  - Running totals counted as trials. About a dozen registration scripts (growth hunt a1-a20, residual momentum, two
+    re-audition runners) set a forward registration's `prior_trials_int` to the family's registered grids so far, a
+    snapshot for that round's DSR. `family_trial_summary` summed it over all rows, so each round counted the family
+    again: four hunt_a3 rounds of 30.10 carried 157-163K each (86% of the reversal family's 754K), residual-momentum
+    rounds 4-21 carried 33K each. Forward rows' snapshots summed to 1.53M; their own grids to 201K.
+  - Book weight grids in a signal family: fund_products_opt / _size (7,611 + 13,746) in tactical_asset_allocation.
+  - Chronology: the hunts of 30-31.10 searched for new engines after DV2, HPI, TAA and NDX were chosen; they test other
+    hypotheses (the program-wide BY-FDR's concern, where DV2 is a discovery), not the choice already made.
+- **Rules:** a retro registration adds its declared `prior_trials_int` (the closed study's own trials); a forward one
+  adds its own `grid_size_int` (0 when its trials are recorded as trial rows); a `note` row of kind
+  `trial_count_correction` overrides (the registration row is never edited). `as_of_date_str` keeps registrations whose
+  trials ran on or before that date: a forward row is dated by its timestamp (S0 is written before the run), a retro
+  row by the knowledge-base study it cites, else the date in its id. Pre-Scout studies are not registered (A22), so a
+  chronological count is a floor.
+- **Review fixes before the final numbers** (quant-pitfalls review of A26/A27):
+  - Retro rows are dated by every knowledge-base study they name, with or without a `reports/` path, earliest first
+    (`eom_tradable_retro_20261101` cites three September studies; it had been dated by its November id).
+  - Growth-hunt grids that misstate the search are corrected by notes (rows 823-839): hunt_a4_round3's 151,200-cell
+    product of questions → 17,720 (2,215 simulations x eight read settings, as its justification states);
+    hunt_a4_round2 → 10,479 (its listed extra simulations); every other hunt agent whose trials.csv logs more evaluated
+    rows than its grids add up to carries the difference on its last registration per family. Agents that logged fewer
+    keep their grids.
+  - The chronological cut is the date each strategy was graded (its saved bundle's date: 2026-10-02 for the
+    re-auditions, 2026-10-16 for the dividend family, 2026-11-01 for the EOM flow rules), not one fixed date.
+  - Not registered, by the A22 rule: the Pakal low-volatility study the a14 rounds cite (1,308) and other pre-Scout
+    work, so every chronological count is a floor.
+- **Family counts** (all to date; by 2026-10-02): reversal 754,441 → 49,661 (1,061); momentum 658,670 → 59,861 (1,408);
+  trend 182,315 → 51,250 (2,202); low-risk allocation 6,901 (186); TAA 27,989 → 5,935 (2,779); ETF reversal
+  12,534 → 12,235 (622); calendar 3,295 → 2,667 (1,070); macro 1,822 (1,740).
+- **S5 live p against the recorded search up to the grading date, studies correlated at 0.3** (headline, decided before
+  the table), and against all studies to date (shown, not judged); from `results/scout/verdict/` (seed 0, 20,000 draws):
+
+  | Pod | Card p | Up to grading date | All to date |
+  |---|---:|---:|---:|
+  | EOM | <0.001 | <0.001 | <0.001 |
+  | EOM flow rules | <0.001 | <0.001 | <0.001 |
+  | Compass QQQ | <0.001 | <0.001 | <0.001 |
+  | HPI vote | <0.001 | 0.002 | 0.062 |
+  | DV2 industry ETF | 0.002 | 0.017 | 0.15 |
+  | DV2 S&P 500 | 0.004 | 0.019 | 0.38 |
+  | CORE5 | 0.001 | 0.034 | 0.30 |
+  | NDX NATR20 | 0.008 | 0.057 | 0.67 |
+  | Sector IBS VOX IYR | 0.007 | 0.065 | 0.43 |
+  | TAA 3x | 0.008 | 0.13 | 0.28 |
+  | TAA 3x 1/N | 0.026 | 0.31 | 0.60 |
+  | NDX VXN (live) | 0.062 | 0.33 | 0.99 |
+  | DV2 Nasdaq-100 | 0.41 | 0.78 | 1.00 |
+
+- **Reading:** against the search they were chosen from, EOM, Compass, HPI, DV2 industry ETF, DV2 and CORE5 pass; NDX
+  NATR20 and sector IBS are borderline; TAA 3x (0.13) is amber, in a family with strong outside evidence (time-series
+  momentum, A27 question 1) and the only pod whose live record is GREEN; the live NDX VXN rule (0.33) and DV2
+  Nasdaq-100 (0.78) do not pass, as their cards already said (NDX: dollar-ATR ranking, own-grid MCPT p 0.18; DV2 NDX:
+  universe chosen after results). The "all to date" column answers a different question (is the best of everything
+  the house ever tried real?). The DSR stays a WARN.
+- **Limit:** `as_of_date_str` filters registrations only; recorded `trial` rows (none exist today) are not dated yet.
+
+**A27 (2026-11-07, the quant verdict).**
+Code: `alpha/scout/verdict.py`, CLI `python -m alpha.scout verdict [--pod ...]`, Bench `/scout/verdicts` and
+`/scout/verdict/<pod>`. Output: `results/scout/verdict/` (one JSON per strategy, index.json, verdict.md). Tests:
+`tests/test_scout_verdict.py`, `tests/test_bench_scout.py`.
+
+- **Why:** the stations answer the right questions but across cards, ledger rows and reports; the owner wants a fast,
+  robust answer to what an allocator's quant asks. The verdict reads what Scout already saved (re-audition bundles,
+  ledger, shadow logs, pod health) and re-runs only the lucky-pick null (about a minute per strategy).
+- **Eight questions, fixed thresholds** (module docstring): mechanism real (outside evidence per family + S3); beats
+  luck in its own grid (MCPT); lucky pick (A26 chronological null, rho 0.3; all-to-date as sensitivity); still alive
+  (net Sharpe by era, 2023 on = the vault years); beyond known factors (net alpha t against QQQ, an ETF mix and trend,
+  house pods excluded); adds to the book (T-bill slot); costs and capacity (Sharpe at twice the costs); forward proof
+  (shadow log or live pod health against MinTRL).
+- **Outside evidence** is a short table per family (`FAMILY_EVIDENCE_DICT`, references cited): ESTABLISHED for stock
+  reversal, momentum, TAA / time-series momentum, trend, calendar flows, the variance premium; PRACTITIONER for ETF
+  reversal and macro regimes. It answers the owner's point that a documented factor should not be judged as a mined
+  idea; it does not replace the house tests.
+- **Review fixes:** "alive" is Sharpe over T-bills (DTB3), so an idle sleeve no longer passes on 2023-26 rates (TFI
+  had shown 8.76); a bundle without post-2022 data reads n/a, not red (a closed vault is not judged); the 2023+ era is
+  labelled as seen at the re-audit, a recent check, not a holdout; forward proof is green only on a GREEN status and
+  n/a without a MinTRL; tiny p-values read <0.001.
+- **Limits:** only as fresh as the bundles (re-audited 2026-10-02, data to 2026-10-01); a strategy without a bundle has
+  no verdict; the thresholds are judgement, fixed in code before any verdict was read; the book slot and cost rows read
+  saved S4/S6 numbers that include the seen 2023+ years.
 
 **Not adopted from the critique.** One correction: the critique said the kill rule closes gap G-006.
 It does not. G-006's missing circuit breaker is about **repeated reconciliation failures**, not about

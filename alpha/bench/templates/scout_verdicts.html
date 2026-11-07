@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Scout verdicts{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='scout.css') }}">{% endblock %}
+{% block content %}
+<div class="scout">
+  {% include "_scout_head.html" %}
+  {% if not row_list %}
+  <div class="notice notice-info"><div class="notice-title">No data yet.</div>
+    <div class="notice-detail">No quant verdicts were found.</div></div>
+  {% else %}
+  <section class="panel pad">
+    <p class="sc-note">Each question has a fixed threshold; see a strategy for the numbers.</p>
+    <table class="sc-table sc-vmatrix">
+      <thead><tr><th>Strategy</th>{% for key, title in column_list %}<th class="sc-vcell">{{ title }}</th>{% endfor %}</tr></thead>
+      <tbody>
+      {% for r in row_list %}
+        <tr><th scope="row"><a href="{{ url_for('scout.scout_verdict_fn', pod_str=r.pod_str) }}">{{ r.pod_str }}</a>
+            <div class="sc-vdetail">{{ r.family_str }}{% if r.error_str %} · {{ r.error_str }}{% endif %}</div></th>
+          {% for c in r.cell_list %}<td class="sc-vcell"><span class="sc-dot-chip sc-{{ c.state_str }}" title="{{ c.headline_str }}">{{ c.state_str if c.state_str != 'grey' else 'n/a' }}</span></td>{% endfor %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}

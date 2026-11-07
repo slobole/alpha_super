@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Scout verdict{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='scout.css') }}">{% endblock %}
+{% block content %}
+<div class="scout">
+  {% include "_scout_head.html" %}
+  {% if pod_str is none %}
+  <div class="notice notice-info"><div class="notice-title">No verdict for this strategy.</div>
+    <div class="notice-detail"><a href="{{ url_for('scout.scout_verdicts_fn') }}">Back to all verdicts</a></div></div>
+  {% else %}
+  <section class="panel pad">
+    <div class="sc-shead"><h2>{{ pod_str }}</h2></div>
+    <div class="sc-stats">
+      <div><span>Family</span><b>{{ family_str }}</b></div>
+      <div><span>Live configuration</span><b>{{ live_label_str }}</b></div>
+      <div><span>Built</span><b>{{ built_str }}</b></div>
+    </div>
+    {% if error_str %}<p class="sc-note">{{ error_str }}</p>{% endif %}
+    {% if row_list %}
+    <table class="sc-table">
+      <thead><tr><th>Status</th><th>Question</th><th>Answer</th></tr></thead>
+      <tbody>
+      {% for r in row_list %}
+        <tr><td><span class="sc-dot-chip sc-{{ r.state_str }}">{{ r.state_str if r.state_str != 'grey' else 'n/a' }}</span></td>
+          <th scope="row">{{ r.question_str }}</th>
+          <td><div class="sc-vhead">{{ r.headline_str }}</div>{% if r.detail_str %}<div class="sc-vdetail">{{ r.detail_str }}</div>{% endif %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </section>
+  {% endif %}
+</div>
+{% endblock %}

@@ -380,9 +380,35 @@ def _grade_by_id_dict() -> dict:
     return grade_dict
 
 
+def _correction_dict() -> dict[str, int]:
+    """A26 trial-count corrections (ledger notes), latest wins."""
+    out_dict: dict[str, int] = {}
+    for row_dict in _ledger_rows("note"):
+        if row_dict.get("note_kind_str") == "trial_count_correction" and row_dict.get("registration_id_str"):
+            try:
+                out_dict[row_dict["registration_id_str"]] = int(row_dict.get("counted_trials_int") or 0)
+            except (TypeError, ValueError):
+                continue
+    return out_dict
+
+
+def _counted_trials_int(row_dict: dict, correction_dict: dict[str, int]) -> int:
+    """Trials a registration adds to its family (same rule as alpha.scout.trials.registration_trial_count, A26)."""
+    id_str = row_dict.get("registration_id_str")
+    try:
+        if id_str in correction_dict:
+            return correction_dict[id_str]
+        if row_dict.get("retro_bool"):
+            return int(row_dict.get("prior_trials_int") or 0)
+        return int(row_dict.get("grid_size_int") or 1)
+    except (TypeError, ValueError):
+        return 0
+
+
 @blueprint_obj.route("/scout/ledger")
 def scout_ledger_fn() -> str:
     grade_dict = _grade_by_id_dict()
+    correction_dict = _correction_dict()
     card_dict = _card_link_dict()
     row_list = []
     for row_dict in _ledger_rows("registration"):
@@ -391,7 +417,7 @@ def scout_ledger_fn() -> str:
         row_list.append({
             "id_str": id_str, "family_str": row_dict.get("family_id_str") or "–",
             "grade_str": _grade_word_str(grade_dict.get(id_str)) if id_str in grade_dict else "UNGRADED",
-            "grade_detail_str": grade_dict.get(id_str, ""), "trials_int": row_dict.get("prior_trials_int") or 0,
+            "grade_detail_str": grade_dict.get(id_str, ""), "trials_int": _counted_trials_int(row_dict, correction_dict),
             "retro_bool": bool(row_dict.get("retro_bool")), "date_str": str(row_dict.get("utc_ts_str") or "")[:10],
             "card_url_str": url_for("artifact_fn", rel_path_str=CARDS_ARTIFACT_PREFIX_STR + card_name_str) if card_name_str else None,
         })
@@ -421,10 +447,11 @@ def scout_families_fn() -> str:
 
     for id_str in description_dict:
         family_obj(id_str)
+    correction_dict = _correction_dict()
     for row_dict in _ledger_rows("registration"):
         entry_dict = family_obj(row_dict.get("family_id_str") or "unknown")
         entry_dict["registrations_int"] += 1
-        entry_dict["trials_int"] += row_dict.get("prior_trials_int") or 0
+        entry_dict["trials_int"] += _counted_trials_int(row_dict, correction_dict)
         registration_id_str = row_dict.get("registration_id_str")
         grade_str = _grade_word_str(grade_dict[registration_id_str]) if registration_id_str in grade_dict else "UNGRADED"
         entry_dict["grade_dict"][grade_str] = entry_dict["grade_dict"].get(grade_str, 0) + 1
@@ -435,6 +462,75 @@ def scout_families_fn() -> str:
     grade_column_list = [g for g in GRADE_ORDER_LIST + ["UNGRADED"] if any(g in e["grade_dict"] for e in row_list)]
     return render_template("scout_families.html", active_nav="scout", scout_tab_str="families", row_list=row_list,
                            grade_column_list=grade_column_list, has_fdr_bool=bool(fdr_dict))
+
+
+# ── quant verdicts ───────────────────────────────────────────────────────
+VERDICT_COLUMN_LIST = [("mechanism", "Mechanism"), ("own_grid", "Own grid"), ("lucky_pick", "Lucky pick"),
+                       ("alive", "Alive"), ("factors", "Factors"), ("book", "Book"), ("costs", "Costs"),
+                       ("forward", "Forward proof")]
+_VERDICT_SLUG_RE = re.compile(r"[A-Za-z0-9_\-]+")
+
+
+def _verdict_state_str(status_obj) -> str:
+    return status_obj if status_obj in ("green", "amber", "red") else "grey"
+
+
+def _verdict_index_list() -> list[dict]:
+    index_obj = _read_json(SCOUT_ROOT_PATH / "verdict" / "index.json")
+    if not isinstance(index_obj, list):
+        return []
+    return [e for e in index_obj if isinstance(e, dict) and isinstance(e.get("pod_str"), str)
+            and _VERDICT_SLUG_RE.fullmatch(e["pod_str"])]
+
+
+def _verdict_count_int(entry_dict: dict, key_str: str) -> int:
+    count_dict = entry_dict.get("count_dict")
+    value_obj = count_dict.get(key_str) if isinstance(count_dict, dict) else 0
+    return value_obj if isinstance(value_obj, int) else 0
+
+
+def _verdict_pod_dict(pod_str: str) -> dict | None:
+    """The saved verdict of one strategy, or None. pod_str must be a safe slug and listed in the index."""
+    if not _VERDICT_SLUG_RE.fullmatch(pod_str) or pod_str not in {e["pod_str"] for e in _verdict_index_list()}:
+        return None
+    pod_obj = _read_json(SCOUT_ROOT_PATH / "verdict" / f"{pod_str}.json")
+    return pod_obj if isinstance(pod_obj, dict) else None
+
+
+@blueprint_obj.route("/scout/verdicts")
+def scout_verdicts_fn() -> str:
+    row_list = []
+    for entry_dict in _verdict_index_list():
+        pod_str = entry_dict["pod_str"]
+        pod_obj = _verdict_pod_dict(pod_str) or {}
+        by_key_dict = {r.get("key_str"): r for r in pod_obj.get("row_list") or [] if isinstance(r, dict)}
+        cell_list = []
+        for key_str, _title_str in VERDICT_COLUMN_LIST:
+            cell_dict = by_key_dict.get(key_str) or {}
+            cell_list.append({"state_str": _verdict_state_str(cell_dict.get("status_str")),
+                              "headline_str": str(cell_dict.get("headline_str") or "No data for this question")})
+        row_list.append({
+            "pod_str": pod_str, "family_str": entry_dict.get("family_id_str") or "–", "cell_list": cell_list,
+            "error_str": entry_dict.get("error_str") or pod_obj.get("error_str"),
+            "red_int": _verdict_count_int(entry_dict, "red"), "amber_int": _verdict_count_int(entry_dict, "amber"),
+        })
+    row_list.sort(key=lambda r: (-r["red_int"], -r["amber_int"], r["pod_str"]))
+    return render_template("scout_verdicts.html", active_nav="scout", scout_tab_str="verdicts", row_list=row_list,
+                           column_list=VERDICT_COLUMN_LIST)
+
+
+@blueprint_obj.route("/scout/verdict/<pod_str>")
+def scout_verdict_fn(pod_str: str):
+    pod_obj = _verdict_pod_dict(pod_str)
+    if pod_obj is None:
+        return render_template("scout_verdict.html", active_nav="scout", scout_tab_str="verdicts", pod_str=None,
+                               row_list=[]), 404
+    row_list = [{"state_str": _verdict_state_str(r.get("status_str")), "question_str": r.get("question_str") or r.get("key_str") or "",
+                 "headline_str": r.get("headline_str") or "", "detail_str": r.get("detail_str") or ""}
+                for r in pod_obj.get("row_list") or [] if isinstance(r, dict)]
+    return render_template("scout_verdict.html", active_nav="scout", scout_tab_str="verdicts", pod_str=pod_str, row_list=row_list,
+                           family_str=pod_obj.get("family_id_str") or "–", live_label_str=pod_obj.get("live_label_str") or "–",
+                           built_str=str(pod_obj.get("built_str") or "–")[:10], error_str=pod_obj.get("error_str"))
 
 
 def register_routes(app_obj) -> None:

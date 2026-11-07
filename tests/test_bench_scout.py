@@ -11,7 +11,7 @@ import pytest
 from alpha.bench import scout_pages
 from alpha.bench.app import create_app
 
-PAGE_LIST = ["/scout", "/scout/shadows", "/scout/ledger", "/scout/families"]
+PAGE_LIST = ["/scout", "/scout/shadows", "/scout/ledger", "/scout/families", "/scout/verdicts"]
 POD_ID_STR = "demo_shadow_20261001"
 
 
@@ -87,6 +87,14 @@ def seeded_client(tmp_path, monkeypatch):
     ]
     ledger_path.parent.mkdir(parents=True)
     ledger_path.write_text("\n".join(json.dumps(r) for r in row_list) + "\n", encoding="utf-8")
+    _write_json(scout_root / "verdict" / "index.json", [
+        {"pod_str": "DV2", "family_id_str": "fam_one", "worst_status_str": "red", "count_dict": {"green": 6, "amber": 1, "red": 1}},
+        {"pod_str": "EOM", "family_id_str": "fam_two", "worst_status_str": "green", "count_dict": {"green": 8, "amber": 0, "red": 0}}])
+    _write_json(scout_root / "verdict" / "DV2.json", {
+        "pod_str": "DV2", "family_id_str": "fam_one", "built_str": "2026-11-07", "live_label_str": "live cfg 5/3",
+        "worst_status_str": "red", "count_dict": {"green": 6, "amber": 1, "red": 1},
+        "row_list": [{"key_str": "mechanism", "question_str": "Is the mechanism real?", "status_str": "red",
+                      "headline_str": "S3 edge t 0.4 hard fail", "detail_str": "detail text here"}]})
     return create_app().test_client()
 
 
@@ -142,3 +150,33 @@ def test_shadows_page_survives_a_non_utf8_forward_log(seeded_client):
     for folder_path in folder_list:
         (folder_path / "forward_log.csv").write_bytes(bytes([0xFF, 0xFE, 0x00]) + b"bad")
     assert seeded_client.get("/scout/shadows").status_code == 200
+
+
+def test_verdicts_matrix_and_detail(seeded_client):
+    text = seeded_client.get("/scout/verdicts").get_data(as_text=True)
+    assert "DV2" in text and "sc-red" in text and "S3 edge t 0.4 hard fail" in text
+    assert text.index("DV2") < text.index("EOM")  # most red first
+    detail = seeded_client.get("/scout/verdict/DV2")
+    assert detail.status_code == 200
+    detail_text = detail.get_data(as_text=True)
+    assert "S3 edge t 0.4 hard fail" in detail_text and "live cfg 5/3" in detail_text and "detail text here" in detail_text
+
+
+def test_verdict_unknown_traversal_and_missing_files_are_404(seeded_client, empty_client):
+    assert seeded_client.get("/scout/verdict/NOPE").status_code == 404
+    assert "No verdict for this strategy" in seeded_client.get("/scout/verdict/NOPE").get_data(as_text=True)
+    assert seeded_client.get("/scout/verdict/..%2Fsecret").status_code == 404
+    assert seeded_client.get("/scout/verdict/..%5Csecret").status_code == 404
+
+
+def test_verdict_detail_404_with_all_files_missing(empty_client):
+    assert empty_client.get("/scout/verdict/DV2").status_code == 404
+
+
+def test_verdict_malformed_json_never_500(seeded_client):
+    verdict_dir = scout_pages.SCOUT_ROOT_PATH / "verdict"
+    (verdict_dir / "DV2.json").write_text("{not json", encoding="utf-8")
+    assert seeded_client.get("/scout/verdicts").status_code == 200
+    assert seeded_client.get("/scout/verdict/DV2").status_code == 404
+    (verdict_dir / "index.json").write_text("[[[", encoding="utf-8")
+    assert seeded_client.get("/scout/verdicts").status_code == 200

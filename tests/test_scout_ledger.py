@@ -13,7 +13,7 @@ import pytest
 
 from alpha.scout.__main__ import main as scout_cli_main
 from alpha.scout.ledger import GENESIS_HASH_STR, LEDGER_RELATIVE_PATH, Ledger, LedgerIntegrityError, row_hash_str
-from alpha.scout.registration import Registration, register
+from alpha.scout.registration import Registration, register, registration_rows
 from alpha.scout.trials import effective_trial_count, family_trial_summary, prior_effective_trial_count, record_trial
 
 REPO_ROOT_PATH = Path(__file__).resolve().parents[1]
@@ -380,3 +380,32 @@ def test_prior_effective_count_matches_expected_max_and_is_conservative():
     assert measured_target_float < exact_expected_max_z(prior_effective_trial_count(200))
     with pytest.raises(ValueError):
         prior_effective_trial_count(-1)
+
+
+def test_family_count_rule_forward_grid_retro_prior_corrections_and_chronology(tmp_path):
+    """A26: a forward registration adds its own grid (its prior_trials_int, a running family total in several scripts,
+    is ignored); a retro one adds its declared trials; a correction note overrides; as_of keeps earlier studies only."""
+    from alpha.scout.trials import record_trial_count_correction, registration_trial_count
+
+    ledger = Ledger(tmp_path / "ledger.jsonl")
+    register(ledger, _registration(registration_id_str="round1_20261030", prior_trials_int=0))  # grid 3 x 2 = 6
+    register(ledger, _registration(registration_id_str="round2_20261030", prior_trials_int=6, parent_id_str="round1_20261030"))
+    register(ledger, _registration(registration_id_str="old_study_retro_20261001", retro_bool=True, prior_trials_int=40,
+                                   source_str="pakal-research/reports/old_study (40)"))
+    register(ledger, _registration(registration_id_str="book_grid_retro_20261020", retro_bool=True, prior_trials_int=900,
+                                   source_str="book weights"))
+    row_dict = registration_rows(ledger)
+    assert registration_trial_count(row_dict["round2_20261030"]) == 6  # its grid, not the running total 6 + its grid
+    assert registration_trial_count(row_dict["old_study_retro_20261001"]) == 40
+
+    summary = family_trial_summary(ledger, "us_equity_short_term_reversal")
+    assert summary.prior_trial_count_int == 6 + 6 + 40 + 900
+    record_trial_count_correction(ledger, "book_grid_retro_20261020", 0, "book weights, not a signal")
+    summary = family_trial_summary(ledger, "us_equity_short_term_reversal")
+    assert summary.prior_trial_count_int == 6 + 6 + 40 and sorted(summary.prior_group_count_tuple) == [6, 6, 40]
+    with pytest.raises(ValueError):
+        record_trial_count_correction(ledger, "no_such_registration", 0, "x")
+
+    # chronology: the retro study dated 2026-10-01 (id suffix) counts on 10-02; forward rows are dated by their timestamp
+    early = family_trial_summary(ledger, "us_equity_short_term_reversal", as_of_date_str="2026-10-02")
+    assert early.prior_trial_count_int == 40

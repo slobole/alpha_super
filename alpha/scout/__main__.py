@@ -47,13 +47,14 @@ def _ledger_command(command_str: str, ledger_path_str: str) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m alpha.scout")
-    parser.add_argument("command", choices=("verify", "summary", "health", "gate", "panel", "fdr", "shadow", "daily", "kb"))
+    parser.add_argument("command", choices=("verify", "summary", "health", "gate", "panel", "fdr", "shadow", "daily", "kb", "verdict"))
     parser.add_argument("spec", nargs="?", default=None, help="gate: a GATED_SPEC_DICT name (taa_3x, taa_3x_1n, taa_lin_1n_qqq, taa_2x_1n_qld, taa_nobtal_2x_1n_qld, taa_nobtal_2x_1n_sso, ndx_vxn, ndx_atr, ndx_natr20, ndx_natr20_vxn, compass, compass_qqq); panel: index name, e.g. \"S&P 500\"")
     parser.add_argument("--fresh", action="store_true", help="gate: run the engine now instead of the newest saved run")
     parser.add_argument("--ledger", default=str(DEFAULT_LEDGER_PATH), help="ledger path (default: main-checkout ledger)")
     parser.add_argument("--flex-xml", nargs="+", default=None, help="health: IBKR Flex ALPHA_DAILY_TWR XML files")
     parser.add_argument("--flex-db", default=None, help="health: IBKR Flex SQLite store (read-only)")
     parser.add_argument("--out", default=None, help="health: output folder (default results/scout/pod_health/<today>)")
+    parser.add_argument("--pod", nargs="+", default=None, help="verdict: re-audition folder names (default: all)")
     args = parser.parse_args(argv)
 
     if args.command in ("verify", "summary"):
@@ -78,6 +79,16 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{report_dict['pod_id_str']:<40} {report_dict['status_str']}")
         print(f"Report: {output_dir_path / 'shadow.md'}")
         return 0
+    if args.command == "verdict":
+        from alpha.scout.verdict import VERDICT_ROOT_PATH, write_verdicts
+
+        verdict_list = write_verdicts(args.pod, Ledger(args.ledger))
+        for verdict_dict in verdict_list:
+            count_dict = verdict_dict.get("count_dict") or {}
+            print(f"{verdict_dict['pod_str']:<36} " + (verdict_dict.get("error_str") or
+                  f"green {count_dict.get('green', 0)}  amber {count_dict.get('amber', 0)}  red {count_dict.get('red', 0)}"))
+        print(f"Report: {VERDICT_ROOT_PATH / 'verdict.md'}")
+        return 1 if any(v.get("error_str") for v in verdict_list) else 0
     if args.command == "kb":
         from alpha.scout.kb_link import kb_link_report, summary_str
 

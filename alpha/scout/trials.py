@@ -34,6 +34,9 @@ before) made the DSR of large families uninformative.
 
 from __future__ import annotations
 
+import functools
+import json
+import re
 import subprocess
 from dataclasses import dataclass
 
@@ -54,6 +57,7 @@ PRIOR_TRIAL_CORRELATION_FLOAT = 0.3
 MODE_TUPLE = ("parity", "truth")
 
 
+@functools.lru_cache(maxsize=4096)  # the same study counts repeat across families and verdicts
 def prior_effective_trial_count(prior_trial_count_int: int, correlation_float: float = PRIOR_TRIAL_CORRELATION_FLOAT) -> float:
     """M independent trials with the expected maximum of N equicorrelated ones (module docstring, A25); 0 for N = 0."""
     if prior_trial_count_int < 0 or not 0.0 <= correlation_float < 1.0:
@@ -163,16 +167,115 @@ class FamilyTrialSummary:
     trial_sharpe_variance_float: float | None
 
 
-def family_trial_summary(ledger: Ledger, family_id_str: str, trial_return_df: pd.DataFrame | None = None) -> FamilyTrialSummary:
+TRIAL_COUNT_CORRECTION_KIND_STR = "trial_count_correction"
+_DATE_SUFFIX_PATTERN = re.compile(r"_(20\d{2})(\d{2})(\d{2})(?![0-9])")
+_REPORT_FOLDER_PATTERN = re.compile(r"reports/([A-Za-z0-9_\-]+)")
+
+
+def record_trial_count_correction(ledger: Ledger, registration_id_str: str, counted_trials_int: int, reason_str: str) -> dict:
+    """A26: a note row that sets how many trials a registration contributes to its family's N (the registration row
+    itself is never edited). The latest correction of a registration wins."""
+    if counted_trials_int < 0 or not reason_str.strip():
+        raise ValueError("A correction needs counted_trials_int >= 0 and a reason.")
+
+    def precondition(existing_ledger: Ledger) -> None:
+        if registration_id_str not in registration_rows(existing_ledger):
+            raise ValueError(f"Registration {registration_id_str!r} does not exist.")
+
+    return ledger.append("note", {"note_kind_str": TRIAL_COUNT_CORRECTION_KIND_STR, "registration_id_str": registration_id_str,
+                                  "counted_trials_int": int(counted_trials_int), "reason_str": reason_str},
+                         precondition_fn=precondition)
+
+
+def registration_trial_count(row_dict: dict, correction_dict: dict | None = None) -> int:
+    """Trials one registration adds to its family's N (A26).
+
+    A retro registration declares the closed study's own trials in `prior_trials_int`. A forward registration runs its
+    frozen grid: its trials are `grid_size_int`. Its `prior_trials_int`, when set, is the family's running total at the
+    time (several growth-hunt and residual-momentum scripts wrote that), so summing it would count the family again for
+    every round. A trial_count_correction note overrides both.
+    """
+    if correction_dict and row_dict["registration_id_str"] in correction_dict:
+        return int(correction_dict[row_dict["registration_id_str"]])
+    if row_dict.get("retro_bool"):
+        return int(row_dict.get("prior_trials_int") or 0)
+    return int(row_dict.get("grid_size_int") or 1)
+
+
+def trial_count_correction_dict(ledger: Ledger) -> dict[str, int]:
+    return {row_dict["registration_id_str"]: int(row_dict["counted_trials_int"]) for row_dict in ledger.rows("note")
+            if row_dict.get("note_kind_str") == TRIAL_COUNT_CORRECTION_KIND_STR}
+
+
+def _kb_study_date_dict() -> dict[str, str]:
+    from alpha.scout.kb_link import KB_REGISTRY_PATH, study_folder_str
+
+    try:
+        study_list = json.loads(KB_REGISTRY_PATH.read_text(encoding="utf-8"))["studies"]
+    except (OSError, ValueError, KeyError):
+        return {}
+    date_dict = {}
+    for study_dict in study_list:
+        folder_str = study_folder_str(study_dict.get("concise_report"))
+        if folder_str and study_dict.get("created_at"):
+            date_dict[folder_str.split("/")[0]] = str(study_dict["created_at"])[:10]
+    return date_dict
+
+
+_KB_NAME_PATTERN_CACHE: dict = {}
+
+
+def _kb_name_pattern(kb_date_dict: dict[str, str]) -> re.Pattern:
+    """One regex matching any knowledge-base folder name as a whole word (longest names first)."""
+    key_tuple = tuple(sorted(kb_date_dict, key=len, reverse=True))
+    if key_tuple not in _KB_NAME_PATTERN_CACHE:
+        _KB_NAME_PATTERN_CACHE.clear()
+        _KB_NAME_PATTERN_CACHE[key_tuple] = re.compile(
+            r"(?<![A-Za-z0-9_])(" + "|".join(re.escape(k) for k in key_tuple) + r")(?![A-Za-z0-9_])") if key_tuple else re.compile(r"(?!x)x")
+    return _KB_NAME_PATTERN_CACHE[key_tuple]
+
+
+def registration_study_date_str(row_dict: dict, kb_date_dict: dict[str, str] | None = None) -> str:
+    """When the registration's trials were run (A26): a forward registration is written before its run, so its own
+    timestamp; a retro one is dated by the knowledge-base study it cites, else by the date in its id, else its
+    timestamp."""
+    if row_dict.get("retro_bool"):
+        source_str = str(row_dict.get("source_str", "")).replace("\\", "/")
+        if kb_date_dict:
+            # every knowledge-base study the row names, with or without a reports/ path; the earliest is when its trials
+            # began (a row citing three September studies is not dated by its November id)
+            cited_date_list = [kb_date_dict[f] for f in _REPORT_FOLDER_PATTERN.findall(source_str) if f in kb_date_dict]
+            cited_date_list += [kb_date_dict[f] for f in _kb_name_pattern(kb_date_dict).findall(source_str)]
+            if cited_date_list:
+                return min(cited_date_list)
+        match_list = _DATE_SUFFIX_PATTERN.findall(row_dict["registration_id_str"])
+        if match_list:
+            return "-".join(match_list[-1])
+    return str(row_dict["utc_ts_str"])[:10]
+
+
+def family_trial_summary(ledger: Ledger, family_id_str: str, trial_return_df: pd.DataFrame | None = None,
+                         as_of_date_str: str | None = None) -> FamilyTrialSummary:
     """Inputs for the DSR of any selection made inside this family.
 
     Without `trial_return_df` every recorded trial counts as independent (the
     conservative fallback). With it (one column per recorded trial, in ledger
     order), N_eff comes from the correlation clusters of their returns.
+
+    `as_of_date_str` (A26) keeps only registrations whose trials were run on or before that date: the DSR of a
+    strategy chosen on that date. Searches run afterwards test other hypotheses and are the program-wide FDR's concern.
     """
     trial_row_list = [row_dict for row_dict in ledger.rows("trial") if row_dict["family_id_str"] == family_id_str]
-    prior_list = [int(row_dict.get("prior_trials_int") or 0) for row_dict in registration_rows(ledger).values()
-                  if row_dict["family_id_str"] == family_id_str]
+    recorded_registration_set = {row_dict["registration_id_str"] for row_dict in trial_row_list}
+    correction_dict = trial_count_correction_dict(ledger)
+    kb_date_dict = _kb_study_date_dict() if as_of_date_str else None
+    prior_list = [
+        0 if row_dict["registration_id_str"] in recorded_registration_set and not row_dict.get("retro_bool")
+        else registration_trial_count(row_dict, correction_dict)
+        for row_dict in registration_rows(ledger).values()
+        if row_dict["family_id_str"] == family_id_str
+        and (as_of_date_str is None or registration_study_date_str(row_dict, kb_date_dict) <= as_of_date_str)
+    ]
     prior_trial_count_int = sum(prior_list)
     prior_effective_float = sum(prior_effective_trial_count(n_int) for n_int in prior_list)
     sharpe_vec = np.array([row_dict["per_period_sharpe_float"] for row_dict in trial_row_list], dtype=float)
