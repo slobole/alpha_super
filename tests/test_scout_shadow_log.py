@@ -54,3 +54,15 @@ def test_duplicate_logged_date_and_missing_returns_do_not_break_the_log(tmp_path
     result = log_forward("reg", _ser({"2026-11-02": 0.02, "2026-11-03": float("nan")}), date(2026, 11, 3), root_path=tmp_path)
     # the first record wins and the changed value is one revision; the NaN session is not logged
     assert result["revised_today_int"] == 1 and result["appended_int"] == 0
+
+
+def test_a_crash_mid_append_heals_on_the_next_run(tmp_path):
+    folder_path = tmp_path / "reg"
+    folder_path.mkdir()
+    (folder_path / FORWARD_LOG_NAME_STR).write_bytes(b"")  # crash left an empty file
+    assert log_forward("reg", _ser({"2026-11-02": 0.01}), date(2026, 11, 2), root_path=tmp_path)["appended_int"] == 1
+    log_path = folder_path / FORWARD_LOG_NAME_STR
+    log_path.write_bytes(log_path.read_bytes().rstrip(b"\r\n"))  # crash left the last line without its newline
+    result = log_forward("reg", _ser({"2026-11-02": 0.01, "2026-11-03": 0.02}), date(2026, 11, 3), root_path=tmp_path)
+    assert result["appended_int"] == 1 and result["logged_sessions_int"] == 2
+    assert pd.read_csv(log_path, dtype={"date_str": str})["date_str"].tolist() == ["2026-11-02", "2026-11-03"]

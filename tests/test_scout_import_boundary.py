@@ -113,6 +113,8 @@ def test_live_never_reaches_scout():
     live_module_list = [name for name in graph_dict if name.startswith("alpha.live")]
     assert len(live_module_list) > 20  # positive control: the scan really covered alpha/live
     assert not _scout_names(_reachable_modules(graph_dict, "alpha.live"))
+    # A24: the research statistics and the Bench pages stay out of live too
+    assert not {name for name in _reachable_modules(graph_dict, "alpha.live") if name.startswith(("alpha.stats", "alpha.bench"))}
 
 
 def test_stats_package_stays_light():

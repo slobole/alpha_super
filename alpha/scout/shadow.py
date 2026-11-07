@@ -171,6 +171,12 @@ def log_forward(registration_id_str: str, forward_ser: pd.Series, as_of_date: da
     folder_path.mkdir(parents=True, exist_ok=True)
     log_path, revision_path = folder_path / FORWARD_LOG_NAME_STR, folder_path / REVISION_LOG_NAME_STR
     as_of_str = as_of_date.isoformat()
+    for path in (log_path, revision_path):  # self-heal a crash mid-append: an empty file is absent, a cut line is ended
+        if path.exists() and path.stat().st_size == 0:
+            path.unlink()
+        elif path.exists() and not path.read_bytes().endswith(b"\n"):
+            with open(path, "a", encoding="utf-8") as tail_file:
+                tail_file.write("\n")
     new_ser = pd.Series(forward_ser.to_numpy(dtype=float), index=pd.DatetimeIndex(forward_ser.index).strftime("%Y-%m-%d"))
     new_ser = new_ser[~new_ser.index.duplicated(keep="last")].dropna()  # a missing return is not logged
     logged_df = pd.read_csv(log_path, dtype={"date_str": str}) if log_path.exists() else pd.DataFrame(
